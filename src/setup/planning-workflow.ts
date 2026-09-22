@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
+      actions: read
       contents: read
       issues: read
       pull-requests: read
@@ -73,6 +74,7 @@ ${setup}      - name: Verify ready label and prepare coordinator context
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
+      actions: read
       contents: write
       issues: read
       pull-requests: write

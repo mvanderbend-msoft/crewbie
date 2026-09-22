@@ -13,6 +13,14 @@ GitHub App installation token. Follow GitHub's
 [current assignment permissions](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/use-cloud-agent-via-the-api).
 Do not print tokens, put them in command arguments, or commit them.
 
+For a repository-restricted fine-grained PAT, issue assignment requires Metadata
+read and Actions, Contents, Issues and Pull requests read/write. Crewbie also
+needs **Agent tasks: read** to correlate sessions and release completed capacity;
+assignment permissions alone do not grant telemetry access. The optional
+same-PR correction loop needs **Agent tasks: read/write**. See GitHub's
+[Agent Tasks permissions](https://docs.github.com/en/rest/agent-tasks/agent-tasks).
+Unavailable telemetry keeps capacity reserved rather than guessing completion.
+
 Read-only dashboard collection and PR checks use the job-scoped `GITHUB_TOKEN`
 with explicit read permissions. They do not require copying a user's saved
 credential into Actions secrets. Native assignment still requires its documented
@@ -36,7 +44,7 @@ Crewbie is distributed through GitHub Releases, not an npm registry. For this
 alpha, configure the consuming repository with the version-pinned public asset:
 
 ```powershell
-gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.3/crewbie-cli-0.1.0-alpha.3.tgz"
+gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.4/crewbie-cli-0.1.0-alpha.4.tgz"
 ```
 
 For a reviewed custom build, use `npm pack` and distribute its tarball through

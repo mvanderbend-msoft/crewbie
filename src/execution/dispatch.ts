@@ -167,7 +167,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     }
     if (!pr?.merged_at && (pr?.state === "closed" || issue.state === "closed")) {
       state = "failed";
-      reason = `Closed without a merged prerequisite PR.${claim && !sessionComplete ? " Native completion remains unverified or unsuccessful; capacity stays reserved." : ""}`;
+      reason = `Closed without a merged prerequisite PR.${claim && !sessionComplete ? ` Native completion remains unverified or unsuccessful; capacity stays reserved. ${reason}` : ""}`;
     }
     const role = config.roles.find((role) => role.id === metadata.task.owner);
     if (!claim && (!role || role.model !== metadata.task.model)) { state = "blocked"; reason = "Owner/model policy changed; reapproval required."; }

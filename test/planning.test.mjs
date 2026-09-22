@@ -230,9 +230,11 @@ test("planning workflow is opt-in, label-gated and separates analysis from repos
   assert.deepEqual(flow.on.issues.types, ["labeled"]);
   assert.match(flow.jobs.prepare.if, /crewbie:ready-for-planning/);
   assert.equal(flow.jobs.prepare.permissions.contents, "read");
+  assert.equal(flow.jobs.prepare.permissions.actions, "read", "Preparation verifies its GitHub Actions run provenance.");
   assert.deepEqual(flow.jobs.analyze.permissions, { "copilot-requests": "write" });
   assert.equal(flow.jobs.publish.permissions.contents, "write");
   assert.equal(flow.jobs.publish.permissions.issues, "read");
+  assert.equal(flow.jobs.publish.permissions.actions, "read", "Publication rechecks its GitHub Actions run provenance.");
   assert.equal(flow.jobs.publish.permissions["pull-requests"], "write");
   assert.equal(Object.values(flow.jobs).reduce((sum, job) => sum + job["timeout-minutes"], 0), 15);
   assert.match(file, /--no-custom-instructions --disable-builtin-mcps --available-tools --silent --deny-tool shell write url/);

@@ -253,6 +253,7 @@ test("closed PRs with active or unverified native sessions keep their capacity r
     assert.equal(fixture.assignments.length, 1, mode);
     assert.equal(work[0].sessionComplete, false);
     assert.match(work[0].reason, /capacity stays reserved/);
+    if (mode === "denied") assert.match(work[0].reason, /HTTP 403/, "Keep the actionable telemetry error visible after closure.");
   }
 });
 
