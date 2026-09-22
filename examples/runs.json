@@ -1,0 +1,22 @@
+[
+  {
+    "schemaVersion": 1,
+    "id": "synthetic-example",
+    "kind": "work-item",
+    "specialist": "developer",
+    "requestedModel": "example-requested-model",
+    "observedModel": null,
+    "observedModelSource": null,
+    "date": "2026-09-22T07:00:00Z",
+    "status": "example-only",
+    "issue": "https://github.com/example/project/issues/1",
+    "pullRequest": null,
+    "inputTokens": null,
+    "outputTokens": null,
+    "credits": null,
+    "currencyAmount": null,
+    "currency": null,
+    "usageSource": null,
+    "summary": "Synthetic demonstration. No model ran and no usage was measured."
+  }
+]

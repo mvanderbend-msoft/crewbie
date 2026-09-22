@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "small-feature",
+  "spec": "Let users retrieve a saved preference without changing existing behavior. Keep the change small and cover the supported and missing-value cases. Do not redesign unrelated settings.",
+  "sources": [],
+  "tasks": [
+    {
+      "id": "preference-read",
+      "title": "Read a saved preference",
+      "body": "Implement the smallest change using existing storage and validation patterns.\n\n## Acceptance criteria\n- Saved values are returned unchanged.\n- Missing values follow the existing default behavior.\n- Focused tests cover both cases.",
+      "owner": "developer",
+      "model": "REPLACE_WITH_APPROVED_MODEL",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "preference-consumer",
+      "title": "Use the preference in its existing consumer",
+      "body": "Connect the approved read behavior to the existing consumer without redesigning it.\n\n## Acceptance criteria\n- The consumer uses the saved preference.\n- Missing values preserve current behavior.\n- Relevant checks pass or pre-existing failures are reported.",
+      "owner": "developer",
+      "model": "REPLACE_WITH_APPROVED_MODEL",
+      "priority": 2,
+      "dependsOn": ["preference-read"]
+    }
+  ],
+  "approval": null
+}

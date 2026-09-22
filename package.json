@@ -1,0 +1,41 @@
+{
+  "name": "@crewbie/cli",
+  "version": "0.1.0-alpha.0",
+  "description": "A small AI crew for existing repositories.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mvanderbend-msoft/crewbie.git"
+  },
+  "homepage": "https://github.com/mvanderbend-msoft/crewbie#readme",
+  "bugs": {
+    "url": "https://github.com/mvanderbend-msoft/crewbie/issues"
+  },
+  "private": true,
+  "type": "module",
+  "bin": {
+    "crewbie": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "jsdom": "^26.1.0",
+    "yaml": "^2.8.0",
+    "typescript": "^5.9.0"
+  }
+}
