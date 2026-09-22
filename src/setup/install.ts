@@ -19,10 +19,21 @@ export interface FileChange { path: string; before: string | null; after: string
 export async function installation(root: string, proposal: unknown): Promise<FileChange[]> {
   const data = record(proposal, "setup proposal");
   const config = parseConfig(data.config);
+  if (data.configBeforeHash !== undefined) {
+    const current = await optionalText(await safePath(root, ".crewbie/config.json"));
+    const expected = data.configBeforeHash;
+    if (expected !== null && (typeof expected !== "string" || !/^[a-f0-9]{64}$/.test(expected))) throw new Error("configBeforeHash must be a SHA-256 hash or null.");
+    const proposed = json(config);
+    const alreadyApplied = current !== null && textHash(current) === textHash(proposed);
+    const unchanged = current === null ? expected === null : expected !== null && matchesTextHash(current, expected);
+    if (!alreadyApplied && !unchanged) {
+      throw new Error("Crewbie configuration changed since assessment. Reassess the team before applying this proposal.");
+    }
+  }
   const limits = limitsFor(config);
   bounded(SHARED_INSTRUCTIONS, limits.constitution, "Shared working rules");
   const adopted: Record<string, string> = {};
-  const files: Record<string, string> = { ".crewbie/config.json": json(config), ".crewbie/instructions.md": SHARED_INSTRUCTIONS, ".github/skills/crewbie/SKILL.md": SKILL, ...workflows(config.nightly.enabled) };
+  const files: Record<string, string> = { ".crewbie/config.json": json(config), ".crewbie/instructions.md": SHARED_INSTRUCTIONS, ".github/skills/crewbie/SKILL.md": SKILL, ...workflows(config.nightly.enabled, config.planning?.enabled) };
   if (data.constitutionText !== null && data.constitutionText !== undefined) {
     const content = string(data.constitutionText, "constitution text");
     if (!config.constitution) throw new Error("Select a constitution path before proposing its contents.");

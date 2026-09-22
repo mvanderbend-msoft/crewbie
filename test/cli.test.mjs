@@ -37,6 +37,17 @@ test("CLI rejects implicit approval and unsupported input formats", async (t) =>
   assert.match(result.stderr, /Convert Word\/PDF outside/);
 });
 
+test("CLI reassesses an installed team without resetting policy or installing changes", async (t) => {
+  const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config({ maxActive: 1 })), "package.json": '{"dependencies":{"react":"1"}}' });
+  run(root, "init", "--update", "--out", "team.json");
+  const proposal = JSON.parse(await readFile(join(root, "team.json"), "utf8"));
+  assert.equal(proposal.config.maxActive, 1);
+  assert.ok(proposal.config.roles.some((role) => role.id === "frontend"));
+  assert.equal(JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8")).roles.length, 1);
+  const empty = await fixture(t);
+  assert.throws(() => run(empty, "init", "--update"), /No installed crew/);
+});
+
 test("CLI rejects watch without local batch dispatch and rejects orphan timing options", () => {
   for (const args of [["status", "--watch"], ["publish", "--batch", "batch.json", "--watch"], ["status", "--poll-seconds", "1"]]) {
     const result = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });

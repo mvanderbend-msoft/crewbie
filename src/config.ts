@@ -1,6 +1,7 @@
 import { readJson, record, string, strings, slug, integer, safePath } from "./core.js";
 
 export interface Role { id: string; purpose: string; model: string; checks?: string[]; nonNegotiables?: string[] }
+export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const DEFAULT_LIMITS = { spec: 600, charter: 400, hot: 600, index: 400, decisions: 400, constitution: 600, topic: 1500, pr: 250 };
 export type WordLimits = typeof DEFAULT_LIMITS;
 export interface Config {
@@ -13,6 +14,7 @@ export interface Config {
   nightly: { enabled: boolean; maxRecords: number; allowedPaths: string[] };
   ado: { organization: string; project: string; workItemType: string } | null;
   limits?: WordLimits;
+  planning?: { enabled: boolean; model: string };
 }
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
 export function parseConfig(value: unknown): Config {
@@ -59,11 +61,19 @@ export function parseConfig(value: unknown): Config {
   if (ado && !/^[A-Za-z0-9-]+$/.test(ado.organization)) throw new Error("Use an ADO organization name, not a URL.");
   const rawLimits = data.limits === undefined ? {} : record(data.limits, "word limits");
   const limits = Object.fromEntries(Object.entries(DEFAULT_LIMITS).map(([key, fallback]) => [key, integer(rawLimits[key] ?? fallback, `${key} word limit`, 1, 10000)])) as WordLimits;
+  let planning: Config["planning"];
+  if (data.planning !== undefined) {
+    const value = record(data.planning, "planning");
+    if (typeof value.enabled !== "boolean") throw new Error("planning.enabled must be true or false.");
+    const model = string(value.model, "planning.model", !value.enabled);
+    if (model && (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) || model.toLowerCase() === "auto")) throw new Error("Choose an explicit planning model identifier, not auto.");
+    planning = { enabled: value.enabled, model };
+  }
   return {
     schemaVersion: 1, repository, approvers, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),
     nightly: { enabled: nightly.enabled, maxRecords: integer(nightly.maxRecords, "maxRecords", 1, 100), allowedPaths },
-    ado, limits,
+    ado, limits, ...(planning ? { planning } : {}),
   };
 }
 export async function loadConfig(root: string): Promise<Config> {

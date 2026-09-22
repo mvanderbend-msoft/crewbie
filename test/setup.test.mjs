@@ -87,6 +87,10 @@ test("domain charters contain distinct checks, invariants and reviewed repositor
   const configured = parseConfig(config({ roles: [{ id: "frontend", purpose: "UI.", model: "approved-model", checks: ["npm test"], nonNegotiables: ["Use established tokens."] }] }));
   assert.deepEqual(configured.roles[0].checks, ["npm test"]);
   assert.deepEqual(configured.roles[0].nonNegotiables, ["Use established tokens."]);
+  const custom = profile({ id: "constructor", purpose: "Review object construction.", model: "approved-model", checks: ["Check initialization invariants."] }, config());
+  assert.match(custom, /Trace the changed behavior/);
+  assert.match(custom, /Check initialization invariants/);
+  assert.doesNotMatch(custom, /function Object/);
 });
 
 test("hosted maintenance separates read-only preparation, tool-free AI and write-capable publication", () => {

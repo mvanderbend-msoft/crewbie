@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { hash, integer, json, optionalText, readJson, record, safePath, string, writeAtomic } from "./core.js";
@@ -12,6 +13,7 @@ import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/revi
 import { assess } from "./setup/assessment.js";
 import { applyInstallation, installation } from "./setup/install.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
+import { preparePlanning, publishPlanning } from "./specification/planning.js";
 import { checkPrDescription } from "./specification/prose.js";
 import { api, requireApprover } from "./tracking/github.js";
 import { publish, publishDescription } from "./tracking/issues.js";
@@ -25,6 +27,7 @@ import { collectRecords, parseRecords } from "./reporting/records.js";
 const HELP = `Crewbie: a small AI crew for existing repositories.
 
   init [--out setup.json]                         Read-only brownfield assessment
+  init --update --out team.json                   Reassess an installed crew without resetting policy
   init --proposal setup.json --apply              Apply the reviewed setup
   init --proposal setup.json --update             Preview safe managed-file upgrades
   doctor --repo owner/name [--agent stem] [--model id] [--json]
@@ -97,8 +100,9 @@ async function main(): Promise<void> {
       if (values.apply) { await applyInstallation(root, changes); console.log(`Applied ${changes.length} reviewed file changes.`); }
       else console.log("Preview only. Add --apply after reviewing the complete diff.");
     } else {
-      if (values.apply || values.update) throw new Error("Use --proposal with --apply or --update; assessment alone never installs files.");
+      if (values.apply) throw new Error("Use --proposal with --apply; assessment alone never installs files.");
       const proposal = await assess(root);
+      if (values.update && proposal.configBeforeHash === null) throw new Error("No installed crew to reassess. Run init without --update first.");
       if (values.out) await writeAtomic(root, values.out, json(proposal));
       console.log(json(proposal));
     }
@@ -247,6 +251,14 @@ async function main(): Promise<void> {
   } else if (command === "internal-maintain") {
     if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply, not both.");
     console.log(values.prepare ? `Selected ${await prepareMaintenance(root, github, config)} new evidence records.` : await applyMaintenance(root, github, config));
+  } else if (command === "internal-plan") {
+    if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply for planning.");
+    if (values.prepare) {
+      if (!process.env.GITHUB_EVENT_PATH || process.env.GITHUB_EVENT_NAME !== "issues") throw new Error("Planning preparation requires a GitHub issues event.");
+      const result = await preparePlanning(root, github, config, await readJson(process.env.GITHUB_EVENT_PATH));
+      if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
+      console.log(result.reason);
+    } else console.log(await publishPlanning(root, github, config));
   } else if (command === "internal-pages") {
     if (!["private", "public"].includes(values["pages-mode"] ?? "")) throw new Error("Explicitly select private or public Pages mode.");
     const pages = record(await github.request("GET", `/repos/${config.repository}/pages`), "Pages configuration");

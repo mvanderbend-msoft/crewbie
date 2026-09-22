@@ -1,0 +1,91 @@
+import { PLANNING_LABEL } from "../config.js";
+
+export function planningWorkflow(setup: string, enabled: boolean): string {
+  return `name: Crewbie planning
+on:
+${enabled ? "  issues:\n    types: [labeled]" : "  workflow_dispatch:"}
+permissions:
+  contents: read
+concurrency:
+  group: crewbie-planning-\${{ github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: \${{ github.event_name == 'issues' && github.event.label.name == '${PLANNING_LABEL}' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      ready: \${{ steps.context.outputs.ready }}
+      model: \${{ steps.context.outputs.model }}
+    steps:
+${setup}      - name: Verify ready label and prepare coordinator context
+        id: context
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-plan --prepare
+      - uses: actions/upload-artifact@v7.0.1
+        if: \${{ steps.context.outputs.ready == 'true' }}
+        with:
+          name: crewbie-planning-input
+          include-hidden-files: true
+          retention-days: 1
+          path: |
+            .crewbie-planning-input.json
+            .crewbie-planning-prompt.txt
+          if-no-files-found: error
+  analyze:
+    needs: prepare
+    if: \${{ needs.prepare.outputs.ready == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    permissions:
+      copilot-requests: write
+    steps:
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: crewbie-planning-input
+      - name: Run named coordinator planning
+        env:
+          GITHUB_TOKEN: \${{ github.token }}
+          CREWBIE_PLANNING_MODEL: \${{ needs.prepare.outputs.model }}
+          CREWBIE_COPILOT_VERSION: \${{ vars.CREWBIE_COPILOT_VERSION }}
+        run: |
+          [[ "$CREWBIE_COPILOT_VERSION" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || { echo "Set an approved exact Copilot CLI version."; exit 1; }
+          test -n "$CREWBIE_PLANNING_MODEL" || { echo "Approve an explicit planning model."; exit 1; }
+          npm install --prefix "$RUNNER_TEMP/copilot" --no-audit --no-fund "@github/copilot@$CREWBIE_COPILOT_VERSION"
+          "$RUNNER_TEMP/copilot/node_modules/.bin/copilot" --model "$CREWBIE_PLANNING_MODEL" --no-custom-instructions --disable-builtin-mcps --available-tools --silent --deny-tool shell write url --prompt "$(cat .crewbie-planning-prompt.txt)" > .crewbie-planning-output.txt
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: crewbie-planning-output
+          include-hidden-files: true
+          retention-days: 1
+          path: .crewbie-planning-output.txt
+          if-no-files-found: error
+  publish:
+    needs: [prepare, analyze]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: write
+    steps:
+${setup}      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: crewbie-planning-input
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: crewbie-planning-output
+      - name: Validate and publish planning PR only
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-plan --apply
+`;
+}

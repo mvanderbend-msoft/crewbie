@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import type { Config, Role } from "../config.js";
+import { parseConfig, type Config } from "../config.js";
+import { optionalText, safePath, textHash } from "../core.js";
 import { assessInstructions, instructionFile, type InstructionQuality } from "./instruction-quality.js";
+import { assessTeam, type TeamAssessment } from "./team.js";
 
 export interface Assessment {
   schemaVersion: 1;
@@ -12,6 +14,8 @@ export interface Assessment {
   constitutionText: string | null;
   instructions: { path: string; content: string; beforeHash: string | null }[];
   instructionQuality: InstructionQuality;
+  configBeforeHash: string | null;
+  team: TeamAssessment;
 }
 export async function assess(root: string): Promise<Assessment> {
   const absolute = await realpath(resolve(root));
@@ -27,14 +31,13 @@ export async function assess(root: string): Promise<Assessment> {
   const ci = paths.filter((path) => path.startsWith(".github/workflows/") && /\.ya?ml$/.test(path));
   const existingConstitution = paths.find((path) => /(^|\/)constitution\.md$/i.test(path)) ?? null;
   const decisions = paths.filter((path) => /(^|\/)(adr|adrs|decisions)(\/|\.md$)/i.test(path));
-  const roles: Role[] = [];
-  if (paths.some((path) => /\.(tsx|jsx|vue|svelte)$/.test(path))) roles.push({ id: "frontend", purpose: "Implement and test the repository's user interface using its existing patterns.", model: "" });
-  if (paths.some((path) => /(^|\/)(api|server|backend)\//.test(path))) roles.push({ id: "backend", purpose: "Implement and test server-side behavior without breaking existing consumers.", model: "" });
-  if (!roles.length) roles.push({ id: "developer", purpose: "Make focused changes using the repository's existing conventions and relevant tests.", model: "" });
-  roles.push(
-    { id: "tester", purpose: "Design focused regression and boundary tests, preserve application behavior, and report actual outcomes and coverage gaps.", model: "" },
-    { id: "reviewer", purpose: "Review changes against acceptance criteria for correctness and material risks, with evidence rather than unrelated rewrites.", model: "" },
-  );
+  const installedText = await optionalText(await safePath(root, ".crewbie/config.json"));
+  const installed = installedText === null ? null : parseConfig(JSON.parse(installedText) as unknown);
+  const team = await assessTeam(root, paths, installed?.roles ?? []);
+  const roles = [
+    ...(installed?.roles ?? []),
+    ...team.suggestions.filter(({ role }) => !installed?.roles.some((existing) => existing.id === role.id)).map(({ role }) => role),
+  ];
   const findings: Assessment["findings"] = [
     { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "First check whether existing documentation is enough; propose agent-specific guidance only for useful missing context." },
     { area: "Build and tests", status: build.length ? "unknown" : "gap", evidence: [...build, ...tests.slice(0, 4), ...ci].slice(0, 12), detail: "File inspection does not prove commands work. Ask permission before running project scripts." },
@@ -51,15 +54,18 @@ export async function assess(root: string): Promise<Assessment> {
       : "No selected static warning was found. This is not a quality certification; review repository-specific value and the disclosed inspection coverage.",
   });
   return {
-    schemaVersion: 1, findings, instructionQuality,
+    schemaVersion: 1, findings, instructionQuality, team,
+    configBeforeHash: installedText === null ? null : textHash(installedText),
     questions: [
       "Which existing constraints are intentional, and which are legacy debt?",
       "Which checks and human approvals are required before merge?",
       "Which areas must agents leave unchanged?",
       "Which instruction-quality warnings reflect stale or redundant guidance, and which are justified policies to preserve?",
-      "Approve the proposed team and explicit models; do not infer policy from file names.",
+      "Which expertise does the project and upcoming feature need? Review the team evidence; add custom specialists or split, specialize and retire existing roles only after reviewing their open work.",
+      "Approve explicit models and domain checks for added roles. Existing models, policy and memory are preserved; discovery hints are not a fixed roster.",
+      "Enable hosted planning from crewbie:ready-for-planning labels? Approve planning.model and the human approvers first; this authorizes planning, not implementation.",
     ],
-    config: {
+    config: installed ? { ...installed, roles } : {
       schemaVersion: 1, repository: "", approvers: [], roles, constitution: existingConstitution,
       maxActive: 2, nightly: {
         enabled: false, maxRecords: 20,
@@ -67,7 +73,7 @@ export async function assess(root: string): Promise<Assessment> {
           ".crewbie/team/", ".crewbie/decisions/", ".crewbie/decisions.md", ".crewbie/instructions.md",
           ...[...roles.map((role) => role.id), "coordinator", "improver"].map((role) => `.github/agents/crewbie-${role}.agent.md`),
         ],
-      }, ado: null,
+      }, ado: null, planning: { enabled: false, model: "" },
     },
     constitutionText: null,
     instructions: [],

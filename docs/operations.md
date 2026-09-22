@@ -29,12 +29,13 @@ The installed workflows use:
 | Variable `CREWBIE_COPILOT_VERSION` | An approved exact Copilot CLI package version |
 | Variable `CREWBIE_MAINTENANCE_MODEL` | Explicit approved maintenance model; not `auto` |
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
+| Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 
 Crewbie is distributed through GitHub Releases, not an npm registry. For this
 alpha, configure the consuming repository with the version-pinned public asset:
 
 ```powershell
-gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.0/crewbie-cli-0.1.0-alpha.0.tgz"
+gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.1/crewbie-cli-0.1.0-alpha.1.tgz"
 ```
 
 For a reviewed custom build, use `npm pack` and distribute its tarball through
@@ -56,6 +57,7 @@ PR. A missing entitlement or permission is an error, not a token/runtime fallbac
 | Capability | Personal repository | Organization repository | Verified here |
 |---|---|---|---|
 | Local onboarding/specification | Supported | Supported | Local CLI and fixtures |
+| Ready-label issue planning | Opt-in Actions CLI; eligible Copilot seat | Opt-in Actions CLI; organization billing policy | Authorization, source binding, proposal publication and workflow fixtures; no new paid live intake run claimed |
 | Native custom-agent assignment | Requires eligible account/repo and user auth | Requires eligible account/policy and user auth | Named backend, frontend, tester and reviewer sessions in a private Java/React repository; native IDs confirmed |
 | Model selection | Requested explicitly; entitlement varies | Requested explicitly; policy varies | `gpt-5.4` confirmed in native session metadata; no universal model guarantee |
 | Same-PR review corrections | Agent Tasks API requires an eligible Business/Enterprise seat and user auth | Requires eligible seat/policy and user auth | Two correction rounds reused the original frontend PR, followed by tester refresh and independent re-review |
@@ -102,6 +104,105 @@ handoffs. The hosted improver proposed a small guard against inferring policy fr
 incomplete evidence, and the private dashboard workflow succeeded. These are
 account-specific alpha results, not a claim of universal or unattended production
 readiness. Application and learning PRs remained unmerged.
+
+## Evolving the team
+
+The approved configuration is the current roster, not a permanent template.
+`init` on an installed repository and `init --update --out team-review.json`
+reassess the current project without resetting its models, approvers, limits,
+constitution, integrations or learning permissions.
+
+The `team` report separates evidence-backed suggestions from existing roles that
+need human review. Discovery uses non-ignored production paths and bounded
+manifest inspection: at most 20 manifests, 64 KB each and 512 KB total. Omitted
+or malformed manifests are disclosed. Fixture, example and generated paths do
+not automatically grow the team. No project script is executed.
+
+Built-in signals are not a role enum. The coordinator must also consider the
+feature's domain and can propose custom roles, splits, specialization or
+retirement. Review proposed purpose, checks, non-negotiables and models before
+applying. Newly detected roles have no approved model until you choose one.
+Existing roles and their domain guidance remain intact unless explicitly edited.
+
+Reassessment proposals bind to the existing configuration fingerprint. A stale
+proposal cannot overwrite intervening policy changes; LF/CRLF checkout differences
+are tolerated. Installation retains historical profile and memory files when a
+role is explicitly removed from the active config. Crewbie stops routing new
+work to that role, but never reassigns existing tasks automatically. Review/drain
+open work and reapprove any changed task ownership before retiring a role.
+New roles do not silently expand nightly instruction-edit permissions.
+
+## Ready-label issue intake
+
+The label **`crewbie:ready-for-planning`** is separate from the execution-state
+label `crewbie:ready`. It authorizes coordinator planning, not application work.
+Enable it in a reviewed setup proposal:
+
+```json
+{
+  "planning": {
+    "enabled": true,
+    "model": "gpt-5.4"
+  }
+}
+```
+
+This is the `config.planning` fragment, not a complete setup file. Choose a model
+your account supports; the example is not an entitlement guarantee. Apply the
+reviewed proposal and commit the generated configuration, profiles, memory and
+`crewbie-plan.yml` workflow to the default branch.
+
+Configure `CREWBIE_PACKAGE` as described above, set an approved exact
+`CREWBIE_COPILOT_VERSION` (the earlier hosted CLI runs used `1.0.87`), and allow
+Actions to create pull requests. Copilot billing/organization policy still
+applies. No saved user token is required for planning:
+
+```powershell
+gh label create "crewbie:ready-for-planning" --repo OWNER/REPO --color b11f4b --description "Approved for coordinator planning, not implementation"
+gh variable set CREWBIE_COPILOT_VERSION --repo OWNER/REPO --body "1.0.87"
+```
+
+Put the PRD in the issue body, then have a configured human approver apply the
+label. The workflow checks the actual label-event actor and current issue
+content before analysis. Bots, unapproved actors, closed issues, generated
+execution issues and unrelated labels cannot start planning. Creating an issue
+alone is not a trigger. After source changes, review the text and remove/reapply
+the label; it does not continuously analyze every edit.
+
+The prepare job uses read-only repository access and loads the coordinator
+charter, bounded hot/index memory, relevant indexed history, shared guidance and
+the repository assessment. The separate model job has Copilot-request permission
+but no repository write permission or available tools. This is a named-context
+Copilot CLI planning run in Actions, not a native Agent Tasks implementation
+session. Model selection is requested explicitly; runtime model/billing
+measurements are not inferred.
+
+The publisher rechecks the source, label approval, policy and default-branch
+revision. It can only create a draft PR containing `.crewbie/plans/issue-N/`
+files: a concise human-facing plan, a setup proposal and an unapproved task batch
+when requirements are sufficient. Each task names an owner, model and dependencies.
+Custom specialists need domain checks and non-negotiables. Missing requirements
+produce questions rather than fabricated acceptance criteria.
+
+Review the proposal on its branch. Preview and apply `setup.json` through `init`,
+then review/merge the resulting configuration and profiles onto the default
+branch. Resolve questions and inspect `batch.json` before `approve --batch ...
+--yes --execute` and `publish --batch ... --apply --dispatch-local --watch`.
+Merging the draft planning PR alone neither installs its nested setup proposal
+nor approves execution. The coordinator does not approve its own task graph.
+
+The same source/base/configuration snapshot is deduplicated, including a closed
+planning PR. Existing branches without a matching PR indicate interrupted
+publication and stop visibly; inspect them rather than deleting state or blindly
+retrying. Changed source or base context requires a fresh reviewed label event.
+Planning never force-pushes a human-edited branch or merges PRs.
+
+Inputs are bounded to a 50 KB issue body and 100 KB total prompt/output. Plans
+have at most eight tasks, five questions and four additional roles per proposal.
+The three jobs have 3/9/3-minute limits; different issues can plan concurrently.
+These limits are not spending caps. Links, attachments, Word/PDF files and
+external URLs are **not fetched**: paste the relevant text into the issue.
+Generated task issues are explicitly excluded, preventing recursive planning.
 
 ## ADO-authoritative work
 
