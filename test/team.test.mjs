@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assess } from "../dist/setup/assessment.js";
-import { installation, applyInstallation } from "../dist/setup/install.js";
+import { installation, applyInstallation, teamInstallation } from "../dist/setup/install.js";
 import { parseConfig } from "../dist/config.js";
 import { hash, json } from "../dist/core.js";
 import { fixture, config } from "./helpers.mjs";
@@ -123,4 +123,21 @@ test("reassessment fingerprints survive LF/CRLF checkouts without treating them 
   const path = join(root, ".crewbie/config.json");
   await writeFile(path, (await readFile(path, "utf8")).replaceAll("\n", "\r\n"));
   assert.ok((await installation(root, proposal)).some((change) => change.path === ".crewbie/config.json"));
+});
+
+test("planning materialization preserves existing customized charters and never upgrades workflows or grants policy", async (t) => {
+  const root = await fixture(t);
+  const current = parseConfig(config());
+  await applyInstallation(root, await installation(root, { config: current, constitutionText: null }));
+  const charter = join(root, ".github/agents/crewbie-developer.agent.md");
+  await writeFile(charter, "Human-owned domain guidance.");
+  const role = { id: "ledger", purpose: "Keep ledger contracts.", model: "approved-model", checks: ["Check balances."], nonNegotiables: ["Preserve posted entries."] };
+  const next = { ...current, roles: [...current.roles, role] };
+  const files = await teamInstallation(root, current, next);
+  assert.ok(files[".github/agents/crewbie-ledger.agent.md"]);
+  assert.equal(files[".github/agents/crewbie-developer.agent.md"], undefined);
+  assert.ok(Object.keys(files).every((path) => !path.startsWith(".github/workflows/")));
+  assert.equal(await readFile(charter, "utf8"), "Human-owned domain guidance.");
+  await assert.rejects(teamInstallation(root, current, { ...next, maxActive: 10 }), /not execution permissions/);
+  await assert.rejects(teamInstallation(root, current, { ...current, roles: [{ ...current.roles[0], purpose: "Replace edited guidance." }] }), /Preserving user-owned/);
 });

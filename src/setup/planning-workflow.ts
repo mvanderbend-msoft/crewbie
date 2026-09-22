@@ -89,3 +89,34 @@ ${setup}      - uses: actions/download-artifact@v8.0.1
         run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-plan --apply
 `;
 }
+
+export function executionWorkflow(setup: string, enabled: boolean): string {
+  return `name: Crewbie execute approved plan
+on:
+${enabled ? "  pull_request_target:\n    types: [closed]\n" : ""}  workflow_dispatch:
+    inputs:
+      pr:
+        description: Merged planning PR number to verify and resume
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: crewbie-plan-release-\${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: false
+jobs:
+  release:
+    if: \${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged == true && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'crewbie/plans/')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+${setup}      - name: Verify human approval and merge, publish tasks and dispatch
+        env:
+          GH_TOKEN: \${{ secrets.CREWBIE_USER_TOKEN }}
+          CREWBIE_ADO_TOKEN: \${{ secrets.CREWBIE_ADO_TOKEN }}
+          PR_NUMBER: \${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "Configure a supported user-authorized CREWBIE_USER_TOKEN for native cloud assignment. No credential fallback is used."; exit 1; }
+          node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-release-plan --pr "$PR_NUMBER"
+`;
+}

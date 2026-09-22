@@ -64,6 +64,7 @@ export async function assess(root: string): Promise<Assessment> {
       "Which expertise does the project and upcoming feature need? Review the team evidence; add custom specialists or split, specialize and retire existing roles only after reviewing their open work.",
       "Approve explicit models and domain checks for added roles. Existing models, policy and memory are preserved; discovery hints are not a fixed roster.",
       "Enable hosted planning from crewbie:ready-for-planning labels? Approve planning.model and the human approvers first; this authorizes planning, not implementation.",
+      "Enable planning.executeOnMerge? Then a human approval of the exact planning head plus a human merge authorizes automatic paid execution; configure the supported assignment credential once.",
     ],
     config: installed ? { ...installed, roles } : {
       schemaVersion: 1, repository: "", approvers: [], roles, constitution: existingConstitution,
@@ -73,7 +74,7 @@ export async function assess(root: string): Promise<Assessment> {
           ".crewbie/team/", ".crewbie/decisions/", ".crewbie/decisions.md", ".crewbie/instructions.md",
           ...[...roles.map((role) => role.id), "coordinator", "improver"].map((role) => `.github/agents/crewbie-${role}.agent.md`),
         ],
-      }, ado: null, planning: { enabled: false, model: "" },
+      }, ado: null, planning: { enabled: false, model: "", executeOnMerge: false },
     },
     constitutionText: null,
     instructions: [],

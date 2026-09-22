@@ -14,7 +14,7 @@ export interface Config {
   nightly: { enabled: boolean; maxRecords: number; allowedPaths: string[] };
   ado: { organization: string; project: string; workItemType: string } | null;
   limits?: WordLimits;
-  planning?: { enabled: boolean; model: string };
+  planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
 }
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
 export function parseConfig(value: unknown): Config {
@@ -67,7 +67,9 @@ export function parseConfig(value: unknown): Config {
     if (typeof value.enabled !== "boolean") throw new Error("planning.enabled must be true or false.");
     const model = string(value.model, "planning.model", !value.enabled);
     if (model && (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) || model.toLowerCase() === "auto")) throw new Error("Choose an explicit planning model identifier, not auto.");
-    planning = { enabled: value.enabled, model };
+    if (value.executeOnMerge !== undefined && typeof value.executeOnMerge !== "boolean") throw new Error("planning.executeOnMerge must be true or false.");
+    if (value.executeOnMerge === true && !value.enabled) throw new Error("Enable planning before opting into execution on merge.");
+    planning = { enabled: value.enabled, model, ...(value.executeOnMerge === undefined ? {} : { executeOnMerge: value.executeOnMerge }) };
   }
   return {
     schemaVersion: 1, repository, approvers, roles, constitution,

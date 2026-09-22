@@ -14,6 +14,7 @@ import { assess } from "./setup/assessment.js";
 import { applyInstallation, installation } from "./setup/install.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning } from "./specification/planning.js";
+import { releaseMergedPlan } from "./execution/planning-approval.js";
 import { checkPrDescription } from "./specification/prose.js";
 import { api, requireApprover } from "./tracking/github.js";
 import { publish, publishDescription } from "./tracking/issues.js";
@@ -245,7 +246,10 @@ async function main(): Promise<void> {
     console.log("PR has concise what/why/checks sections. Human review still judges the reasoning and evidence.");
   } else if (command === "internal-dispatch") {
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
-    const work = await dispatch(github, config, ado);
+    const hints = (process.env.CREWBIE_ISSUE_NUMBERS ?? "").trim();
+    const issueNumbers = hints ? hints.split(",").map((value) => integer(Number(value), "confirmed issue number")) : [];
+    if (issueNumbers.length > 100) throw new Error("At most 100 confirmed issue IDs can be reconciled at once.");
+    const work = await dispatch(github, config, ado, issueNumbers.length ? { issueNumbers } : undefined);
     console.log(json(work));
     if (config.ado) await syncAdo(github, adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? ""), config, work);
   } else if (command === "internal-maintain") {
@@ -255,10 +259,15 @@ async function main(): Promise<void> {
     if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply for planning.");
     if (values.prepare) {
       if (!process.env.GITHUB_EVENT_PATH || process.env.GITHUB_EVENT_NAME !== "issues") throw new Error("Planning preparation requires a GitHub issues event.");
-      const result = await preparePlanning(root, github, config, await readJson(process.env.GITHUB_EVENT_PATH));
+      const result = await preparePlanning(root, github, config, await readJson(process.env.GITHUB_EVENT_PATH),
+        process.env.GITHUB_RUN_ID ? integer(Number(process.env.GITHUB_RUN_ID), "workflow run ID") : undefined);
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
       console.log(result.reason);
     } else console.log(await publishPlanning(root, github, config));
+  } else if (command === "internal-release-plan") {
+    if (!values.pr) throw new Error("Choose a merged planning PR with --pr.");
+    const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
+    console.log(await releaseMergedPlan(github, config, integer(Number(values.pr), "planning PR"), ado));
   } else if (command === "internal-pages") {
     if (!["private", "public"].includes(values["pages-mode"] ?? "")) throw new Error("Explicitly select private or public Pages mode.");
     const pages = record(await github.request("GET", `/repos/${config.repository}/pages`), "Pages configuration");

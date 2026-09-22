@@ -30,12 +30,13 @@ The installed workflows use:
 | Variable `CREWBIE_MAINTENANCE_MODEL` | Explicit approved maintenance model; not `auto` |
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
+| Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
 
 Crewbie is distributed through GitHub Releases, not an npm registry. For this
 alpha, configure the consuming repository with the version-pinned public asset:
 
 ```powershell
-gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.1/crewbie-cli-0.1.0-alpha.1.tgz"
+gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.2/crewbie-cli-0.1.0-alpha.2.tgz"
 ```
 
 For a reviewed custom build, use `npm pack` and distribute its tarball through
@@ -58,6 +59,7 @@ PR. A missing entitlement or permission is an error, not a token/runtime fallbac
 |---|---|---|---|
 | Local onboarding/specification | Supported | Supported | Local CLI and fixtures |
 | Ready-label issue planning | Opt-in Actions CLI; eligible Copilot seat | Opt-in Actions CLI; organization billing policy | Authorization, source binding, proposal publication and workflow fixtures; no new paid live intake run claimed |
+| Approve-and-merge execution | Supported user-authorized assignment credential required | Credential plus repository/organization policy | Exact-head review/merge provenance, team materialization, publication and recovery fixtures; live webshop validation pending |
 | Native custom-agent assignment | Requires eligible account/repo and user auth | Requires eligible account/policy and user auth | Named backend, frontend, tester and reviewer sessions in a private Java/React repository; native IDs confirmed |
 | Model selection | Requested explicitly; entitlement varies | Requested explicitly; policy varies | `gpt-5.4` confirmed in native session metadata; no universal model guarantee |
 | Same-PR review corrections | Agent Tasks API requires an eligible Business/Enterprise seat and user auth | Requires eligible seat/policy and user auth | Two correction rounds reused the original frontend PR, followed by tester refresh and independent re-review |
@@ -178,18 +180,20 @@ session. Model selection is requested explicitly; runtime model/billing
 measurements are not inferred.
 
 The publisher rechecks the source, label approval, policy and default-branch
-revision. It can only create a draft PR containing `.crewbie/plans/issue-N/`
-files: a concise human-facing plan, a setup proposal and an unapproved task batch
-when requirements are sufficient. Each task names an owner, model and dependencies.
+revision. It creates a draft PR with `.crewbie/plans/issue-N/` files: a concise
+human-facing plan, a setup proposal and an unapproved task batch when requirements
+are sufficient. Merge-enabled plans also include the actual reviewed team files
+and an execution manifest, as described below. Each task names an owner, model and dependencies.
 Custom specialists need domain checks and non-negotiables. Missing requirements
 produce questions rather than fabricated acceptance criteria.
 
-Review the proposal on its branch. Preview and apply `setup.json` through `init`,
+With merge execution disabled, review the proposal on its branch. Preview and apply `setup.json` through `init`,
 then review/merge the resulting configuration and profiles onto the default
 branch. Resolve questions and inspect `batch.json` before `approve --batch ...
 --yes --execute` and `publish --batch ... --apply --dispatch-local --watch`.
-Merging the draft planning PR alone neither installs its nested setup proposal
-nor approves execution. The coordinator does not approve its own task graph.
+In this manual mode, merging the draft planning PR alone neither installs its
+nested setup proposal nor approves execution. The coordinator never approves
+its own task graph.
 
 The same source/base/configuration snapshot is deduplicated, including a closed
 planning PR. Existing branches without a matching PR indicate interrupted
@@ -203,6 +207,63 @@ The three jobs have 3/9/3-minute limits; different issues can plan concurrently.
 These limits are not spending caps. Links, attachments, Word/PDF files and
 external URLs are **not fetched**: paste the relevant text into the issue.
 Generated task issues are explicitly excluded, preventing recursive planning.
+
+### Approve and merge to execute
+
+For a GitHub-only per-feature handoff, also set `config.planning.executeOnMerge`
+to `true` in the reviewed setup. Install the updated workflows once and commit
+them to the default branch. Configure `CREWBIE_USER_TOKEN` in repository Actions
+secrets using a supported user-authorized credential belonging to a configured
+approver. It needs the documented native-assignment access, issue publication,
+claim-ref writes and workflow-dispatch permissions. Follow the linked GitHub
+permission guidance rather than assuming an installation token can assign agents.
+Store credentials through the approved secret store, never issues or commits.
+Enable `crewbie-execute-plan.yml` and `crewbie-dispatch.yml` if previously disabled.
+The built-in job token is sufficient for planning, **not native assignment**.
+
+For subsequent features, your only handoff is to review the planning PR, approve
+its exact final commit, and merge it into the default branch. Ready plans include:
+
+- The concise spec and task batch.
+- Actual configuration, changed/new specialist charters and missing new-role
+  hot/index seeds. Existing history and unchanged human-customized charters stay intact.
+- A bounded execution manifest identifying the planning run and reviewed files.
+
+The planning PR may change roles, not approvers, concurrency, workflow permissions,
+secrets or unrelated policy. It includes no application changes. Clarification-only
+plans do not contain an executable manifest and cannot start work when merged.
+If a generated plan needs edits, regenerate it and review the new commit; changing
+files without refreshing its fingerprints blocks execution rather than accepting
+an ambiguous plan.
+
+The merged-PR workflow runs trusted package code from the default branch, never
+untrusted PR-head code with assignment credentials. It independently verifies:
+
+- Prior opt-in policy from the recorded default-branch planning workflow run,
+  which must have completed successfully.
+- A configured human's `APPROVED` review on the exact final head before merge,
+  and a configured human merger. Stale/bot/dismissed approvals and unresolved
+  human change requests do not qualify.
+- The complete allowed file set, unchanged contents across reviewed head, merge
+  commit and current default branch, and the unchanged source-issue requirements.
+
+After authorization, it publishes task issues with specialist/model ownership,
+records their planning-PR approval provenance and explicitly requests the normal
+dispatcher. No local `init`, `approve` or `publish` command is needed for that
+feature. Shared locking and persistent launch claims retain concurrency and
+duplicate-launch protections. The dispatcher reconciles on configured issue/PR
+events and its hourly recovery schedule; GitHub can delay scheduled runs. Implementation
+dependencies still require merged application PRs; independent work and explicit
+review tasks progress under their existing rules. Application PRs are never
+automatically merged.
+
+Missing credentials, changed policy, lost planning-run evidence, changed files
+or failed publication stop visibly. For recovery, use **Run workflow** on
+`Crewbie execute approved plan` with the merged planning PR number. All approval
+checks run again; matching issues and approvals are reused. Do not erase launch
+claims or overwrite branches to force another paid session. Keep the planning
+run record until execution/recovery finishes. A merge by an unconfigured bot or
+merge-queue identity does not substitute for the required human merger.
 
 ## ADO-authoritative work
 

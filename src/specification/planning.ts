@@ -6,14 +6,16 @@ import { isApprover, type GitHubApi } from "../tracking/github.js";
 import { memoryContext, relevantTopics } from "../memory/context.js";
 import { assess } from "../setup/assessment.js";
 import { profile } from "../setup/templates.js";
-import { issueDigest, parseBatch, type Batch } from "./batch.js";
+import { batchDigest, issueDigest, parseBatch, type Batch } from "./batch.js";
+import { teamInstallation } from "../setup/install.js";
+import { verifyPlanningRun, type PlanExecution } from "../execution/planning-approval.js";
 
 export { PLANNING_LABEL } from "../config.js";
 const INPUT = ".crewbie-planning-input.json";
 const PROMPT = ".crewbie-planning-prompt.txt";
 const OUTPUT = ".crewbie-planning-output.txt";
 interface Source { number: number; title: string; body: string; revision: string; labelEvent: number }
-interface Snapshot { schemaVersion: 1; source: Source; actor: string; base: string; baseSha: string; configHash: string; configBeforeHash: string; key: string }
+interface Snapshot { schemaVersion: 1; source: Source; actor: string; base: string; baseSha: string; configHash: string; configBeforeHash: string; key: string; runId?: number }
 export interface Plan { summary: string; questions: string[]; roles: Role[]; batch: Batch | null }
 
 async function sourceIssue(client: GitHubApi, config: Config, number: number, actor: string): Promise<Source> {
@@ -52,7 +54,7 @@ async function requireUnusedBranch(client: GitHubApi, config: Config, snapshot: 
   throw new Error("A planning branch exists without its expected PR. Inspect the interrupted publication before retrying; no analysis or branch overwrite is authorized.");
 }
 
-export async function preparePlanning(root: string, client: GitHubApi, config: Config, eventValue: unknown): Promise<{ ready: boolean; reason: string; model: string }> {
+export async function preparePlanning(root: string, client: GitHubApi, config: Config, eventValue: unknown, runId?: number): Promise<{ ready: boolean; reason: string; model: string }> {
   for (const path of [INPUT, PROMPT, OUTPUT]) {
     try { await unlink(await safePath(root, path)); } catch (error) { if (!errorCode(error, "ENOENT")) throw error; }
   }
@@ -79,7 +81,11 @@ export async function preparePlanning(root: string, client: GitHubApi, config: C
   const key = hash(json({ repository: config.repository, issue: source.number, source: issueDigest(source.title, source.body), baseSha, configHash }));
   const configText = await optionalText(await safePath(root, ".crewbie/config.json"));
   if (configText === null) throw new Error("Install the approved crew before enabling issue intake.");
-  const snapshot: Snapshot = { schemaVersion: 1, source, actor, base, baseSha, configHash, configBeforeHash: textHash(configText), key };
+  if (config.planning.executeOnMerge) {
+    if (runId === undefined) throw new Error("Merge-triggered execution requires a trusted GitHub planning-run identity.");
+    if (await verifyPlanningRun(client, config, runId, baseSha) !== base) throw new Error("Planning run is not on the default branch.");
+  }
+  const snapshot: Snapshot = { schemaVersion: 1, source, actor, base, baseSha, configHash, configBeforeHash: textHash(configText), key, ...(runId === undefined ? {} : { runId }) };
   const existing = await existingPlan(client, config, snapshot);
   if (existing) return skipped(`This revision already has a planning PR: ${existing}`);
   await requireUnusedBranch(client, config, snapshot);
@@ -160,6 +166,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
     schemaVersion: 1, source, actor: string(input.actor, "planning actor"), base: string(input.base, "planning base"),
     baseSha: string(input.baseSha, "planning SHA"), configHash: string(input.configHash, "config hash"),
     configBeforeHash: string(input.configBeforeHash, "config before hash"), key: string(input.key, "planning key"),
+    ...(input.runId === undefined ? {} : { runId: integer(input.runId, "planning run") }),
   };
   const expectedKey = hash(json({ repository: config.repository, issue: source.number, source: issueDigest(source.title, source.body), baseSha: snapshot.baseSha, configHash: snapshot.configHash }));
   if (snapshot.key !== expectedKey) throw new Error("Planning snapshot fingerprint is invalid.");
@@ -177,13 +184,30 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
   if (!output || Buffer.byteLength(output) > 100_000) throw new Error("Planning output is missing or exceeds 100 KB.");
   const plan = parsePlan(JSON.parse(output.trim().replace(/^```json\s*\n([\s\S]*?)\n```$/, "$1")) as unknown, config, source);
   const directory = `.crewbie/plans/issue-${source.number}`;
-  const setup = { config: { ...config, roles: plan.roles }, configBeforeHash: snapshot.configBeforeHash, constitutionText: null, instructions: [] };
+  const proposed = parseConfig({ ...config, roles: plan.roles });
+  const setup = { config: proposed, configBeforeHash: snapshot.configBeforeHash, constitutionText: null, instructions: [] };
+  const automatic = config.planning.executeOnMerge === true && plan.batch !== null && plan.questions.length === 0;
+  const handoff = automatic
+    ? "Team/configuration changes are included in this PR. Approving its exact final head and merging it authorizes publication and paid cloud execution of this batch. No local installation or approval command is required. Application PR merges remain human-owned."
+    : "This PR does not authorize automatic execution. Resolve questions, then review/install setup.json and explicitly approve the task batch, or generate a new merge-enabled plan.";
   const files: Record<string, string> = {
     [`${directory}/setup.json`]: json(setup),
-    [`${directory}/plan.md`]: `# Planning issue #${source.number}\n\n${plan.summary}\n\n${plan.batch?.spec ?? "Clarification is required before decomposition."}\n\n${plan.questions.length ? `## Questions\n${plan.questions.map((q) => `- ${q}`).join("\n")}\n\n` : ""}Source: https://github.com/${config.repository}/issues/${source.number}\n\nReview proposed roles/models in setup.json and task owners/dependencies in batch.json when present. Install the reviewed setup before approving the batch. No implementation has been authorized. Retired role history is retained; review open work before changing ownership.\n`,
+    [`${directory}/plan.md`]: `# Planning issue #${source.number}\n\n${plan.summary}\n\n${plan.batch?.spec ?? "Clarification is required before decomposition."}\n\n${plan.questions.length ? `## Questions\n${plan.questions.map((q) => `- ${q}`).join("\n")}\n\n` : ""}Source: https://github.com/${config.repository}/issues/${source.number}\n\n${handoff}\n\nRetired role history is retained; review open work before changing ownership.\n`,
   };
   if (plan.batch) files[`${directory}/batch.json`] = json(plan.batch);
-  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\n${plan.batch ? `Plans source issue #${source.number} with repository-specific roles and specialist-owned tasks.` : `Requests clarification of source issue #${source.number} before decomposition.`} The ready label authorizes planning only.\n\n## Checks\nValidated source revision, human label actor, configuration, role charters and task dependencies when present. Application checks were not run. Review questions, proposed team and task scope before installation and execution approval. No issues were assigned to coding sessions and no PRs were merged.\n\n<!-- crewbie-plan:${snapshot.key} -->`;
+  if (automatic && plan.batch) {
+    if (snapshot.runId === undefined) throw new Error("Missing trusted planning-run identity.");
+    if (await verifyPlanningRun(client, config, snapshot.runId, snapshot.baseSha) !== snapshot.base) throw new Error("Planning run is not on the default branch.");
+    Object.assign(files, await teamInstallation(root, config, proposed));
+    if (Object.keys(files).length > 100 || Object.values(files).some((content) => Buffer.byteLength(content) > 100_000)) throw new Error("Materialized plan exceeds the bounded execution manifest.");
+    const execution: PlanExecution = {
+      schemaVersion: 1, sourceIssue: source.number, runId: snapshot.runId, baseSha: snapshot.baseSha, key: snapshot.key,
+      baseConfigHash: snapshot.configHash, configHash: hash(json(proposed)), batchDigest: batchDigest(plan.batch),
+      files: Object.fromEntries(Object.entries(files).map(([path, content]) => [path, textHash(content)])),
+    };
+    files[`${directory}/execution.json`] = json(execution);
+  }
+  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number} with repository-specific ownership. The ready label authorizes planning only.\n\n## Checks\nValidated source revision, label actor, configuration, charters and task dependencies when present. Application checks were not run.\n\n${handoff}\n\n<!-- crewbie-plan:${snapshot.key} -->`;
   bounded(body.replace(/<!--[\s\S]*?-->/g, ""), limitsFor(config).pr, "Planning PR description");
   const commit = record(await client.request("GET", `${prefix}/git/commits/${snapshot.baseSha}`), "base commit");
   const tree = record(await client.request("POST", `${prefix}/git/trees`, {

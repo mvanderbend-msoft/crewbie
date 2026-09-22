@@ -227,7 +227,7 @@ export function eligible(work: Work[], maxActive: number, batchId?: string): Wor
     .sort((a, b) => a.metadata.task.priority - b.metadata.task.priority || a.metadata.task.id.localeCompare(b.metadata.task.id))
     .slice(0, Math.max(0, maxActive - active));
 }
-export async function dispatch(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch: Batch; issueNumbers: number[] }): Promise<Work[]> {
+export async function dispatch(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch?: Batch; issueNumbers: number[] }): Promise<Work[]> {
   return withDispatchLock(client, config, () => dispatchLocked(client, config, ado, scope));
 }
 export async function withDispatchLock<T>(client: GitHubApi, config: Config, action: () => Promise<T>): Promise<T> {
@@ -241,11 +241,11 @@ export async function withDispatchLock<T>(client: GitHubApi, config: Config, act
   try { return await action(); }
   finally { await client.request("DELETE", `${prefix}/git/refs/tags/crewbie/dispatch-lock`); }
 }
-async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch: Batch; issueNumbers: number[] }): Promise<Work[]> {
+async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch?: Batch; issueNumbers: number[] }): Promise<Work[]> {
   await ensureLabels(client, config);
   const work = await inspectWork(client, config, scope?.issueNumbers);
-  const scoped = scope ? batchWork(work, scope.batch) : work;
-  const selected = eligible(work, config.maxActive, scope?.batch.id);
+  const scoped = scope?.batch ? batchWork(work, scope.batch) : work;
+  const selected = eligible(work, config.maxActive, scope?.batch?.id);
   for (const item of scoped) {
     await setStatus(client, config.repository, item.issue, item.state);
     if (item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {

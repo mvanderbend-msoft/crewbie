@@ -67,14 +67,14 @@ for local specification. Cloud execution also needs an eligible Copilot account
 and repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.1/crewbie-cli-0.1.0-alpha.1.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.2/crewbie-cli-0.1.0-alpha.2.tgz
 gh auth login
 ```
 
 > [!NOTE]
 > This alpha ships through **GitHub Releases, not npm**. Don't use
 > `npx @crewbie/cli` or install an unverified similarly named package.
-> The [release](https://github.com/mvanderbend-msoft/crewbie/releases/tag/v0.1.0-alpha.1)
+> The [release](https://github.com/mvanderbend-msoft/crewbie/releases/tag/v0.1.0-alpha.2)
 > includes a SHA-256 checksum. Installing Crewbie does not start agents.
 
 ### 2. Assess your existing project
@@ -165,16 +165,23 @@ With [hosted planning enabled](docs/operations.md#ready-label-issue-intake):
 2. A configured human approver adds **`crewbie:ready-for-planning`**.
 3. The hosted coordinator reads its charter/history and repository assessment,
    proposes the right crew, and decomposes the work into specialist-owned tasks.
-4. A draft planning PR presents the short spec, team proposal, task dependencies
-   and any clarification questions.
-5. Review/install the proposed team, approve the batch, and publish it to start
-   the named cloud specialists.
+4. A draft planning PR presents the short spec, specialist-owned tasks and
+   dependencies. In merge-enabled mode it includes the actual team files too.
+5. **Approve the final planning commit and merge the PR.** With
+   `planning.executeOnMerge` enabled, Actions publishes the approved tasks and
+   dispatches the named cloud specialists. No per-feature CLI handoff is needed.
 
-**The ready label authorizes planning, not implementation.** Task owners are
-assigned in the plan; coding sessions start only after batch approval and
-publication. Unlabeled issues and labels applied by unapproved actors do not
-trigger paid analysis. Planning uses the named coordinator's supplied context
-in a tool-free Copilot CLI job, not a native cloud implementation session.
+**The ready label authorizes planning; approval plus merge authorizes execution.**
+This needs one-time setup of a supported user-authorized assignment credential.
+Both the reviewer and merger must be configured human approvers. Stale approvals,
+changed source requirements and clarification-only plans cannot start coding.
+Unlabeled issues and labels applied by unapproved actors do not trigger analysis.
+Planning uses the named coordinator's supplied context in a tool-free Copilot CLI
+job, not a native cloud implementation session. Application PR merges stay yours.
+
+Without `executeOnMerge`, the manual team-installation and batch-approval path
+below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)
+for credentials, workflow recovery and approval boundaries.
 
 ### Or plan locally
 

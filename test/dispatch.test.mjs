@@ -190,7 +190,7 @@ test("scoped dispatch detects remote scope drift before making any paid assignme
 });
 
 test("fresh publication receipts survive lagging label indexes without bypassing approvals", async () => {
-  for (const approvedComments of [true, false]) {
+  for (const [scoped, approvedComments] of [[true, true], [true, false], [false, true], [false, false]]) {
     const fixture = githubFixture();
     const original = fixture.client.list;
     fixture.client.list = async (path) => {
@@ -199,10 +199,10 @@ test("fresh publication receipts survive lagging label indexes without bypassing
       return original(path);
     };
     const approved = approvedBatch(parseBatch(batch(), config()), true);
-    const action = dispatch(fixture.client, config(), undefined, { batch: approved, issueNumbers: [1, 2, 3] });
-    if (approvedComments) {
+    const action = dispatch(fixture.client, config(), undefined, { ...(scoped ? { batch: approved } : {}), issueNumbers: [1, 2, 3] });
+    if (approvedComments || !scoped) {
       await action;
-      assert.equal(fixture.assignments.length, 2);
+      assert.equal(fixture.assignments.length, approvedComments ? 2 : 0);
     } else {
       await assert.rejects(action, /differs/);
       assert.equal(fixture.assignments.length, 0);
