@@ -1,207 +1,292 @@
+<div align="center">
+
 # Crewbie
 
-**A small crew, not a big process.** Crewbie adds specialist agents to existing
-GitHub repositories without introducing a new agent runtime or a long document
-chain. Local specification uses Copilot CLI; implementation uses named GitHub
-cloud agents.
+### A small crew, not a big process.
 
-**Status: alpha.** Local flows and remote request contracts are covered by
-automated fixtures. Live account entitlements, GitHub's preview assignment
-interface, and hosted workflows still need verification in your repository.
-Nothing silently switches to a generic agent or a different model.
+**Short specs. Named cloud specialists. Memory worth keeping.**
 
-## Install the alpha
+[![CI](https://github.com/mvanderbend-msoft/crewbie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mvanderbend-msoft/crewbie/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/mvanderbend-msoft/crewbie?include_prereleases&color=b11f4b)](https://github.com/mvanderbend-msoft/crewbie/releases)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-43853d)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-Requires Node.js 22 or newer and Git. Install the prebuilt package from the
-[GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases/tag/v0.1.0-alpha.0):
+[Quick start](#quick-start) &nbsp; / &nbsp;
+[Principles](#our-principles) &nbsp; / &nbsp;
+[Meet the crew](#meet-the-crew) &nbsp; / &nbsp;
+[How it works](#from-idea-to-reviewed-pr) &nbsp; / &nbsp;
+[Operations guide](docs/operations.md)
+
+</div>
+
+---
+
+Crewbie brings a small AI development team to your **existing GitHub repository**.
+Clarify the work locally with Copilot CLI, approve a concise specification, and
+let named GitHub cloud specialists implement, test and review it. Keep the code,
+decisions and useful lessons in Git. Keep final approval with people.
+
+| Less ceremony | Real specialists | Learning without the baggage |
+|---|---|---|
+| A short spec, not a mandatory document chain. | Repository-specific charters, explicit models and visible PR attribution. | Curated role memory and evidence-backed improvement PRs, not growing transcripts. |
+
+> [!IMPORTANT]
+> **Alpha software.** Commands and GitHub preview interfaces may change.
+> Live workflows have been exercised on an eligible account, not every account
+> or organization policy. Cloud runs can incur charges. Nothing silently falls
+> back to a generic agent or a different model.
+
+## Our principles
+
+These are the design rules behind Crewbie, not extra documents for your team to fill in.
+
+| Principle | What it means in practice |
+|---|---|
+| **Fit the repository.** | Assess before generating. Reuse existing instructions, tests and decisions; don't demand a rewrite to adopt AI. |
+| **Specify enough, then build.** | Agree on the problem, behavior, non-goals and acceptance criteria. Small fixes can use an issue instead of a separate spec. |
+| **Keep the crew small and specific.** | Propose only useful roles. Give specialists subject-area checks and non-negotiables, not copies of the same generic prompt. |
+| **People own the decisions.** | Humans approve scope, owners, models and execution. Application changes and learning proposals still need human review and merge. |
+| **Automate inside clear limits.** | Bound concurrency, review rounds and maintenance work. Stop visibly on blockers or uncertain launches; don't blindly retry paid sessions. |
+| **Remember lessons, not everything.** | Keep current knowledge hot, retrieve deeper history by topic, and archive superseded detail. No new lesson means no forced memory change. |
+| **Instructions must earn their place.** | Prefer concrete repository guidance over duplicated docs or generic advice. Quality warnings cite evidence; length alone is not a quality score. |
+| **Improve from evidence.** | Propose guidance changes from actual outcomes and feedback. Never turn an agent's suggestion into accepted policy automatically. |
+| **Say what is known.** | Distinguish requested models from observed models, inspected commands from executed checks, and unknown usage from zero cost. |
+| **Write for the reader.** | Explain what changed, why and what was checked. Keep artifacts short enough to review; link detail instead of repeating it. |
+
+**Deliberate non-goals:** a new agent runtime, an always-on server, a vector
+database, raw-transcript memory, automatic merges, or a heavyweight process
+you must adopt before writing code.
+
+## Quick start
+
+### 1. Install the alpha
+
+You need **Node.js 22+**, **Git**, an authenticated **GitHub CLI**, and **Copilot CLI**
+for local specification. Cloud execution also needs an eligible Copilot account
+and repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
 npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.0/crewbie-cli-0.1.0-alpha.0.tgz
+gh auth login
 ```
 
-This alpha is distributed through GitHub Releases, **not npm**. Do not use
-`npx @crewbie/cli` or install an unverified similarly named package. The release
-includes a SHA-256 checksum. Installation does not launch agents or enable paid
-runs.
+> [!NOTE]
+> This alpha ships through **GitHub Releases, not npm**. Don't use
+> `npx @crewbie/cli` or install an unverified similarly named package.
+> The [release](https://github.com/mvanderbend-msoft/crewbie/releases/tag/v0.1.0-alpha.0)
+> includes a SHA-256 checksum. Installing Crewbie does not start agents.
 
-For local GitHub orchestration, install GitHub CLI and authenticate with
-`gh auth login`. Local specification also needs an authenticated Copilot CLI.
-Cloud specialists require an eligible Copilot account and repository access;
-see the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
+### 2. Assess your existing project
 
-Alternatively, build from source:
-
-```powershell
-git clone https://github.com/mvanderbend-msoft/crewbie.git
-cd crewbie
-npm ci
-npm test
-npm pack
-```
-
-Use `node C:\path\to\crewbie\dist\cli.js` below, or install the generated tarball:
-
-```powershell
-npm install --global .\crewbie-cli-0.1.0-alpha.0.tgz
-```
-
-## Start in an existing project
-
-Run this from the project you want your crew to work on, not the Crewbie source
-repository:
+Run this **inside the repository you want your crew to work on**, not inside the
+Crewbie source repository:
 
 ```powershell
 crewbie init --out crewbie-setup.json
 ```
 
-This only inspects files. It reports readiness gaps and questions; it does not
-execute your scripts or change project policy. Open the project in Copilot CLI
-and use the Crewbie skill after installation, or ask it to review the proposal
-against representative code, tests and existing guidance.
+This reads repository context and writes a proposal. It does **not** execute
+project scripts, change your policy or launch a cloud session.
 
-Review `crewbie-setup.json`. Choose the GitHub repository, human approvers,
-specialists and explicit models. Reuse an existing constitution or supply a
-short `constitutionText` and its path. Optional `instructions` entries contain
-`path`, `content`, and `beforeHash` (`null` for a new file). Existing files need
-their exact SHA-256 in `beforeHash` or the proposal's `adopt` map before Crewbie
-may take over updates. Declining a new constitution is supported.
+Open the project in Copilot CLI and start with:
 
-The proposed crew includes repository-specific implementation roles, a tester and
-a reviewer, alongside the coordinator and improver. Each has a distinct charter
-and its own hot/index memory. Remove unnecessary roles during review; defining a
-team does not launch every member for every task. The improver is provisioned even
-when scheduled learning is disabled.
+```text
+Review crewbie-setup.json against this repository.
+Propose only the specialists we need, with domain-specific checks.
+Reuse our existing guidance and explain the changes before applying them.
+```
 
-Charters contain subject-specific checks and non-negotiables: frontend state,
-accessibility and browser recovery differ from backend contracts, transactions
-and persistence. Shared scope/learning rules live once in
-`.crewbie/instructions.md`. Optional role `checks` and `nonNegotiables` arrays
-add reviewed repository-specific guidance without copying a generic charter.
+Review the repository name, human approvers, specialists and explicit models.
+Reuse an existing constitution, approve a short one, or decline a new one.
 
-Assessment also reports **instruction quality**, inspired by
-[Gloaguen et al. (2026)](https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd).
-It flags copied README passages, repeated specialist boilerplate, generic-only advice, unverified local links,
-missing npm script references and apparently unconditional full-suite work.
-Each signal has a file/line, explanation and recommendation. These are advisory
-heuristics, not findings proven harmful by the paper, a maturity score, or permission
-to rewrite policy. File length alone is not a quality warning. Inspection limits
-are disclosed, and no project command is executed.
+### 3. Preview and install your crew
 
 ```powershell
 crewbie init --proposal crewbie-setup.json
 crewbie init --proposal crewbie-setup.json --apply
 ```
 
-The first command previews complete changes. Installation preserves existing
-guidance and stops on edited-file conflicts. `--update` uses the same preview
-and ownership checks; it does not overwrite human edits.
+The first command previews the changes; the second applies your reviewed
+proposal. Existing guidance is preserved, and edited-file conflicts stop
+installation rather than being overwritten.
 
-## Specify, approve, deliver
+Commit the reviewed setup to your default branch before cloud dispatch.
+For hosted reporting or learning, also configure the
+[version-pinned package and workflow settings](docs/operations.md#human-approval-and-credentials).
+Local dispatch can use your existing GitHub CLI authentication without storing
+an assignment token in Actions.
 
-Use the installed `crewbie` skill in Copilot CLI. It asks focused questions,
-writes a short spec, and proposes small tasks with owners and dependencies.
-See `examples\batch.json` for the machine-readable contract.
+## Meet the crew
+
+The team follows your repository, not a fixed roster. A Java/React project might
+use the following crew; a smaller project should need fewer implementation roles.
+
+| Specialist | Runs primarily in | Owns |
+|---|---|---|
+| **Coordinator** | Local Copilot CLI | Clarification, concise specs, task ownership and dependency planning. |
+| **Frontend** | GitHub cloud agent | UI state, accessibility, interaction and browser recovery. |
+| **Backend** | GitHub cloud agent | API contracts, validation, persistence and transaction boundaries. |
+| **Tester** | GitHub cloud agent | Regression coverage and evidence from the actual combined implementation. |
+| **Reviewer** | GitHub cloud agent | Independent findings tied to the exact commits reviewed. |
+| **Improver** | Scheduled GitHub Actions | Bounded, evidence-backed guidance proposals; opt-in execution. |
+
+Each agent profile **is its charter**, with its own bounded history. Shared
+working rules live once in `.crewbie\instructions.md`. Reviewed `checks` and
+`nonNegotiables` can add repository-specific requirements without repeating
+generic boilerplate. A provisioned role does not run on every task.
+
+## From idea to reviewed PR
+
+**Assess > Specify > Approve > Implement > Review > Human merge > Learn**
+
+Use the installed `crewbie` skill in Copilot CLI to turn a request, issue or
+requirements file into a short spec and small tasks. Review the owners, models,
+scope and dependencies before approving execution.
 
 ```powershell
 crewbie status --source requirements.md
 crewbie status --batch batch.json
 crewbie approve --batch batch.json --yes --execute
 crewbie publish --batch batch.json
-crewbie publish --batch batch.json --apply
 ```
 
-Approve publication without `--execute` if implementation must wait. Changing
-scope, source content, ownership, model or dependencies requires reapproval.
-Preview and approval never launch a session.
-
-After installing and configuring the Actions workflows, publication explicitly
-requests dispatch. The dispatcher validates trusted approval, follows prerequisite
-links and limits active work. A `ready` label alone grants nothing. Only a merged
-linked PR releases dependent tasks; failures and uncertain launches require
-human attention.
-
-Implementation dependencies require merged PRs. Explicit `kind: "review"` tasks
-can instead depend on verified completed sessions with linked reviewable PRs.
-That distinction is part of the approved task graph, not inferred from a title.
-
-For local orchestration with your authenticated GitHub CLI account, use
-`publish --batch batch.json --apply --dispatch-local`. The same approval, claims
-and capacity checks launch native cloud specialists, without storing an assignment
-credential in Actions. This flag does not grant execution consent.
-
-Add `--watch` to keep that command reconciling automatically:
+The last command previews publication. **The following command publishes the
+approved work and can start paid native cloud sessions:**
 
 ```powershell
 crewbie publish --batch batch.json --apply --dispatch-local --watch
 ```
 
-It releases newly eligible specialists and stops when the batch reaches cloud
-handoff, needs human action, or times out (one hour by default). It never merges
-PRs, retries uncertain assignments, or launches another batch. Repository-wide
-capacity still applies. A completed session is not a claim that CI or review passed.
+The watcher reconciles work within the repository's concurrency limit. It
+releases eligible specialists and stops at handoff, a blocker or timeout.
+Implementation dependencies require merged PRs; explicitly approved review tasks
+can inspect completed, unmerged work. A completed session does not mean its
+tests or review passed.
 
-For **autonomous review and correction**, approve a small review plan identifying
-the reviewer issue, target issue/PR pairs, exact issue digests, allowed correction
-paths and a `maxRounds` budget (1-5). Then preview and apply:
+See [the batch example](examples/batch.json) and
+[scheduling and recovery](docs/operations.md#scheduling-and-recovery).
+
+### Let the reviewer close the loop
+
+For an approved review plan with exact issue digests, target PRs, correction
+paths and a round budget:
 
 ```powershell
 crewbie publish --review-loop review.json
 crewbie publish --review-loop review.json --apply --watch
 ```
 
-The named reviewer produces a pinned-head report. Crewbie posts it as real GitHub
-PR reviews, sends required changes to each original specialist on its existing
-branch, and re-reviews the corrected heads. Specialist attribution is maintained
-in PR descriptions. Reviews are explicitly attributed to the cloud reviewer even
-when the authorized coordinator publishes them; they are not human approval.
-The loop keeps one reviewer report PR and stops on a clean result, a blocker,
-an uncertain launch, timeout or the correction budget. It never merges.
-This opt-in mode uses the documented Agent Tasks API for same-branch continuations,
-which currently requires an eligible Business/Enterprise seat and user-authorized
-Agent Tasks access; issue-assignment eligibility alone does not establish support.
-See the review-plan format and recovery details in [operations](docs/operations.md).
+The named reviewer produces findings against exact commits. Crewbie publishes
+actual GitHub reviews, sends required fixes to the **original specialist on the
+same PR**, refreshes tester evidence when included, and independently re-reviews.
+Specialist attribution stays visible in PR descriptions.
 
-## Memory and improvement
+> [!WARNING]
+> This optional mode uses the Agent Tasks API, which currently requires an
+> eligible Business/Enterprise seat and user-authorized access. Basic issue
+> assignment eligibility is not enough. Automated reviews are explicitly
+> attributed to the specialist but published by the authorized coordinator;
+> they are **not human approval**. Crewbie never merges the PRs.
 
-The agent profile is its charter. Each role reads shared decisions and its own
-small hot file/index, loading cold/archive topics only when relevant.
-When the approved issue scope allows it, specialists propose durable history
-updates as file changes in their implementation/review PR. Shared decisions change
-only for new cross-role choices, not as an activity log. If memory is out of scope,
-a short marked PR comment carries the proposal to nightly review. No useful new
-lesson means no forced file change.
+The [review-plan format and recovery guide](docs/operations.md#autonomous-review-and-correction)
+explain scope guards, uncertain launches and round limits.
 
-```powershell
-crewbie status --memory developer
-crewbie status --memory developer --topic shared/cold/storage-choice.md
+## Memory that stays useful
+
+| Layer | Keep here | Read when |
+|---|---|---|
+| **Hot** | Current constraints and recurring lessons. | The role starts work. |
+| **Index** | Short topic pointers and relevance cues. | Finding the right history. |
+| **Cold** | Deeper topic summaries with evidence. | The current task needs them. |
+| **Archive** | Superseded detail and its provenance. | Investigating an older decision. |
+
+Shared decisions belong in a compact repository-wide record; role history
+captures practical lessons. Reuse existing ADRs rather than copying them.
+Specialists propose useful lessons in scoped PR changes, or defer them to
+nightly review when memory is outside their approved scope. No compulsory churn.
+
+Nightly learning is **opt-in**. Preparation, tool-free Copilot analysis and
+guarded publication run separately with scoped job tokens. The improver proposes
+changes in one human-reviewed PR, skips unchanged evidence, and cannot expand
+its own permissions or edit application code.
+
+### Small defaults, explicit exceptions
+
+| Surface | Default budget |
+|---|---|
+| Specification / constitution | 600 words each |
+| Specialist charter | 400 words |
+| Role hot memory | 600 words |
+| Role index / active shared decisions | 400 words each |
+| PR description | Normally 150-250 words |
+| Concurrent implementation sessions | 2 per repository |
+| Nightly input / improvement PRs | 20 new records / 1 active PR |
+
+Budgets are configurable. Word limits are readability constraints, not quality
+scores or token limits. Workflow timeouts are not guaranteed spending caps.
+
+<details>
+<summary><strong>What gets added to my repository?</strong></summary>
+
+```text
+.github\agents\crewbie-*.agent.md       Specialist charters
+.github\skills\crewbie\SKILL.md         Local specification workflow
+.github\workflows\crewbie-*.yml         Dispatch, improvement and reporting
+.crewbie\config.json                   Approved team and execution policy
+.crewbie\instructions.md               Shared working rules
+.crewbie\constitution.md               Approved principles, or an existing path
+.crewbie\decisions.md                  Compact shared decisions
+.crewbie\team\<role>\hot.md            Current role knowledge
+.crewbie\team\<role>\index.md          Topic pointers
 ```
 
-Nightly learning is opt-in. A constrained Copilot CLI analysis proposes
-evidence-linked guidance changes in one human-reviewed PR. The improver has its
-own memory. Decisions and legacy exceptions are not silently rewritten.
-Preparation, tool-free AI analysis and guarded publication run in separate Actions
-jobs with scoped built-in tokens. No personal token is needed for this workflow;
-account entitlement and Copilot billing policy still apply.
+Specs and cold/archive detail appear when needed, not as empty document trees.
+The installer tracks ownership and stops on conflicting human edits.
+`init --update` uses the same preview and ownership checks.
 
-## Usage dashboard
+</details>
+
+## See what happened
 
 ```powershell
 crewbie dashboard --collect --out crewbie-dashboard.html
-crewbie dashboard --records examples\runs.json --out example-report.html
 ```
 
-The self-contained report filters specialists, models and dates. It separates
-requested from observed models and shows missing measurements as **unknown**.
-Collected issue records are not an exhaustive session/billing ledger. Exact
-cloud tokens and spend cannot be invented from organization totals.
+The static report filters by specialist, model and date. It separates requested
+and observed models and leaves missing measurements **unknown**, not zero.
+Collected work records are not an exhaustive session or billing ledger.
+Hosted reports default to an access-controlled Actions artifact; public hosting
+requires explicit opt-in.
 
-Hosted reports default to a repository-access-controlled Actions artifact.
-Private Pages requires the right GitHub plan; public hosting is explicit opt-in.
+Instruction assessment also flags copied documentation, repeated charter
+boilerplate, generic advice, unverified links and suspect test directives.
+Inspired by [Gloaguen et al., *Evaluating AGENTS.md*](https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd),
+these are advisory engineering heuristics with file/line evidence, not
+paper-validated causal rules or automatic permission to rewrite instructions.
+Read the [evidence and limitations](docs/operations.md#instruction-quality-evidence-and-limits).
 
-See [operations](docs/operations.md) for credentials, ADO, deployment, recovery,
-and the account capability matrix. Registry publishing and live cloud runs are
-not performed by installation.
+## Build and contribute
 
-MIT licensed. Inspired by [Spec Kit](https://github.com/github/spec-kit) and
-[Brady Gaster's Squad](https://github.com/bradygaster/squad), with an original,
-smaller implementation. Crewbie is a working name pending branding clearance.
+```powershell
+git clone https://github.com/mvanderbend-msoft/crewbie.git
+cd crewbie
+npm ci --ignore-scripts
+npm test
+npm pack
+```
+
+The package has **no runtime npm dependencies**. Source is TypeScript; the release
+contains prebuilt JavaScript. Keep contributions small, cover behavior changes
+with tests, and preserve the principles above.
+
+For credentials, ADO integration, workflow deployment, upgrades and recovery,
+start with the [operations guide](docs/operations.md).
+Report reproducible problems in [GitHub issues](https://github.com/mvanderbend-msoft/crewbie/issues).
+
+---
+
+**MIT licensed.** Inspired by [Spec Kit](https://github.com/github/spec-kit)'s
+specification discipline and [Brady Gaster's Squad](https://github.com/bradygaster/squad)'s
+specialist teams and repository-backed history. Crewbie is an original,
+smaller implementation, not a fork or a compatibility layer.
+The name remains subject to branding clearance.
