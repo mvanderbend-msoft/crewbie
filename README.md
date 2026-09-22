@@ -67,14 +67,14 @@ for local specification. Cloud execution also needs an eligible Copilot account
 and repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.2/crewbie-cli-0.1.0-alpha.2.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.3/crewbie-cli-0.1.0-alpha.3.tgz
 gh auth login
 ```
 
 > [!NOTE]
 > This alpha ships through **GitHub Releases, not npm**. Don't use
 > `npx @crewbie/cli` or install an unverified similarly named package.
-> The [release](https://github.com/mvanderbend-msoft/crewbie/releases/tag/v0.1.0-alpha.2)
+> The [release](https://github.com/mvanderbend-msoft/crewbie/releases/tag/v0.1.0-alpha.3)
 > includes a SHA-256 checksum. Installing Crewbie does not start agents.
 
 ### 2. Assess your existing project

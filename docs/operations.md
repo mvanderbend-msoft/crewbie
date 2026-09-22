@@ -36,7 +36,7 @@ Crewbie is distributed through GitHub Releases, not an npm registry. For this
 alpha, configure the consuming repository with the version-pinned public asset:
 
 ```powershell
-gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.2/crewbie-cli-0.1.0-alpha.2.tgz"
+gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.3/crewbie-cli-0.1.0-alpha.3.tgz"
 ```
 
 For a reviewed custom build, use `npm pack` and distribute its tarball through
@@ -436,7 +436,8 @@ claims or treat issue closure as successful implementation.
 Reconciliation preserves unrelated labels. Failed/unmerged work blocks its
 descendants. Claims survive session completion to prevent relaunch. A uniquely
 correlated completed cloud task frees execution capacity while its PR awaits
-review; it does not satisfy a merged-PR dependency. Missing, ambiguous, active or
+review or after it is closed without merging. Closed-unmerged work stays failed,
+retains its claim, and never satisfies a prerequisite. Missing, ambiguous, active or
 inaccessible task telemetry retains capacity and reports why. A draft PR alone
 is not proof that a session has finished.
 An explicitly approved `kind: "review"` task can depend on completed sessions

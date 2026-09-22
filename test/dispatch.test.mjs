@@ -224,6 +224,38 @@ test("a draft PR alone, missing telemetry or a resumed session never frees capac
   }
 });
 
+test("closing completed trial work frees its slot without erasing claims or releasing unmerged dependencies", async () => {
+  const fixture = githubFixture();
+  await dispatch(fixture.client, config({ maxActive: 1 }));
+  fixture.pulls.set(1, { id: 1001, number: 101, state: "closed", merged_at: null, user: { login: "Copilot" } });
+  fixture.cloudTasks.push({ id: "finished-task", state: "completed", custom_agent: { id: "crewbie-developer" }, artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+  const work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.equal(work[0].pull?.number, 101, "The closing PR is still correlated.");
+  assert.equal(fixture.assignments.length, 2, "The independent next task must be able to start after verified completion.");
+  assert.equal(work[0].state, "failed", "Closed-unmerged work is not completed implementation.");
+  assert.equal(work[0].sessionComplete, true);
+  assert.ok(fixture.claims.has(1), "Keep the historical launch claim.");
+  assert.ok(!fixture.claims.has(2), "An unmerged prerequisite still blocks its dependent.");
+});
+
+test("closed PRs with active or unverified native sessions keep their capacity reservation", async () => {
+  for (const mode of ["active", "missing", "denied", "ambiguous"]) {
+    const fixture = githubFixture();
+    await dispatch(fixture.client, config({ maxActive: 1 }));
+    fixture.issues[0].state = "closed";
+    fixture.pulls.set(1, { id: 1001, number: 101, state: "closed", merged_at: null, user: { login: "Copilot" } });
+    if (mode === "active") fixture.cloudTasks.push({ id: "active-task", state: "in_progress", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+    if (mode === "ambiguous") {
+      for (const id of ["finished-a", "finished-b"]) fixture.cloudTasks.push({ id, state: "completed", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+    }
+    fixture.cloudStatusDenied = mode === "denied";
+    const work = await dispatch(fixture.client, config({ maxActive: 1 }));
+    assert.equal(fixture.assignments.length, 1, mode);
+    assert.equal(work[0].sessionComplete, false);
+    assert.match(work[0].reason, /capacity stays reserved/);
+  }
+});
+
 test("terminal cloud failures stop watched work without relaunching or satisfying review prerequisites", async () => {
   for (const state of ["failed", "timed_out", "cancelled"]) {
     const input = batch();

@@ -149,7 +149,6 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
       state = "blocked"; reason = "Launch was claimed but neither Copilot assignment nor a linked PR is visible. Inspect the outcome before retrying.";
     }
     if (pr?.merged_at) { state = "done"; reason = "Linked Copilot PR merged."; }
-    else if (pr?.state === "closed" || issue.state === "closed") { state = "failed"; reason = "Closed without a merged prerequisite PR."; }
     else if (pr) {
       telemetry ??= cloudTasks(client, config.repository);
       const snapshot = await telemetry;
@@ -165,6 +164,10 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
       reason = sessionComplete ? "Cloud task completed; linked PR awaits human review."
         : failed ? `Cloud task ${String(nativeTask?.state)}; inspect its saved work before an explicitly authorized continuation.`
         : snapshot.warning ?? "Linked PR exists, but its cloud session is active or unverified; capacity remains reserved.";
+    }
+    if (!pr?.merged_at && (pr?.state === "closed" || issue.state === "closed")) {
+      state = "failed";
+      reason = `Closed without a merged prerequisite PR.${claim && !sessionComplete ? " Native completion remains unverified or unsuccessful; capacity stays reserved." : ""}`;
     }
     const role = config.roles.find((role) => role.id === metadata.task.owner);
     if (!claim && (!role || role.model !== metadata.task.model)) { state = "blocked"; reason = "Owner/model policy changed; reapproval required."; }
@@ -248,7 +251,7 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, s
   const selected = eligible(work, config.maxActive, scope?.batch?.id);
   for (const item of scoped) {
     await setStatus(client, config.repository, item.issue, item.state);
-    if (item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {
+    if (item.state === "review" && item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {
       await attributePull(client, config, item.pull, item.nativeTask, item.metadata.task.owner, item.metadata.task.model, integer(item.issue.number, "execution issue"));
     }
   }
