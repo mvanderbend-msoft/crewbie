@@ -66,7 +66,7 @@ PR. A missing entitlement or permission is an error, not a token/runtime fallbac
 | Capability | Personal repository | Organization repository | Verified here |
 |---|---|---|---|
 | Local onboarding/specification | Supported | Supported | Local CLI and fixtures |
-| Ready-label issue planning | Opt-in Actions CLI; eligible Copilot seat | Opt-in Actions CLI; organization billing policy | Authorization, source binding, proposal publication and workflow fixtures; no new paid live intake run claimed |
+| Ready-label issue planning | Opt-in Actions CLI; eligible Copilot seat | Opt-in Actions CLI; organization billing policy | Live private Java/React intake passed prepare/analyze/publish with the coordinator charter/history, proposing five tasks across four specialists |
 | Approve-and-merge execution | Supported user-authorized assignment credential required | Credential plus repository/organization policy | Exact-head review/merge provenance, team materialization, publication and recovery fixtures; live webshop validation pending |
 | Native custom-agent assignment | Requires eligible account/repo and user auth | Requires eligible account/policy and user auth | Named backend, frontend, tester and reviewer sessions in a private Java/React repository; native IDs confirmed |
 | Model selection | Requested explicitly; entitlement varies | Requested explicitly; policy varies | `gpt-5.4` confirmed in native session metadata; no universal model guarantee |
@@ -78,6 +78,14 @@ PR. A missing entitlement or permission is an error, not a token/runtime fallbac
 Run `crewbie doctor --repo owner/name --agent crewbie-developer --model MODEL`
 for read-only discovery. It does not prove live assignment, model selection, or
 memory use. Keep those limitations visible when evaluating an account.
+
+The ready-label trial exposed two separate permission requirements: planning
+preparation/publication need `actions: read` to verify their run provenance, and
+the user credential needs Agent tasks read access to reconcile native sessions.
+After both were corrected, hosted planning published a reviewable PR and hosted
+dispatch verified all four historical completed sessions without deleting claims.
+The planning PR remains subject to human approval and merge; that result alone
+does not establish live merge-triggered assignment.
 
 The 2026-09-22 live smoke test used one cloud task in a private synthetic repository.
 The completed task reported the selected specialist and one session. Its PR
