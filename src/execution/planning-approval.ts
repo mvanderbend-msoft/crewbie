@@ -115,14 +115,30 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   if (!["ahead", "identical"].includes(String(compare.status)) || record(compare.merge_base_commit, "merge base").sha !== mergeSha) throw new Error("The approved planning merge is no longer on the default branch.");
   const files = await client.list(`${prefix}/pulls/${number}/files`);
   const expected = new Set([...Object.keys(manifest.files), manifestPath]);
-  if (files.length !== expected.size || pr.changed_files !== files.length || new Set(files.map((file) => file.filename)).size !== files.length) throw new Error("Planning PR file coverage is incomplete or differs from the approved manifest.");
-  const contents = new Map<string, string>();
-  for (const file of files) {
-    const path = string(file.filename, "changed file");
-    if (!expected.has(path) || (path !== manifestPath && !allowedFile(path, directory, config))
+  const changed = new Map(files.map((file) => [string(file.filename, "changed file"), file]));
+  if (files.length > expected.size || pr.changed_files !== files.length || changed.size !== files.length
+    || !changed.has(manifestPath)) throw new Error("Planning PR file coverage is incomplete or differs from the approved manifest.");
+  for (const [path, file] of changed) {
+    if (!expected.has(path)
       || !["added", "modified"].includes(String(file.status)) || file.previous_filename !== undefined) throw new Error(`Planning PR contains an unapproved change: ${path}`);
+  }
+  const contents = new Map<string, string>();
+  for (const path of expected) {
+    if (path !== manifestPath && !allowedFile(path, directory, config)) throw new Error(`Planning manifest contains an unapproved file: ${path}`);
     const approved = path === manifestPath ? manifestFile : await repoText(client, config.repository, path, headSha);
-    if (approved.sha !== file.sha) throw new Error(`Planning file is not the reviewed regular blob: ${path}`);
+    const file = changed.get(path);
+    if (file) {
+      if (approved.sha !== file.sha) throw new Error(`Planning file is not the reviewed regular blob: ${path}`);
+    } else {
+      // GitHub omits unchanged files from the PR diff, not from the reviewed manifest.
+      let prior: { content: string; sha: string };
+      try { prior = await repoText(client, config.repository, path, manifest.baseSha); }
+      catch (error) {
+        if (error instanceof GitHubError && error.status === 404) throw new Error(`Planning PR file coverage omits a missing file: ${path}`);
+        throw error;
+      }
+      if (prior.sha !== approved.sha) throw new Error(`Planning PR file coverage omits a changed file: ${path}`);
+    }
     const fingerprint = textHash(approved.content);
     if (path !== manifestPath && fingerprint !== manifest.files[path]) throw new Error(`Planning file changed after generation: ${path}. Regenerate the plan and review the new head.`);
     for (const revision of new Set([mergeSha, currentSha])) {

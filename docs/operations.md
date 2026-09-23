@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.8 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.9 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -411,6 +411,9 @@ untrusted PR-head code with assignment credentials. It independently verifies:
   human change requests do not qualify.
 - The complete allowed file set, unchanged contents across reviewed head, merge
   commit and current default branch, and the unchanged source-issue requirements.
+  A regenerated plan can reuse identical setup, plan or batch files: these remain
+  in the manifest even when GitHub omits them from the PR diff. Every omitted file
+  must also match the recorded planning base; it is not exempt from content checks.
 
 After authorization, it publishes task issues with specialist/model ownership,
 records their planning-PR approval provenance and explicitly requests the normal

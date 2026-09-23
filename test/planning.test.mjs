@@ -106,7 +106,8 @@ async function planningFixture(t, automatic = false) {
     state.snapshots.set("b".repeat(40), { ...files });
     state.snapshots.set("c".repeat(40), { ...files });
     state.sha = "c".repeat(40);
-    state.diff = state.tree.map((entry) => ({ filename: entry.path, status: baseFiles[entry.path] === undefined ? "added" : "modified", sha: blob(entry.content) }));
+    state.diff = state.tree.filter((entry) => baseFiles[entry.path] !== entry.content)
+      .map((entry) => ({ filename: entry.path, status: baseFiles[entry.path] === undefined ? "added" : "modified", sha: blob(entry.content) }));
     const pull = state.pulls[0];
     Object.assign(pull, { number: 13, merged: true, state: "closed", draft: false, merge_commit_sha: state.sha, merged_at: "2026-09-22T10:05:00Z", merged_by: sender, changed_files: state.diff.length, base: { ref: "main", repo: { full_name: cfg.repository } } });
     pull.head.sha = "b".repeat(40);
@@ -287,7 +288,7 @@ test("description budgets are checked before remote writes and replacing roles c
   assert.throws(() => parsePlan({ ...f.candidate, roles }, config({ roles: Array.from({ length: 8 }, (_, i) => ({ ...role, id: `old-${i}` })) }), f.state.source), /four additional roles/);
 });
 
-async function mergedFixture(t) {
+async function mergedFixture(t, unchangedPaths = []) {
   const f = await planningFixture(t, true);
   const frontend = { id: "frontend", purpose: "Own the catalogue UI.", model: "approved-model", checks: ["Check progressive loading and explicit retry."], nonNegotiables: ["Preserve loaded cards on failure."] };
   f.candidate.roles = [...f.cfg.roles, frontend];
@@ -295,6 +296,9 @@ async function mergedFixture(t) {
   await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
   await f.output();
   await publishPlanning(f.root, f.client, f.cfg);
+  for (const path of unchangedPaths) {
+    f.state.snapshots.get(f.state.sha)[path] = f.state.tree.find((entry) => entry.path === path).content;
+  }
   const active = f.merge();
   f.state.writes = [];
   return { ...f, active };
@@ -311,6 +315,95 @@ test("merge-enabled planning materializes team files and verifies the exact huma
   assert.equal(proof.approver, "maintainer");
   assert.equal(proof.batch.tasks[0].owner, "frontend");
   assert.equal(f.state.writes.length, 0, "Authorization is read-only.");
+});
+
+test("merge execution accepts an unchanged setup listed in the manifest but absent from the PR diff", async (t) => {
+  const path = ".crewbie/plans/issue-12/setup.json";
+  const f = await mergedFixture(t, [path]);
+  const manifest = JSON.parse(f.state.snapshots.get("b".repeat(40))[".crewbie/plans/issue-12/execution.json"]);
+  assert.ok(manifest.files[path]);
+  assert.ok(!f.state.diff.some((file) => file.filename === path));
+  assert.equal(Object.keys(manifest.files).length + 1, f.state.diff.length + 1);
+  const proof = await approvedMergedPlan(f.client, f.active, 13);
+  assert.equal(proof.batch.approval.execute, true);
+  assert.equal(f.state.writes.length, 0);
+});
+
+test("unchanged plan and batch contents remain verified and available for publication", async (t) => {
+  const f = await mergedFixture(t, ["setup.json", "plan.md", "batch.json"].map((name) => `.crewbie/plans/issue-12/${name}`));
+  assert.match(await releaseMergedPlan(f.client, f.active, 13), /dispatch requested/);
+  assert.equal(f.state.executionIssues.length, 1);
+  assert.equal(f.state.dispatches, 1);
+});
+
+test("manifest files omitted from the PR diff must exist unchanged at the planning base", async (t) => {
+  const path = ".crewbie/plans/issue-12/setup.json";
+  const f = await mergedFixture(t, [path]);
+  const base = f.state.snapshots.get(f.state.run.head_sha);
+  const saved = base[path];
+  base[path] += " ";
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /file coverage/);
+  delete base[path];
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /file coverage/);
+  base[path] = saved;
+  const head = f.state.snapshots.get("b".repeat(40));
+  base[path] = head[path] = `${saved} `;
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /changed after generation/);
+  assert.equal(f.state.writes.length, 0);
+});
+
+test("unchanged manifest files cannot change at merge or on the current default branch", async (t) => {
+  const path = ".crewbie/plans/issue-12/setup.json";
+  const f = await mergedFixture(t, [path]);
+  const merged = f.state.snapshots.get("c".repeat(40));
+  const saved = merged[path];
+  merged[path] += " ";
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /changed at merge or afterwards/);
+  merged[path] = saved;
+  f.state.sha = "d".repeat(40);
+  f.state.snapshots.set(f.state.sha, { ...merged, [path]: `${saved} ` });
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /changed at merge or afterwards/);
+  assert.equal(f.state.writes.length, 0);
+});
+
+test("unchanged manifest entries cannot authorize unrelated files", async (t) => {
+  const f = await mergedFixture(t);
+  const manifestPath = ".crewbie/plans/issue-12/execution.json";
+  const path = ".github/workflows/unsafe.yml";
+  const content = "name: Unrelated workflow\n";
+  const head = f.state.snapshots.get("b".repeat(40));
+  const manifest = JSON.parse(head[manifestPath]);
+  manifest.files[path] = hash(content);
+  for (const revision of [f.state.run.head_sha, "b".repeat(40), "c".repeat(40)]) {
+    f.state.snapshots.get(revision)[path] = content;
+  }
+  for (const revision of ["b".repeat(40), "c".repeat(40)]) {
+    f.state.snapshots.get(revision)[manifestPath] = JSON.stringify(manifest);
+  }
+  f.state.diff.find((file) => file.filename === manifestPath).sha =
+    (await f.client.request("GET", `/repos/example/project/contents/${manifestPath}?ref=${"b".repeat(40)}`)).sha;
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /unapproved/);
+  assert.equal(f.state.writes.length, 0);
+});
+
+test("missing, duplicate, renamed and removed PR diff entries cannot authorize execution", async (t) => {
+  const f = await mergedFixture(t);
+  const original = structuredClone(f.state.diff);
+  for (const diff of [
+    original.slice(1),
+    original.filter((file) => !file.filename.endsWith("execution.json")),
+    [original[0], ...original.slice(0, -1)],
+    original.map((file, index) => index === 0 ? { ...file, status: "removed" } : file),
+    original.map((file, index) => index === 0 ? { ...file, previous_filename: "other.json" } : file),
+  ]) {
+    f.state.diff = diff;
+    f.state.pulls[0].changed_files = diff.length;
+    await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /file coverage|unapproved change/);
+  }
+  f.state.diff = original.slice(1);
+  f.state.pulls[0].changed_files = original.length;
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /file coverage/);
+  assert.equal(f.state.writes.length, 0);
 });
 
 test("approved merge automatically publishes specialist issues, records provenance and requests guarded dispatch idempotently", async (t) => {
