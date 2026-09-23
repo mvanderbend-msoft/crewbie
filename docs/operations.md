@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.5 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.6 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -201,8 +201,21 @@ headers and URLs are withheld. Servers are not started or connectivity-tested.
 Personal/global and ignored settings are not read. MCP configuration changes
 remain recommendations for manual review, not automatic credential-bearing edits.
 
-The LLM runs tool-free in a temporary working directory and isolated
-`COPILOT_HOME`, using environment credentials or authenticated GitHub CLI.
+Interactive init discovers the account's enabled model catalogue through the
+official Copilot SDK and presents numbered choices with IDs and available billing
+multipliers. Invalid selections reprompt; `q` cancels. Discovery failure stops
+with an error rather than inventing model choices. An explicit `--model MODEL`
+bypasses discovery, but still requires model entitlement when assessment runs.
+
+The LLM runs through the SDK's bundled runtime over shell-free stdio, tool-free
+in a temporary working directory and isolated `COPILOT_HOME`, using environment
+credentials or authenticated GitHub CLI. Runtime configuration discovery, skills,
+file hooks, git context and shared session storage are disabled; tool permissions
+are denied. Init waits for a completed assistant response rather than parsing
+process stdout. Startup/model discovery have 30-second timeouts and assessment
+has a five-minute timeout. Empty or malformed JSON produces an explicit error;
+check authentication/model access for runtime errors, or retry/narrow the context
+for incomplete output.
 No fallback roster is installed if analysis fails. `--assessment-only` keeps the
 offline inventory path explicit. Greenfield setup requires a description or
 requirements in the repository; interactive clarification repeats, while
@@ -639,7 +652,9 @@ external scripts, fonts, network access or storage.
 `npm test` builds strict TypeScript and exercises CLI installation/approval,
 request contracts, dependencies, retry claims, memory, ADO, maintenance safety,
 workflow YAML, and the dashboard's interactive DOM. CI is configured for current
-Node 22 on Windows, macOS and Linux.
+Node 22.12+ on Windows, macOS and Linux. Onboarding transport also exercises the
+bundled SDK runtime against a loopback-only synthetic provider without paid model
+calls.
 
 Before broader release, run a consenting personal/organization account matrix:
 select the actual profile/model, inspect memory-read attestations and issue/PR

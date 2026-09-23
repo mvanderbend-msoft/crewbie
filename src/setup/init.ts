@@ -7,6 +7,7 @@ import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
 import { applyInstallation, installation } from "./install.js";
 import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
+import { listCopilotModels, type ModelChoice } from "./copilot.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
@@ -16,6 +17,7 @@ interface InitOptions {
 interface InitIO {
   client: () => GitHubApi;
   analyze?: Analyze;
+  listModels?: () => Promise<ModelChoice[]>;
   ask?: (question: string) => Promise<string>;
   report?: (text: string) => void;
 }
@@ -82,7 +84,20 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       report(json(assessment));
       return;
     }
-    const model = options.model ?? (ask ? (await ask("Which explicit Copilot model should assess this project and run new specialists?")).trim() : "");
+    let model = options.model ?? "";
+    if (!model && ask) {
+      const models = await (io.listModels ?? listCopilotModels)();
+      if (!models.length) throw new Error("No available models were returned. Check Copilot access before onboarding.");
+      report("Choose a Copilot model for this assessment and new specialists:\n" + models.map((choice, index) =>
+        `${index + 1}. ${choice.name} (${choice.id})${choice.multiplier === undefined ? "" : ` - ${choice.multiplier}x billing multiplier`}`).join("\n"));
+      while (!model) {
+        const selected = (await ask("Enter a model number or an exact model ID from the list (q to cancel).")).trim();
+        if (selected.toLowerCase() === "q") throw new Error("Setup cancelled before analysis. No files or labels were changed.");
+        const choice = /^\d+$/.test(selected) ? models[Number(selected) - 1] : models.find((item) => item.id === selected);
+        if (choice) model = choice.id;
+        else report("Invalid choice. Select one of the listed models.");
+      }
+    }
     if (!model) throw new Error("Use --model MODEL for LLM onboarding, or --assessment-only for offline inventory.");
     let description = options.description ?? "";
     if (!description && assessment.inventory.mode === "greenfield" && ask) {

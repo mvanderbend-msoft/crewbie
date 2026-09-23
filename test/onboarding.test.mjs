@@ -1,9 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { assess } from "../dist/setup/assessment.js";
 import { parseSetupReview, proposeSetup, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
 import { initCommand, installSetup } from "../dist/setup/init.js";
@@ -124,6 +122,12 @@ test("incomplete assessment, invented context and generic team output are reject
   await assert.rejects(proposeSetup(report, "", "chosen-model", { analyze: async () => { throw new Error("Provider unavailable"); }, report() {} }), /Provider unavailable/);
 });
 
+test("empty and truncated Copilot responses produce actionable errors, not raw JSON exceptions", async (t) => {
+  const report = await assess(await fixture(t));
+  assert.throws(() => parseSetupReview("", report, "Catalogue", "chosen-model"), /Copilot returned no assessment/);
+  assert.throws(() => parseSetupReview('{"summary":', report, "Catalogue", "chosen-model"), /incomplete or invalid JSON/);
+});
+
 test("reassessment preserves existing models, approvals and policy; retirement is explicit", async (t) => {
   const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config({ maxActive: 1 })) });
   const report = await assess(root);
@@ -237,47 +241,50 @@ test("new custom-agent guidance changes are hash-checked and generated-profile c
   await assert.rejects(installation(root, proposal), /Unsupported instruction path/);
 });
 
-test("real init CLI invokes isolated tool-free Copilot transport and persists its domain team", async (t) => {
+test("interactive model menu uses live choices and reprompts invalid entries", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" });
   const assessment = await assess(root);
-  const fakeScript = `import { readFileSync, existsSync, realpathSync } from "node:fs";
-import assert from "node:assert/strict";
-import { basename, dirname } from "node:path";
-process.chdir(realpathSync(process.cwd()));
-const prompt = readFileSync(0, "utf8");
-assert.match(prompt, /smallest useful implementation crew/);
-assert.match(prompt, /src\\/catalogue.ts/);
-assert.ok(process.argv.includes("--available-tools"));
-assert.ok(process.argv.includes("--no-custom-instructions"));
-assert.ok(process.argv.includes("--no-ask-user"));
-assert.equal(process.env.COPILOT_ALLOW_ALL, "false");
-assert.equal(process.env.COPILOT_PROVIDER_BASE_URL, undefined);
-assert.equal(realpathSync(dirname(process.env.COPILOT_HOME)), realpathSync(process.cwd()));
-assert.equal(basename(process.env.COPILOT_HOME), "config");
-assert.ok(!existsSync("src"));
-console.log(${JSON.stringify(JSON.stringify(response(assessment)))});
-`;
-  const tools = await fixture(t, {
-    "fake-copilot.mjs": fakeScript,
-    "copilot.cmd": `@"${process.execPath}" "%~dp0fake-copilot.mjs" %*\r\n`,
-    "copilot": `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/fake-copilot.mjs" "$@"\n`,
+  const answers = ["auto", "99", "2", "save"], reports = [];
+  let discovery = 0;
+  await initCommand(root, {}, {
+    client() { throw new Error("No GitHub writes"); },
+    listModels: async () => { discovery++; return [{ id: "first", name: "First model" }, { id: "second", name: "Second model", multiplier: 2 }]; },
+    ask: async () => { assert.ok(answers.length); return answers.shift(); },
+    report: (text) => reports.push(text),
+    analyze: async (_prompt, model) => { assert.equal(model, "second"); return JSON.stringify(response(assessment)); },
   });
-  if (process.platform !== "win32") {
-    const { chmod } = await import("node:fs/promises");
-    await chmod(join(tools, "copilot"), 0o755);
+  assert.equal(discovery, 1);
+  assert.match(reports[0], /1\. First model \(first\)[\s\S]*2\. Second model \(second\).*2x/);
+  assert.equal(reports.filter((text) => /Invalid choice/.test(text)).length, 2);
+  const proposal = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.equal(proposal.config.roles[0].model, "second");
+});
+
+test("explicit model and offline inventory bypass model discovery", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" });
+  const assessment = await assess(root);
+  const io = {
+    client() { throw new Error("No GitHub writes"); },
+    listModels() { throw new Error("Must not discover models"); },
+    report() {},
+    analyze: async (_prompt, model) => { assert.equal(model, "explicit-model"); return JSON.stringify(response(assessment)); },
+  };
+  await initCommand(root, { model: "explicit-model" }, io);
+  await initCommand(root, { "assessment-only": true }, { ...io, analyze() { throw new Error("Offline"); }, ask() { throw new Error("Offline"); } });
+});
+
+test("model discovery failure, empty catalogue and cancellation do not create a proposal", async (t) => {
+  for (const [listModels, answer, expected] of [
+    [async () => { throw new Error("Discovery unavailable"); }, "", /Discovery unavailable/],
+    [async () => [], "", /No available models/],
+    [async () => [{ id: "chosen", name: "Chosen" }], "q", /Setup cancelled/],
+  ]) {
+    const root = await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" });
+    await assert.rejects(initCommand(root, {}, {
+      listModels, ask: async () => answer, report() {},
+      analyze() { throw new Error("Must not assess"); },
+      client() { throw new Error("Must not write"); },
+    }), expected);
+    await assert.rejects(readFile(join(root, "crewbie-setup.json")), /ENOENT/);
   }
-  await mkdir(join(tools, "temp-real"));
-  const tempAlias = join(tools, "temp-alias");
-  await symlink(join(tools, "temp-real"), tempAlias, process.platform === "win32" ? "junction" : "dir");
-  const env = { ...process.env, TEMP: tempAlias, TMP: tempAlias, TMPDIR: tempAlias, GH_TOKEN: "fixture-only", COPILOT_GITHUB_TOKEN: "fixture-only", COPILOT_ALLOW_ALL: "true", COPILOT_PROVIDER_BASE_URL: "http://must-not-use.invalid" };
-  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
-  env[pathKey] = `${tools}${process.platform === "win32" ? ";" : ":"}${env[pathKey]}`;
-  const result = spawnSync(process.execPath, [
-    fileURLToPath(new URL("../dist/cli.js", import.meta.url)), "init", "--path", root,
-    "--model", "chosen-model", "--out", "proposal.json",
-  ], { env, encoding: "utf8", timeout: 30_000 });
-  assert.equal(result.status, 0, result.stderr);
-  const proposal = JSON.parse(await readFile(join(root, "proposal.json"), "utf8"));
-  assert.deepEqual(proposal.config.roles.map((role) => role.id), ["catalogue"]);
-  await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
 });

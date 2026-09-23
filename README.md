@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/mvanderbend-msoft/crewbie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mvanderbend-msoft/crewbie/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mvanderbend-msoft/crewbie?include_prereleases&color=b11f4b)](https://github.com/mvanderbend-msoft/crewbie/releases)
-[![Node.js](https://img.shields.io/badge/Node.js-22%2B-43853d)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22.12%2B-43853d)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [Quick start](#quick-start) &nbsp; / &nbsp;
@@ -61,12 +61,13 @@ you must adopt before writing code.
 
 ### 1. Install the alpha
 
-You need **Node.js 22+**, **Git**, an authenticated **GitHub CLI**, and **Copilot CLI**
-for local assessment. Cloud execution also needs an eligible Copilot account
-and repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
+You need **Node.js 22.12+**, **Git**, an authenticated **GitHub CLI**, and an eligible
+**Copilot account**. Local assessment uses the bundled official Copilot SDK runtime;
+a separate Copilot CLI installation is not required for init. Cloud execution also
+needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.5/crewbie-cli-0.1.0-alpha.5.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.6/crewbie-cli-0.1.0-alpha.6.tgz
 gh auth login
 ```
 
@@ -79,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.5.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.6.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -93,7 +94,12 @@ Crewbie source repository:
 crewbie init
 ```
 
-Init asks for an explicit model, then uses Copilot CLI to assess existing
+Init presents a numbered list of models available to your account, with names,
+IDs and billing multipliers when supplied by Copilot. Choose a number or an exact
+listed ID; invalid choices are reprompted, and `q` cancels. `--model MODEL` bypasses
+discovery for scripted use; `auto` is not supported.
+
+Init then uses the Copilot SDK to assess existing
 instructions, custom agents, MCP configuration metadata, decisions and project
 code. It shows a summary, per-file findings, coverage limitations and an
 LLM-generated team with domain checks. Static stack detection is evidence, not
@@ -112,7 +118,10 @@ Analysis may consume AI credits. It runs tool-free in an isolated working/config
 directory, authenticating through `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`,
 `GITHUB_TOKEN`, or `gh auth login`. It does not run repository scripts or MCP
 servers. Personal/global MCP configuration is outside the assessment.
-Use `--assessment-only` for an explicitly offline inventory instead.
+The SDK uses shell-free stdio and waits for a completed assistant response;
+empty or malformed JSON stops onboarding with an actionable error instead of
+installing a fallback team. Use `--assessment-only` for an explicitly offline
+inventory instead; it does not discover models or contact Copilot.
 
 ### 3. Scripted preview and installation
 
