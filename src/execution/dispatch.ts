@@ -20,6 +20,21 @@ export interface Work {
   pull?: Record<string, unknown>;
   nativeTask?: Record<string, unknown>;
 }
+export function renderDispatchResult(work: Work[], config: Config): string {
+  if (!work.length) return [
+    "# Crewbie dispatch", "",
+    "No managed implementation tasks were found. No agents were started.", "",
+    "`crewbie:ready-for-planning` requests a plan; it is not an implementation task or execution approval.",
+    config.planning?.enabled
+      ? "Hosted planning is enabled. Check the separate Crewbie planning workflow for labelled requirement issues, then review its plan before approving implementation."
+      : "Hosted planning is disabled. Enable it explicitly through reviewed init (including its generated workflow), commit the setup, then reapply the ready-for-planning label to request a potentially billable plan.",
+    "Alternatively, approve and publish an implementation batch with the local coordinator. Dispatch acts only on managed tasks with current human execution approval.",
+  ].join("\n");
+  const cell = (text: string) => text.replaceAll("|", "\\|").replace(/\r?\n/g, " ");
+  return ["# Crewbie dispatch", "", `Reconciled ${work.length} managed task(s). Reconciliation does not imply every task started.`, "",
+    "| Issue | State | Explanation |", "| --- | --- | --- |",
+    ...work.map((item) => `| #${item.issue.number} | ${item.state} | ${cell(item.reason)} |`)].join("\n");
+}
 export async function cloudTasks(client: GitHubApi, repo: string): Promise<{ tasks: Record<string, unknown>[]; warning: string | null }> {
   const tasks: Record<string, unknown>[] = [];
   const ids = new Set<string>();

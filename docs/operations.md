@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.7 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.8 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -175,6 +175,26 @@ readiness. Application and learning PRs remained unmerged.
 
 ## Evolving the team
 
+Onboarding prefers adopting existing frontend, backend, testing and review
+specialists rather than replacing their ownership with invented combined roles.
+Each eligible original gets an explicit adopt/retain decision and rationale.
+`maxActive` is a concurrency limit, not a roster-size target.
+
+An adopted role records `sourceAgent` in configuration. Its original moves from
+`.github/agents/NAME.agent.md` to
+`.crewbie/agent-archive/github/agents/NAME.agent.md` (or the corresponding `claude`
+archive). The new active profile is `.github/agents/crewbie-ROLE.agent.md`.
+The archive preserves the complete original bytes; the active profile requires
+reading that charter before work, retains frontmatter tool restrictions, and
+adds Crewbie memory, identity and handoff rules. Known adopted-agent handoffs are
+retargeted. The selected model governs the active profile. Unsupported tool
+metadata requires manual review rather than silently widening permissions.
+
+Archival requires the exact inspected source hash, rejects conflicting archives
+or edited originals, and is idempotent. Archives are written before originals
+are removed. Installation previews name both actions. Adding these adoptions is
+an init operation, not a planning PR's authority to retire original agents.
+
 The approved configuration is the current roster, not a permanent template.
 `init` on an installed repository and `init --update --model MODEL --out team-review.json`
 reassess the current project without resetting its models, approvers, limits,
@@ -191,6 +211,15 @@ feature's domain and can propose custom roles, splits, specialization or
 retirement. Review proposed purpose, checks, non-negotiables and models before
 applying. New roles use the explicitly selected init model, subject to setup review.
 Existing roles and their domain guidance remain intact unless explicitly edited.
+
+Init writes a readable Markdown assessment next to its setup JSON. The terminal
+keeps the overview short; the report contains detailed findings, adoption
+decisions, coverage limits and concrete replacement text for guidance edits.
+Advisory recommendations and unresolved policy decisions are not executable
+changes. If `instructions` is empty and no constitution is proposed, choosing
+guidance application cannot modify existing instruction files; init states this
+explicitly. Skipping guidance preserves those proposals for later review.
+Use `init --proposal FILE --json` for the machine-readable installation preview.
 
 Init includes every inventoried instruction, custom-agent and MCP configuration
 path in its assessment. Text inspection has a 256 KB total/64 KB per-file budget
@@ -254,6 +283,20 @@ open work and reapprove any changed task ownership before retiring a role.
 New roles do not silently expand nightly instruction-edit permissions.
 
 ## Ready-label issue intake
+
+Interactive init asks for explicit hosted-planning opt-in. Existing enabled
+planning settings are preserved; automatic execution on merge is not enabled by
+this prompt. Commit both the approved configuration and regenerated planning
+workflow before using the label.
+
+**A successful dispatch run is not evidence that an agent started.** Dispatch
+reconciles published managed implementation tasks, while
+`crewbie:ready-for-planning` belongs to the separate planning workflow. With no
+managed tasks, dispatch reports that no agents started and explains whether
+planning is enabled, in both logs and the Actions job summary. If planning is
+disabled, explicitly enable it through reviewed init, commit the resulting setup,
+then remove/reapply the ready-for-planning label to request planning. Do not add
+managed labels or bypass human execution approval to force a launch.
 
 The label **`crewbie:ready-for-planning`** is separate from the execution-state
 label `crewbie:ready`. It authorizes coordinator planning, not application work.

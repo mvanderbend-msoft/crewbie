@@ -218,6 +218,17 @@ test("model output supports custom expertise and clarification, but cannot self-
   assert.throws(() => parsePlan({ ...custom, summary: "-----BEGIN PRIVATE KEY-----" }, f.cfg, source), /secret/);
 });
 
+test("planning preserves adopted role identities even when omitted by the model", async (t) => {
+  const f = await planningFixture(t);
+  const cfg = structuredClone(f.cfg);
+  cfg.roles[0].sourceAgent = ".github/agents/developer.agent.md";
+  const source = { ...f.state.source, revision: f.state.source.updated_at, labelEvent: 77 };
+  const plan = parsePlan(f.candidate, cfg, source);
+  assert.equal(plan.roles[0].sourceAgent, cfg.roles[0].sourceAgent);
+  const changed = structuredClone(f.candidate);
+  changed.roles[0].sourceAgent = ".github/agents/other.agent.md";
+  assert.throws(() => parsePlan(changed, cfg, source), /through reviewed init/);
+});
 test("malformed or oversized analysis output cannot write a planning branch", async (t) => {
   const f = await planningFixture(t);
   await preparePlanning(f.root, f.client, f.cfg, f.event);

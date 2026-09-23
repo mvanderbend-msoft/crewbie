@@ -27,7 +27,7 @@ export async function inventory(root: string, paths: string[]): Promise<Inventor
     scope: "Repository-visible files only, bounded to 256 KB of text. Ignored files and personal/global MCP settings are not read. MCP configurations are inspected, never launched; arguments, URLs, headers and credential values are withheld. Builds and server availability are unverified.",
   };
   const mcpPaths = paths.filter((path) => /(^|\/)(?:mcp\.json|mcp-config\.json|\.mcp\.json)$/.test(path) || path === ".vscode/settings.json");
-  const guidance = paths.filter((path) => instructionFile(path) || /(^|\/)(?:constitution\.md|CONTRIBUTING\.md)$|(^|\/)(?:adr|adrs|decisions)\/.*\.md$/i.test(path));
+  const guidance = paths.filter((path) => instructionFile(path) || /^\.crewbie\/agent-archive\/(?:github|claude)\/agents\/.*\.md$/.test(path) || /(^|\/)(?:constitution\.md|CONTRIBUTING\.md)$|(^|\/)(?:adr|adrs|decisions)\/.*\.md$/i.test(path));
   const project = paths.filter((path) => /(^|\/)(?:README\.md|(?:requirements|spec|prd)\.md|package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml)$/i.test(path));
   const candidates = [...new Set([...guidance, ...mcpPaths, ...project, ...implementation.slice(0, 8)])];
   let remaining = 256_000;

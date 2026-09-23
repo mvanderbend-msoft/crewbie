@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { assess } from "../dist/setup/assessment.js";
 import { parseSetupReview, proposeSetup, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
 import { initCommand, installSetup } from "../dist/setup/init.js";
-import { installation, applyInstallation } from "../dist/setup/install.js";
+import { installation, applyInstallation, teamInstallation } from "../dist/setup/install.js";
 import { profile } from "../dist/setup/templates.js";
 import { setupLabels } from "../dist/tracking/issues.js";
 import { config, fixture } from "./helpers.mjs";
@@ -19,6 +19,8 @@ function response(assessment, overrides = {}) {
       ...assessment.inventory.mcp.map((file) => ({ area: "mcp", path: file.path, assessment: "Configured servers; connectivity unverified.", recommendation: "Retain existing integrations." })),
     ],
     questions: [],
+    agentDecisions: assessment.inventory.files.filter((file) => /^(?:\.github|\.claude)\/agents\/(?!crewbie-)/.test(file.path) && !file.redacted)
+      .map((file) => ({ path: file.path, action: "retain", reason: "Keep this existing specialist unchanged." })),
     roles: [{ id: "catalogue", purpose: "Own catalogue ordering and pagination.", checks: ["Verify stable ordering and explicit retry after page failure."], nonNegotiables: ["Retain loaded cards after a later page fails."], contextPaths: assessment.inventory.files.filter((file) => file.kind === "agents").map((file) => file.path) }],
     instructions: [], constitutionText: null, ...overrides,
   };
@@ -162,7 +164,7 @@ test("slow assessment reports elapsed wait and validation without exposing model
     complete(JSON.stringify(response(report)));
     await pending;
   }
-  assert.ok(duringWait.some((message) => /Waiting.*15s/.test(message)));
+  assert.ok(duringWait.some((message) => /analysing.*15s/.test(message)));
   assert.ok(messages.some((message) => /validating/i.test(message)));
   const after = messages.length;
   t.mock.timers.tick(30_000);
@@ -360,22 +362,109 @@ test("interactive init shows assessment and preview before applying team-only ch
   const root = await fixture(t, { "src/catalogue.ts": "export const value = 1;", "AGENTS.md": "Existing guidance." });
   const report = await assess(root);
   const prompts = [], reports = [];
-  const answers = ["team", "yes"];
+  const answers = ["team", "no", "yes"];
   const remote = githubLabels();
   await initCommand(root, { model: "chosen-model", repo: "example/project", approver: ["maintainer"] }, {
     analyze: async () => JSON.stringify(response(report, { instructions: [{ path: "AGENTS.md", content: "Proposed change.", reason: "Clarify scope." }] })),
     ask: async (question) => { prompts.push(question); return answers.shift(); },
     client: () => remote.client, report: (text) => reports.push(text),
   });
-  assert.equal(prompts.length, 2);
-  assert.ok(reports.some((text) => /Use a catalogue specialist/.test(text)));
-  assert.ok(reports.some((text) => /"labels"/.test(text)));
+  assert.equal(prompts.length, 3);
+  assert.ok(reports.some((text) => /Specialist catalogue/.test(text)));
+  assert.ok(reports.some((text) => /workflow and specialist labels/.test(text)));
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Existing guidance.");
   const installed = JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8"));
   assert.deepEqual(installed.roles.map((role) => role.id), ["catalogue"]);
   assert.ok(remote.labels.some((label) => label.name === "crewbie:owner:catalogue"));
 });
 
+test("adopted agents become Crewbie specialists and originals are archived, not duplicated", async (t) => {
+  const sourcePath = ".github/agents/frontend-engineer.agent.md";
+  const original = "---\nname: Frontend Engineer\ntools: [read, search]\n---\nPreserve accessible cart interactions. Keep implementation read-only.\n";
+  const root = await fixture(t, { [sourcePath]: original });
+  const report = await assess(root);
+  const review = response(report, {
+    roles: [{ id: "frontend-engineer", purpose: "Own frontend behavior.", checks: ["Check cart keyboard behavior."],
+      nonNegotiables: ["Keep implementation read-only."], contextPaths: [sourcePath], sourceAgent: sourcePath }],
+    agentDecisions: [{ path: sourcePath, action: "adopt", reason: "Existing frontend expertise matches the project." }],
+  });
+  const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
+  await applyInstallation(root, await installation(root, proposal));
+  assert.equal(await readFile(join(root, ".crewbie/agent-archive/github/agents/frontend-engineer.agent.md"), "utf8"), original);
+  await assert.rejects(readFile(join(root, sourcePath)), /ENOENT/);
+  const charter = await readFile(join(root, ".github/agents/crewbie-frontend-engineer.agent.md"), "utf8");
+  assert.match(charter, /tools:.*read/);
+  assert.doesNotMatch(charter, /\bedit\b|\bexecute\b/);
+  assert.match(charter, /agent-archive\/github\/agents\/frontend-engineer.agent.md/);
+  assert.deepEqual(await installation(root, proposal), []);
+});
+
+test("four existing specialists can be adopted while concurrency stays at two", async (t) => {
+  const ids = ["frontend-engineer", "backend-engineer", "behavior-tester", "release-reviewer"];
+  const files = Object.fromEntries(ids.map((id) => [`.github/agents/${id}.agent.md`,
+    `---\nname: ${id}\ntools: [read, search]\nhandoffs:\n  - agent: backend-engineer\n    label: Backend\n    prompt: Review API contracts.\n---\nKeep the ${id} domain boundaries.\n`]));
+  const root = await fixture(t, files), report = await assess(root);
+  const review = response(report, {
+    roles: ids.map((id) => ({ id, sourceAgent: `.github/agents/${id}.agent.md`, purpose: `Own ${id} work.`,
+      checks: ["Verify the affected domain behavior."], nonNegotiables: ["Preserve existing boundaries."], contextPaths: [] })),
+    agentDecisions: ids.map((id) => ({ path: `.github/agents/${id}.agent.md`, action: "adopt", reason: "Reuse existing expertise." })),
+  });
+  const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
+  assert.equal(proposal.config.maxActive, 2);
+  assert.equal(proposal.config.roles.length, 4);
+  await applyInstallation(root, await installation(root, proposal));
+  assert.match(await readFile(join(root, ".github/agents/crewbie-frontend-engineer.agent.md"), "utf8"), /agent: crewbie-backend-engineer/);
+  const reassessment = await assess(root);
+  const refreshed = parseSetupReview(JSON.stringify(response(reassessment, { roles: proposal.config.roles })), reassessment, "", "another-model");
+  assert.equal(refreshed.config.roles[0].model, "chosen-model");
+  assert.deepEqual(await installation(root, refreshed), []);
+  const planned = structuredClone(refreshed.config);
+  planned.roles[0].purpose = "Own accessible frontend flows.";
+  const filesForPlan = await teamInstallation(root, refreshed.config, planned);
+  assert.match(filesForPlan[".github/agents/crewbie-frontend-engineer.agent.md"], /tools:.*read/);
+  assert.match(filesForPlan[".github/agents/crewbie-frontend-engineer.agent.md"], /agent-archive/);
+  assert.ok(!Object.keys(filesForPlan).some((path) => path.startsWith(".crewbie/agent-archive")));
+});
+
+test("agent adoption refuses edited originals, archive collisions and duplicate ownership", async (t) => {
+  const path = ".github/agents/frontend-engineer.agent.md";
+  const root = await fixture(t, { [path]: "Preserve accessibility." }), report = await assess(root);
+  const review = response(report, {
+    roles: [{ id: "frontend", sourceAgent: path, purpose: "Own frontend behavior.", checks: ["Verify keyboard input."], nonNegotiables: ["Preserve accessibility."], contextPaths: [] }],
+    agentDecisions: [{ path, action: "adopt", reason: "Reuse frontend expertise." }],
+  });
+  const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
+  await writeFile(join(root, path), "A newer human boundary.");
+  await assert.rejects(installation(root, proposal), /Agent changed since assessment/);
+  assert.equal(await readFile(join(root, path), "utf8"), "A newer human boundary.");
+  const conflict = await fixture(t, { [path]: "Preserve accessibility.",
+    ".crewbie/agent-archive/github/agents/frontend-engineer.agent.md": "A different archived original." });
+  await assert.rejects(installation(conflict, proposal), /Agent changed since assessment/);
+  review.roles.push({ ...review.roles[0], id: "another-frontend" });
+  assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "chosen-model"), /only one Crewbie specialist/);
+});
+
+test("agent decisions must match the adopted roster and account for every existing candidate", async (t) => {
+  const root = await fixture(t, { ".github/agents/frontend-engineer.agent.md": "Preserve accessibility." });
+  const report = await assess(root), review = response(report);
+  assert.throws(() => parseSetupReview(JSON.stringify({ ...review, agentDecisions: [] }), report, "", "chosen-model"), /every existing agent/);
+  assert.throws(() => parseSetupReview(JSON.stringify({ ...review, agentDecisions: [{ ...review.agentDecisions[0], action: "adopt" }] }), report, "", "chosen-model"), /does not match/);
+});
+test("init writes a readable assessment and applies the actual approved instruction edits", async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Preserve IDs.", "src/catalogue.ts": "export const pageSize = 20;" });
+  const report = await assess(root), messages = [];
+  await initCommand(root, { model: "chosen-model", "skip-labels": true }, {
+    analyze: async () => JSON.stringify(response(report, { instructions: [{ path: "AGENTS.md", content: "Preserve IDs.\nKeep retries explicit.", reason: "Clarify retry ownership." }] })),
+    ask: async (question) => question.startsWith("Install") ? "all" : question.startsWith("Enable") ? "no" : "yes",
+    report: (message) => messages.push(message), client() { throw new Error("No GitHub writes"); },
+  });
+  assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Preserve IDs.\nKeep retries explicit.");
+  const markdown = await readFile(join(root, "crewbie-setup.md"), "utf8");
+  assert.match(markdown, /# Crewbie assessment/);
+  assert.match(markdown, /Clarify retry ownership/);
+  assert.match(markdown, /AGENTS.md/);
+  assert.ok(messages.every((message) => !message.includes('"after":')));
+});
 test("new custom-agent guidance changes are hash-checked and generated-profile collisions rejected", async (t) => {
   const root = await fixture(t, { ".github/agents/catalogue.agent.md": "Existing catalogue guidance." });
   const report = await assess(root);
@@ -390,6 +479,23 @@ test("new custom-agent guidance changes are hash-checked and generated-profile c
   await assert.rejects(installation(root, proposal), /Unsupported instruction path/);
 });
 
+test("init explicitly opts into hosted planning and does not discard skipped guidance proposals", async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Preserve IDs.", "src/catalogue.ts": "export const pageSize = 20;" });
+  const report = await assess(root);
+  await initCommand(root, { model: "chosen-model", "skip-labels": true }, {
+    analyze: async () => JSON.stringify(response(report, { instructions: [{ path: "AGENTS.md", content: "Preserve IDs.\nKeep retries explicit.", reason: "Clarify retries." }] })),
+    ask: async (question) => question.startsWith("Install") ? "team" : "yes",
+    report() {}, client() { throw new Error("No GitHub writes"); },
+  });
+  const installed = JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8"));
+  assert.deepEqual(installed.planning, { enabled: true, model: "chosen-model", executeOnMerge: false });
+  assert.match(await readFile(join(root, ".github/workflows/crewbie-plan.yml"), "utf8"), /issues:\s+types: \[labeled\]/);
+  assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Preserve IDs.");
+  const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.equal(saved.instructions.length, 1);
+  await installSetup(root, saved, { apply: true, guidance: "apply", skipLabels: true });
+  assert.match(await readFile(join(root, "AGENTS.md"), "utf8"), /Keep retries explicit/);
+});
 test("interactive model menu uses live choices and reprompts invalid entries", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" });
   const assessment = await assess(root);

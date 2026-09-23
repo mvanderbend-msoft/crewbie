@@ -13,7 +13,7 @@ export interface Assessment {
   questions: string[];
   config: Config;
   constitutionText: string | null;
-  instructions: { path: string; content: string; beforeHash: string | null }[];
+  instructions: { path: string; content: string; beforeHash: string | null; reason?: string }[];
   instructionQuality: InstructionQuality;
   configBeforeHash: string | null;
   team: TeamAssessment;

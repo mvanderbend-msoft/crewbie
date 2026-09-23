@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { json, optionalText, readJson, record, safePath, string, writeAtomic } from "../core.js";
+import { json, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
 import { parseConfig } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { requireApprover } from "../tracking/github.js";
@@ -8,11 +8,13 @@ import { assess } from "./assessment.js";
 import { applyInstallation, installation } from "./install.js";
 import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
 import { listCopilotModels, type ModelChoice } from "./copilot.js";
+import { renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
   model?: string; repo?: string; approver?: string[]; description?: string;
   guidance?: string; "assessment-only"?: boolean; "skip-labels"?: boolean;
+  json?: boolean;
 }
 interface InitIO {
   client: () => GitHubApi;
@@ -22,7 +24,7 @@ interface InitIO {
   report?: (text: string) => void;
 }
 
-export async function installSetup(root: string, value: unknown, options: { apply: boolean; guidance: "apply" | "skip"; skipLabels: boolean }, client?: GitHubApi): Promise<string> {
+export async function installSetup(root: string, value: unknown, options: { apply: boolean; guidance: "apply" | "skip"; skipLabels: boolean; json?: boolean }, client?: GitHubApi): Promise<string> {
   const raw = record(value, "setup proposal");
   if (raw.status === "clarification") throw new Error("Answer the setup questions and rerun init before creating a team.");
   const config = parseConfig(raw.config);
@@ -33,7 +35,7 @@ export async function installSetup(root: string, value: unknown, options: { appl
   };
   const changes = await installation(root, proposal);
   const labels = options.skipLabels ? [] : setupLabels(config);
-  if (!options.apply) return json({ files: changes, labels, repository: config.repository }) + "Preview only. Add --apply after reviewing files and GitHub label creation.";
+  if (!options.apply) return options.json ? json({ files: changes, labels, repository: config.repository }) : renderInstallationPreview(changes, labels, config.repository);
   if (!options.skipLabels) {
     if (!config.repository || !config.approvers.length) throw new Error("Set repository and human approvers before creating GitHub labels, or explicitly use --skip-labels for offline setup.");
     if (!client) throw new Error("GitHub authentication is required to create setup labels.");
@@ -46,7 +48,7 @@ export async function installSetup(root: string, value: unknown, options: { appl
       throw new Error(`Local setup was applied, but GitHub labels are incomplete. Rerun the same init --proposal ... --apply command; matching labels are preserved. ${error instanceof Error ? error.message : "Label creation failed."}`);
     }
   }
-  return `Applied ${changes.length} reviewed file changes. ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}`;
+  return `Applied ${changes.length} reviewed file changes (${changes.filter((change) => change.before !== null && change.after !== null).length} existing files updated, ${changes.filter((change) => change.after === null).length} original agents archived). ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}`;
 }
 
 export async function initCommand(root: string, options: InitOptions, io: InitIO): Promise<void> {
@@ -58,18 +60,21 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (options["assessment-only"] && (options.proposal || options.apply || options.guidance)) throw new Error("--assessment-only cannot apply setup or guidance.");
     if (options.proposal) {
       const proposal = record(await readJson(await safePath(root, options.proposal)), "setup proposal");
-      if (proposal.review) {
+      if (proposal.review && !options.json) {
         const review = record(proposal.review, "setup review");
         report(string(review.summary, "assessment summary"));
-        report(json(review.findings));
       }
+      const markdown = setupReportPath(options.proposal);
+      await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
+      if (!options.json) report(`Readable assessment: ${markdown}`);
       const hasGuidance = (Array.isArray(proposal.instructions) && proposal.instructions.length > 0) || proposal.constitutionText;
+      if (!hasGuidance && !options.json) report("No existing guidance edits proposed; recommendations in the assessment are advisory only.");
       let guidance = options.guidance;
       if (options.apply && hasGuidance && !guidance && ask) guidance = (await ask("Apply proposed guidance/constitution too? Enter apply or skip (team only).")).trim();
       if (options.apply && hasGuidance && !guidance) throw new Error("Choose --guidance apply or --guidance skip; guidance changes need a separate decision.");
       if (guidance && !["apply", "skip"].includes(guidance)) throw new Error("Choose apply or skip for guidance.");
       report(await installSetup(root, proposal, {
-        apply: options.apply === true, guidance: guidance === "skip" ? "skip" : "apply", skipLabels: options["skip-labels"] === true,
+        apply: options.apply === true, guidance: guidance === "skip" ? "skip" : "apply", skipLabels: options["skip-labels"] === true, json: options.json === true,
       }, options.apply && !options["skip-labels"] ? io.client() : undefined));
       return;
     }
@@ -106,12 +111,15 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield" && !assessment.inventory.files.some((file) => /(?:README|requirements|spec|prd)/i.test(file.path))) {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
-    report("Assessing repository-visible guidance, MCP configuration and agents with Copilot. This may consume AI credits; no project scripts or MCP servers are executed.");
+    report("I'm analysing your codebase, existing agents and project guidance to put your crew together. This may take a few minutes and consume AI credits. I'll show you the recommendations before changing anything; no project scripts or MCP servers are run.");
     const proposal = await proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
     });
     const output = options.out ?? "crewbie-setup.json";
+    const markdown = setupReportPath(output);
     await writeAtomic(root, output, json(proposal));
+    await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
+    report(`Readable assessment: ${markdown}\nEditable setup: ${output}`);
     if (proposal.status === "clarification") {
       throw new Error(`Setup needs clarification; questions saved in ${output}. Rerun init with an expanded --description. No team was installed.`);
     }
@@ -119,18 +127,29 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       report(`Assessment and tailored team saved to ${output}. Review, then run init --proposal ${output} --apply --guidance apply|skip. GitHub labels are created on apply.`);
       return;
     }
-    const choice = (await ask("Install this proposal? Enter team (skip guidance), all (include guidance/constitution), or save (no installation).")).trim().toLowerCase();
+    const choice = (await ask(`Install this proposal? Enter team (adopt/create agents; skip guidance edits), all (also apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " and the proposed constitution" : ""}), or save (no installation).`)).trim().toLowerCase();
     if (!["team", "all", "save"].includes(choice)) throw new Error(`Unknown choice; proposal saved to ${output}. Nothing installed.`);
     if (choice === "save") return;
+    if (!proposal.config.planning?.enabled) {
+      let planning: string;
+      do { planning = (await ask(`Enable hosted planning from crewbie:ready-for-planning using ${model}? Enter yes or no. This permits paid planning, not automatic implementation.`)).trim().toLowerCase(); }
+      while (!["yes", "no"].includes(planning));
+      if (planning === "yes") proposal.config.planning = { enabled: true, model, executeOnMerge: false };
+      else report("Hosted planning stays disabled. The ready-for-planning label will not create a plan.");
+    }
     if (!proposal.config.repository && !options["skip-labels"]) proposal.config.repository = (await ask("GitHub repository (owner/name) for workflow labels?")).trim();
     if (!proposal.config.approvers.length && !options["skip-labels"]) {
       proposal.config.approvers = (await ask("Human GitHub approver logins, comma-separated?")).split(",").map((login) => login.trim()).filter(Boolean);
     }
     const selected = selectGuidance(proposal, choice === "all");
-    await writeAtomic(root, output, json(selected));
+    await writeAtomic(root, output, json(proposal));
+    await writeAtomic(root, markdown, renderSetupMarkdown(proposal, await installation(root, selected))
+      + `\n## Installation choice\n\n${choice === "all" ? "Team plus the concrete guidance edits listed above." : "Team only. Proposed guidance edits remain in the saved proposal but will not be applied in this run."}\n`);
     report(await installSetup(root, selected, { apply: false, guidance: "apply", skipLabels: options["skip-labels"] === true }));
     if ((await ask("Apply exactly these files and labels? Enter yes to confirm.")).trim().toLowerCase() !== "yes") return;
     report(await installSetup(root, selected, { apply: true, guidance: "apply", skipLabels: options["skip-labels"] === true }, options["skip-labels"] ? undefined : io.client()));
+    proposal.configBeforeHash = textHash(json(selected.config));
+    await writeAtomic(root, output, json(proposal));
   } finally {
     terminal?.close();
   }

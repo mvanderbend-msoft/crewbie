@@ -7,7 +7,7 @@ import { hash, integer, json, optionalText, readJson, record, safePath, string, 
 import { limitsFor, loadConfig } from "./config.js";
 import { probeCapabilities, renderReport } from "./execution/capabilities.js";
 import { githubReader } from "./execution/github.js";
-import { dispatch, eligible, inspectWork } from "./execution/dispatch.js";
+import { dispatch, eligible, inspectWork, renderDispatchResult } from "./execution/dispatch.js";
 import { watchBatch } from "./execution/watch.js";
 import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/review-loop.js";
 import { initCommand } from "./setup/init.js";
@@ -35,6 +35,7 @@ const HELP = `Crewbie: a project-specific AI implementation crew.
                                                  Install reviewed team and GitHub labels
     --skip-labels                                Explicit offline setup; no GitHub writes
   init --proposal setup.json --update             Preview safe managed-file upgrades
+    --json                                       Machine-readable installation preview
   doctor --repo owner/name [--agent stem] [--model id] [--json]
   approve --batch batch.json --yes [--execute]     Approve exact local scope
   publish --batch batch.json [--apply] [--ado-create] [--dispatch-local] [--watch]
@@ -245,7 +246,9 @@ async function main(): Promise<void> {
     const issueNumbers = hints ? hints.split(",").map((value) => integer(Number(value), "confirmed issue number")) : [];
     if (issueNumbers.length > 100) throw new Error("At most 100 confirmed issue IDs can be reconciled at once.");
     const work = await dispatch(github, config, ado, issueNumbers.length ? { issueNumbers } : undefined);
-    console.log(json(work));
+    const summary = renderDispatchResult(work, config);
+    console.log(summary);
+    if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary + "\n");
     if (config.ado) await syncAdo(github, adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? ""), config, work);
   } else if (command === "internal-maintain") {
     if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply, not both.");

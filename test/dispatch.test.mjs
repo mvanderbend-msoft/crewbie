@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, linkedPull } from "../dist/execution/dispatch.js";
+import { dispatch, linkedPull, renderDispatchResult } from "../dist/execution/dispatch.js";
 import { GitHubError } from "../dist/execution/github.js";
 import { approvedBatch, issueBody, issueDigest, parseBatch } from "../dist/specification/batch.js";
 import { watchBatch } from "../dist/execution/watch.js";
@@ -106,6 +106,19 @@ test("end-to-end dispatch requests named specialist/model, respects two slots an
   assert.ok(fixture.claims.has(2));
 });
 
+test("empty dispatch explains disabled planning without assigning or claiming any work", async () => {
+  const fixture = githubFixture();
+  fixture.issues.splice(0);
+  const policy = config({ planning: { enabled: false, model: "", executeOnMerge: false } });
+  const work = await dispatch(fixture.client, policy);
+  assert.deepEqual(work, []);
+  assert.equal(fixture.assignments.length, 0);
+  assert.equal(fixture.claims.size, 0);
+  assert.match(renderDispatchResult(work, policy), /No managed implementation tasks.*No agents were started/);
+  assert.match(renderDispatchResult(work, policy), /Hosted planning is disabled/);
+  assert.match(renderDispatchResult(work, policy), /not an implementation task or execution approval/);
+  assert.match(renderDispatchResult(work, config({ planning: { enabled: true, model: "approved-model" } })), /separate Crewbie planning workflow/);
+});
 test("unknown assignment outcome preserves the claim and releases the dispatcher lock", async () => {
   const fixture = githubFixture();
   fixture.failAssignment = true;

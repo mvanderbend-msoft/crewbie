@@ -1,6 +1,6 @@
 import { readJson, record, string, strings, slug, integer, safePath } from "./core.js";
 
-export interface Role { id: string; purpose: string; model: string; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[] }
+export interface Role { id: string; purpose: string; model: string; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const DEFAULT_LIMITS = { spec: 600, charter: 400, hot: 600, index: 400, decisions: 400, constitution: 600, topic: 1500, pr: 250 };
 export type WordLimits = typeof DEFAULT_LIMITS;
@@ -21,6 +21,11 @@ export function isRoleContextPath(path: string): boolean {
   return /^(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+\.md$/i.test(path)
     && !path.includes("..") && !path.toLowerCase().startsWith(".git/");
 }
+export function isExistingAgentPath(path: string): boolean {
+  return /^(?:\.github\/agents\/[A-Za-z0-9._-]+\.agent\.md|\.claude\/agents\/[A-Za-z0-9._-]+\.md)$/.test(path)
+    && !path.includes("..") && !/\/crewbie-/i.test(path);
+}
+export function agentArchivePath(path: string): string { return `.crewbie/agent-archive/${path.replace(/^\./, "")}`; }
 export function parseConfig(value: unknown): Config {
   const data = record(value, "Configuration");
   if (data.schemaVersion !== 1) throw new Error("Unsupported configuration version.");
@@ -45,9 +50,13 @@ export function parseConfig(value: unknown): Config {
     if (invalidPath !== undefined) {
       throw new Error(`Role ${result.id} contextPaths contains ${JSON.stringify(invalidPath)}; use repository-relative Markdown paths.`);
     }
-    return { ...result, ...guidance };
+    const sourceAgent = role.sourceAgent === undefined ? undefined : string(role.sourceAgent, "source agent");
+    if (sourceAgent !== undefined && !isExistingAgentPath(sourceAgent)) throw new Error(`Unsupported source agent: ${sourceAgent}`);
+    return { ...result, ...guidance, ...(sourceAgent === undefined ? {} : { sourceAgent }) };
   });
   if (new Set(roles.map((role) => role.id)).size !== roles.length) throw new Error("Role IDs must be unique.");
+  const adopted = roles.flatMap((role) => role.sourceAgent ? [role.sourceAgent] : []);
+  if (new Set(adopted).size !== adopted.length) throw new Error("Each existing agent can be adopted by only one Crewbie specialist.");
   const nightly = record(data.nightly, "nightly");
   if (typeof nightly.enabled !== "boolean") throw new Error("nightly.enabled must be true or false.");
   const allowedPaths = strings(nightly.allowedPaths, "nightly.allowedPaths");

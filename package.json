@@ -1,6 +1,6 @@
 {
   "name": "@crewbie/cli",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "description": "A repository-aware AI implementation crew for existing and greenfield projects.",
   "license": "MIT",
   "repository": {
@@ -37,12 +37,12 @@
   },
   "dependencies": {
     "@github/copilot-sdk": "1.0.14",
-    "jsonc-parser": "^3.3.1"
+    "jsonc-parser": "^3.3.1",
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "jsdom": "^26.1.0",
-    "yaml": "^2.8.0",
     "typescript": "^5.9.0"
   }
 }

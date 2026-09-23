@@ -27,7 +27,8 @@ test("CLI supports assessment -> reviewed installation -> specification approval
   run(root, "approve", "--batch", "batch.json", "--yes", "--execute");
   assert.match(run(root, "publish", "--batch", "batch.json"), /Preview only/);
   assert.match(run(root, "status", "--memory", "developer"), /constitution\.md/);
-  assert.deepEqual(JSON.parse(run(root, "init", "--proposal", "setup.json", "--update").split("\nPreview")[0]).files, []);
+  assert.match(run(root, "init", "--proposal", "setup.json", "--update"), /Installation preview: 0 files/);
+  assert.deepEqual(JSON.parse(run(root, "init", "--proposal", "setup.json", "--update", "--json")).files, []);
 });
 
 test("CLI rejects implicit approval and unsupported input formats", async (t) => {

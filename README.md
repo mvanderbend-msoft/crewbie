@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.7/crewbie-cli-0.1.0-alpha.7.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.8/crewbie-cli-0.1.0-alpha.8.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.7.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.8.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -101,9 +101,19 @@ discovery for scripted use; `auto` is not supported.
 
 Init then uses the Copilot SDK to assess existing
 instructions, custom agents, MCP configuration metadata, decisions and project
-code. It shows a summary, per-file findings, coverage limitations and an
-LLM-generated team with domain checks. Static stack detection is evidence, not
-the roster. Existing guidance is reused through context pointers.
+code. The CLI shows a short summary and writes **`crewbie-setup.md`** with the
+assessment, per-file findings, coverage limits, proposed crew and exact guidance
+edits. The editable setup remains in `crewbie-setup.json`. Custom `--out FILE.json`
+produces a sibling `FILE.md` report.
+
+Crewbie adopts suitable existing specialists before proposing extra expertise.
+For example, existing frontend and backend engineers become distinct
+`crewbie-frontend-engineer` and `crewbie-backend-engineer` specialists, not an
+unrelated combined role. After approval, originals move into
+`.crewbie/agent-archive/`; their complete domain charters remain mandatory context
+and original tool restrictions carry over. Every inspected candidate receives an
+adopt/retain decision with a reason. Static detection is evidence, not the roster;
+`maxActive` limits simultaneous work, not the number of specialists.
 
 For greenfield projects, initialize Git first and describe the purpose, users,
 main behavior, stack/platform (or freedom to choose) and constraints. Init asks
@@ -113,13 +123,20 @@ guessed team. You can supply context with `--description "..."`.
 Review the proposal, then choose **team only**, **team plus guidance/constitution
 changes**, or **save without installing**. Init previews the exact files and
 GitHub labels before confirmation. Existing constitutions remain reusable.
+Recommendations are clearly separated from concrete edits: if no guidance edits
+were proposed, init says so. Team-only installation keeps those proposals saved
+for later review instead of discarding them.
+
+Init separately asks whether to enable hosted planning with the selected model.
+Opting in permits potentially billable planning when a trusted human applies
+`crewbie:ready-for-planning`; it does not authorize automatic implementation.
 
 Analysis may consume AI credits. It runs tool-free in an isolated working/config
 directory, authenticating through `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`,
 `GITHUB_TOKEN`, or `gh auth login`. It does not run repository scripts or MCP
 servers. Personal/global MCP configuration is outside the assessment.
 The SDK uses shell-free stdio and waits for a completed assistant response;
-init reports elapsed waiting time every 15 seconds, then announces validation.
+init gives a friendly status update with elapsed time every 15 seconds, then announces validation.
 This is a status heartbeat, not a completion estimate; model responses can take
 several minutes.
 
@@ -147,6 +164,8 @@ Without a terminal, init saves the assessment/team JSON for review. Apply with
 the proposed changes. All workflow labels, including `crewbie:ready-for-planning`
 and dynamic owner labels, are created on apply. `--skip-labels` explicitly opts
 out for offline setup. Edited-file conflicts stop installation.
+Installation previews are readable file/action lists; use
+`crewbie init --proposal crewbie-setup.json --json` for a JSON preview.
 
 Commit the reviewed setup to your default branch before cloud dispatch.
 For hosted reporting or learning, also configure the
