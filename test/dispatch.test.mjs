@@ -20,7 +20,7 @@ function githubFixture(input = batch()) {
     get locked() { return locked; },
     client: {
       async list(path) {
-        if (path.endsWith("/labels")) return ["managed", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
+        if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
         if (path.includes("/issues?")) return structuredClone(issues);
         const match = /\/issues\/(\d+)\/(comments|timeline)$/.exec(path);
         if (match) {

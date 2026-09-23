@@ -76,8 +76,7 @@ test("domain charters contain distinct checks, invariants and reviewed repositor
   const backend = profile({ id: "backend", purpose: "Services.", model: "approved-model" }, config());
   bounded(frontend, 400, "frontend");
   bounded(backend, 400, "backend");
-  assert.match(frontend, /keyboard.*focus/);
-  assert.match(frontend, /observers.*automatic request loop/);
+  assert.doesNotMatch(frontend, /observers.*automatic request loop/);
   assert.match(frontend, /npm run build/);
   assert.match(frontend, /Preserve unsaved product edits/);
   assert.match(backend, /transactional rollback/);
@@ -88,7 +87,7 @@ test("domain charters contain distinct checks, invariants and reviewed repositor
   assert.deepEqual(configured.roles[0].checks, ["npm test"]);
   assert.deepEqual(configured.roles[0].nonNegotiables, ["Use established tokens."]);
   const custom = profile({ id: "constructor", purpose: "Review object construction.", model: "approved-model", checks: ["Check initialization invariants."] }, config());
-  assert.match(custom, /Trace the changed behavior/);
+  assert.doesNotMatch(custom, /Trace the changed behavior/);
   assert.match(custom, /Check initialization invariants/);
   assert.doesNotMatch(custom, /function Object/);
 });
@@ -175,6 +174,27 @@ test("generated workflows parse and never execute PR-head code", () => {
   assert.equal(report.jobs.report.permissions["pull-requests"], "read");
   assert.equal(report.jobs.report.permissions.checks, "read");
   assert.equal(report.jobs.report.steps.find((step) => step.name === "Build usage report").env.GH_TOKEN, "${{ github.token }}");
+});
+
+test("ready-label workflow has an exact package fallback when CREWBIE_PACKAGE is unset", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const workflow = YAML.parse(workflows(false, true)[".github/workflows/crewbie-plan.yml"]);
+  const installs = Object.values(workflow.jobs).flatMap((job) => job.steps)
+    .filter((step) => step.name === "Install approved Crewbie package");
+  assert.ok(installs.length);
+  for (const step of installs) {
+    assert.equal(step.env.CREWBIE_PACKAGE, `\${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v${manifest.version}/crewbie-cli-${manifest.version}.tgz' }}`);
+    assert.doesNotMatch(step.run, /Set CREWBIE_PACKAGE to an approved pinned package/);
+  }
+});
+
+test("GitHub releases publish npm-installable artifacts while registry publishing is opt-in", async () => {
+  const workflow = YAML.parse(await readFile(new URL("../.github/workflows/publish.yml", import.meta.url), "utf8"));
+  assert.equal(workflow.jobs.artifacts.permissions.contents, "write");
+  assert.ok(workflow.jobs.artifacts.steps.some((step) => /gh release upload/.test(step.run ?? "")));
+  assert.match(workflow.jobs.publish.if, /CREWBIE_NPM_PUBLISH_ENABLED == 'true'/);
+  assert.equal(workflow.jobs.publish.needs, "artifacts");
+  assert.equal(workflow.jobs.publish.permissions["id-token"], "write");
 });
 
 test("every generated role has concise writing and explicit memory pointers", () => {

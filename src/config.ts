@@ -1,6 +1,6 @@
 import { readJson, record, string, strings, slug, integer, safePath } from "./core.js";
 
-export interface Role { id: string; purpose: string; model: string; checks?: string[]; nonNegotiables?: string[] }
+export interface Role { id: string; purpose: string; model: string; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[] }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const DEFAULT_LIMITS = { spec: 600, charter: 400, hot: 600, index: 400, decisions: 400, constitution: 600, topic: 1500, pr: 250 };
 export type WordLimits = typeof DEFAULT_LIMITS;
@@ -30,12 +30,15 @@ export function parseConfig(value: unknown): Config {
     const result = { id: slug(role.id, "role id"), purpose: string(role.purpose, "role purpose"), model: string(role.model, "role model", true) };
     if (result.model.trim().toLowerCase() === "auto") throw new Error("Choose an explicit approved model, not auto.");
     if (["coordinator", "improver"].includes(result.id)) throw new Error(`${result.id} is reserved for a framework role.`);
-    const guidance: Pick<Role, "checks" | "nonNegotiables"> = {};
-    for (const key of ["checks", "nonNegotiables"] as const) {
+    const guidance: Pick<Role, "checks" | "nonNegotiables" | "contextPaths"> = {};
+    for (const key of ["checks", "nonNegotiables", "contextPaths"] as const) {
       if (role[key] === undefined) continue;
       const entries = strings(role[key], `role ${key}`);
       if (entries.length > 10 || entries.some((entry) => !entry.trim())) throw new Error(`Role ${key} needs at most ten nonempty entries.`);
       guidance[key] = entries;
+    }
+    if (guidance.contextPaths?.some((path) => !/^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.md$/.test(path) || path.includes("..") || path.startsWith(".git/"))) {
+      throw new Error("Role contextPaths must be repository-relative Markdown paths.");
     }
     return { ...result, ...guidance };
   });

@@ -11,7 +11,7 @@ const run = (root, ...args) => execFileSync(process.execPath, [cli, "--path", ro
 
 test("CLI supports assessment -> reviewed installation -> specification approval -> publication preview without remote access", async (t) => {
   const root = await fixture(t, { "requirements.md": "Keep existing behavior. Add one focused feature." });
-  run(root, "init", "--out", "setup.json");
+  run(root, "init", "--assessment-only", "--out", "setup.json");
   const proposal = JSON.parse(await readFile(join(root, "setup.json"), "utf8"));
   proposal.config.repository = "example/project";
   proposal.config.approvers = ["maintainer"];
@@ -19,7 +19,7 @@ test("CLI supports assessment -> reviewed installation -> specification approval
   proposal.config.constitution = ".crewbie/constitution.md";
   proposal.constitutionText = "# Project principles\n\nPreserve documented behavior. Check changed behavior with focused tests; report existing failures separately.";
   await writeFile(join(root, "setup.json"), JSON.stringify(proposal));
-  run(root, "init", "--proposal", "setup.json", "--apply");
+  run(root, "init", "--proposal", "setup.json", "--apply", "--guidance", "apply", "--skip-labels");
   const source = JSON.parse(run(root, "status", "--source", "requirements.md"));
   assert.equal(source.revision.length, 64);
   await writeFile(join(root, "batch.json"), JSON.stringify({ ...batch(), sources: [{ uri: source.uri, revision: source.revision }] }));
@@ -27,7 +27,7 @@ test("CLI supports assessment -> reviewed installation -> specification approval
   run(root, "approve", "--batch", "batch.json", "--yes", "--execute");
   assert.match(run(root, "publish", "--batch", "batch.json"), /Preview only/);
   assert.match(run(root, "status", "--memory", "developer"), /constitution\.md/);
-  assert.deepEqual(JSON.parse(run(root, "init", "--proposal", "setup.json", "--update").split("\nPreview")[0]), []);
+  assert.deepEqual(JSON.parse(run(root, "init", "--proposal", "setup.json", "--update").split("\nPreview")[0]).files, []);
 });
 
 test("CLI rejects implicit approval and unsupported input formats", async (t) => {
@@ -39,7 +39,7 @@ test("CLI rejects implicit approval and unsupported input formats", async (t) =>
 
 test("CLI reassesses an installed team without resetting policy or installing changes", async (t) => {
   const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config({ maxActive: 1 })), "package.json": '{"dependencies":{"react":"1"}}' });
-  run(root, "init", "--update", "--out", "team.json");
+  run(root, "init", "--assessment-only", "--update", "--out", "team.json");
   const proposal = JSON.parse(await readFile(join(root, "team.json"), "utf8"));
   assert.equal(proposal.config.maxActive, 1);
   assert.ok(proposal.config.roles.some((role) => role.id === "frontend"));

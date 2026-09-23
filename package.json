@@ -1,7 +1,7 @@
 {
   "name": "@crewbie/cli",
-  "version": "0.1.0-alpha.4",
-  "description": "A small AI crew for existing repositories.",
+  "version": "0.1.0-alpha.5",
+  "description": "A repository-aware AI implementation crew for existing and greenfield projects.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +11,10 @@
   "bugs": {
     "url": "https://github.com/mvanderbend-msoft/crewbie/issues"
   },
-  "private": true,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "type": "module",
   "bin": {
     "crewbie": "dist/cli.js"
@@ -31,6 +34,9 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
     "prepack": "npm run build"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

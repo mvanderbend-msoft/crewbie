@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import { parseConfig, type Config } from "../config.js";
+import { parseConfig, type Config, type Role } from "../config.js";
 import { optionalText, safePath, textHash } from "../core.js";
 import { assessInstructions, instructionFile, type InstructionQuality } from "./instruction-quality.js";
 import { assessTeam, type TeamAssessment } from "./team.js";
+import { inventory, type Inventory } from "./inventory.js";
 
 export interface Assessment {
   schemaVersion: 1;
@@ -16,6 +17,8 @@ export interface Assessment {
   instructionQuality: InstructionQuality;
   configBeforeHash: string | null;
   team: TeamAssessment;
+  inventory: Inventory;
+  installedRoles: Role[];
 }
 export async function assess(root: string): Promise<Assessment> {
   const absolute = await realpath(resolve(root));
@@ -46,6 +49,11 @@ export async function assess(root: string): Promise<Assessment> {
     { area: "Cloud execution", status: "unknown", evidence: ci.slice(0, 5), detail: "Run doctor with a selected repository and specialist. Account permissions and model support require separate verification." },
   ];
   const instructionQuality = await assessInstructions(root, paths);
+  const context = await inventory(root, paths);
+  findings.push(
+    { area: "MCP servers", status: "unknown", evidence: context.mcp.map((file) => file.path), detail: "Inspect configured capabilities, overlap and missing integrations. Server connectivity and personal/global settings are not verified; credential values are withheld." },
+    { area: "Custom agents", status: "unknown", evidence: context.files.filter((file) => file.kind === "agents").map((file) => file.path), detail: "Review existing responsibilities and reuse their guidance before proposing new specialists." },
+  );
   findings.push({
     area: "Instruction quality", status: instructionQuality.signals.length ? "gap" : "unknown",
     evidence: instructionQuality.signals.length ? [...new Set(instructionQuality.signals.map((signal) => `${signal.path}:${signal.line}`))].slice(0, 12) : instructionQuality.inspected.slice(0, 12),
@@ -54,7 +62,7 @@ export async function assess(root: string): Promise<Assessment> {
       : "No selected static warning was found. This is not a quality certification; review repository-specific value and the disclosed inspection coverage.",
   });
   return {
-    schemaVersion: 1, findings, instructionQuality, team,
+    schemaVersion: 1, findings, instructionQuality, team, inventory: context, installedRoles: installed?.roles ?? [],
     configBeforeHash: installedText === null ? null : textHash(installedText),
     questions: [
       "Which existing constraints are intentional, and which are legacy debt?",

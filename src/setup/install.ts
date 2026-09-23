@@ -57,6 +57,7 @@ export async function teamInstallation(root: string, current: Config, proposed: 
 }
 export async function installation(root: string, proposal: unknown): Promise<FileChange[]> {
   const data = record(proposal, "setup proposal");
+  if (data.status === "clarification") throw new Error("Resolve setup clarification questions before installation.");
   const config = parseConfig(data.config);
   if (data.configBeforeHash !== undefined) {
     const current = await optionalText(await safePath(root, ".crewbie/config.json"));
@@ -89,13 +90,18 @@ export async function installation(root: string, proposal: unknown): Promise<Fil
     for (const raw of data.instructions) {
       const instruction = record(raw, "instruction proposal");
       const path = string(instruction.path, "instruction path");
-      if (path !== "AGENTS.md" && path !== ".github/copilot-instructions.md" && !/^\.github\/instructions\/[a-z0-9._-]+\.instructions\.md$/.test(path)) {
+      if (!/^(?:(?:[a-zA-Z0-9._-]+\/)*(?:AGENTS|CLAUDE|GEMINI)\.md|\.github\/copilot-instructions\.md|\.github\/instructions\/[a-z0-9._/-]+\.instructions\.md|\.github\/agents\/(?!crewbie-)[a-z0-9._-]+\.agent\.md|\.claude\/agents\/[a-z0-9._-]+\.md)$/.test(path)) {
         throw new Error(`Unsupported instruction path: ${path}`);
       }
       const content = string(instruction.content, "instruction content");
       bounded(content, limits.constitution, path);
       files[path] = content;
-      if (instruction.beforeHash !== null) adopted[path] = string(instruction.beforeHash, "instruction beforeHash");
+      const current = await optionalText(await safePath(root, path));
+      const alreadyApplied = current !== null && textHash(current) === textHash(content);
+      if (!alreadyApplied && (instruction.beforeHash === null ? current !== null : current === null || !matchesTextHash(current, instruction.beforeHash))) {
+        throw new Error(`Guidance changed since assessment: ${path}. Reassess before applying.`);
+      }
+      if (current !== null) adopted[path] = hash(current);
     }
   }
   const allRoles = [

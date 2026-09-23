@@ -33,25 +33,28 @@ The installed workflows use:
 |---|---|
 | Secret `CREWBIE_USER_TOKEN` | Unattended native assignment using a supported user credential; unnecessary for `publish --dispatch-local` |
 | Secret `CREWBIE_ADO_TOKEN` | Optional ADO work-item access |
-| Variable `CREWBIE_PACKAGE` | An administrator-approved, version-pinned Crewbie package or release tarball |
+| Variable `CREWBIE_PACKAGE` | Optional approved pinned package override; defaults to the exact version that generated the workflows |
 | Variable `CREWBIE_COPILOT_VERSION` | An approved exact Copilot CLI package version |
 | Variable `CREWBIE_MAINTENANCE_MODEL` | Explicit approved maintenance model; not `auto` |
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
 
-Crewbie is distributed through GitHub Releases, not an npm registry. For this
-alpha, configure the consuming repository with the version-pinned public asset:
+Generated workflows embed the exact installed version's GitHub release tarball
+URL. A missing
+`CREWBIE_PACKAGE` variable no longer blocks ready-label dispatch. The embedded
+version must have its package asset attached to its GitHub release; no npm
+registry publication is required. For an unpublished/custom build, distribute an
+approved tarball and override the package source:
 
 ```powershell
-gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.4/crewbie-cli-0.1.0-alpha.4.tgz"
+gh variable set CREWBIE_PACKAGE --repo OWNER/REPO --body "https://YOUR-RELEASE-HOST/crewbie-cli-VERSION.tgz"
 ```
 
-For a reviewed custom build, use `npm pack` and distribute its tarball through
-an appropriate release/package channel instead. Generated workflows
-deliberately fail if `CREWBIE_PACKAGE` is missing.
 Installing the package uses `--ignore-scripts`; the packed `dist` is prebuilt and
-has no runtime npm dependencies. Keep credentials out of package URLs.
+its JSONC parser is installed by npm. Keep credentials out of package URLs.
+Existing repositories need to reapply reviewed setup with the new CLI and commit
+the changed workflows; upgrading a local package alone cannot change hosted YAML.
 
 The nightly analysis job grants only `copilot-requests: write` and uses a recent,
 pinned CLI with the built-in token. Personal repositories bill the owner's Copilot
@@ -61,11 +64,58 @@ The separate publisher needs `contents: write`, `pull-requests: write`, and the
 repository setting allowing Actions to create PRs. It never approves or merges a
 PR. A missing entitlement or permission is an error, not a token/runtime fallback.
 
+## npm publishing
+
+`package.json` declares a public scoped package with a `crewbie` binary.
+`npm pack` builds and includes `dist`, docs, examples and the license. Installing
+the package does not run setup, create labels, or start agents.
+
+GitHub releases run the package-artifact job, which uploads the npm-installable
+tarball and `SHA256SUMS`. npm registry publication is **disabled by default**:
+the separate publish job requires the repository Actions variable
+`CREWBIE_NPM_PUBLISH_ENABLED` to equal `true`. Leave it unset while npm account
+setup is deferred.
+
+Before the first publication, the maintainer must have an npm account with 2FA
+and publish permission under `@crewbie`. If available, create the `crewbie`
+organization through the npm profile menu's **Add an Organization**, selecting
+the free **Unlimited public packages** plan. If another party owns the scope,
+obtain permission or explicitly choose a different package name.
+
+Run `npm login --auth-type=web --registry=https://registry.npmjs.org` and complete
+authentication directly with npm. `npm whoami --registry=https://registry.npmjs.org`
+checks the authenticated account; it does not prove namespace permission.
+Keep credentials and recovery codes out of Git and chat. A registry TLS failure
+requires approved network/proxy/CA configuration, not `strict-ssl=false`.
+
+Review the package contents with `npm pack --dry-run`, then bootstrap with
+`npm publish --access public --tag next`. Complete any 2FA challenge directly
+with npm. Verify the published version using
+`npm view @crewbie/cli@0.1.0-alpha.5 version --registry=https://registry.npmjs.org`.
+
+After the package exists, open its npm **Settings > Trusted publishing**, choose
+GitHub Actions, and configure:
+
+| Field | Value |
+|---|---|
+| Organization or user | `mvanderbend-msoft` |
+| Repository | `crewbie` |
+| Workflow filename | `publish.yml` |
+| Environment | `npm` |
+
+Configure the `npm` GitHub environment's release approvals and commit the
+workflow before creating a release. After trusted publishing is ready, explicitly
+enable `CREWBIE_NPM_PUBLISH_ENABLED=true`. No long-lived npm token is needed in
+GitHub secrets. Publishing a GitHub release then runs the checks, verifies
+the release tag matches `package.json`, and publishes with provenance using OIDC.
+Prereleases use `next`; stable releases use `latest`. Merely changing this
+repository does not publish a package or configure the npm account.
+
 ## Account and runtime capability matrix
 
 | Capability | Personal repository | Organization repository | Verified here |
 |---|---|---|---|
-| Local onboarding/specification | Supported | Supported | Local CLI and fixtures |
+| Local onboarding/task decomposition | Supported | Supported | Local CLI and fixtures; LLM response handling uses deterministic fixtures |
 | Ready-label issue planning | Opt-in Actions CLI; eligible Copilot seat | Opt-in Actions CLI; organization billing policy | Live private Java/React intake passed prepare/analyze/publish with the coordinator charter/history, proposing five tasks across four specialists |
 | Approve-and-merge execution | Supported user-authorized assignment credential required | Credential plus repository/organization policy | Exact-head review/merge provenance, team materialization, publication and recovery fixtures; live webshop validation pending |
 | Native custom-agent assignment | Requires eligible account/repo and user auth | Requires eligible account/policy and user auth | Named backend, frontend, tester and reviewer sessions in a private Java/React repository; native IDs confirmed |
@@ -126,12 +176,12 @@ readiness. Application and learning PRs remained unmerged.
 ## Evolving the team
 
 The approved configuration is the current roster, not a permanent template.
-`init` on an installed repository and `init --update --out team-review.json`
+`init` on an installed repository and `init --update --model MODEL --out team-review.json`
 reassess the current project without resetting its models, approvers, limits,
 constitution, integrations or learning permissions.
 
-The `team` report separates evidence-backed suggestions from existing roles that
-need human review. Discovery uses non-ignored production paths and bounded
+The `review` report contains the LLM assessment; `team` contains static hints,
+not a final roster. Discovery uses non-ignored production paths and bounded
 manifest inspection: at most 20 manifests, 64 KB each and 512 KB total. Omitted
 or malformed manifests are disclosed. Fixture, example and generated paths do
 not automatically grow the team. No project script is executed.
@@ -139,8 +189,31 @@ not automatically grow the team. No project script is executed.
 Built-in signals are not a role enum. The coordinator must also consider the
 feature's domain and can propose custom roles, splits, specialization or
 retirement. Review proposed purpose, checks, non-negotiables and models before
-applying. Newly detected roles have no approved model until you choose one.
+applying. New roles use the explicitly selected init model, subject to setup review.
 Existing roles and their domain guidance remain intact unless explicitly edited.
+
+Init includes every inventoried instruction, custom-agent and MCP configuration
+path in its assessment. Text inspection has a 256 KB total/64 KB per-file budget
+and representative implementation sampling. Omissions are explicit, not a claim
+of complete semantic coverage. MCP JSON/JSONC files expose only server names,
+transport, executable basename and environment-variable names; values, arguments,
+headers and URLs are withheld. Servers are not started or connectivity-tested.
+Personal/global and ignored settings are not read. MCP configuration changes
+remain recommendations for manual review, not automatic credential-bearing edits.
+
+The LLM runs tool-free in a temporary working directory and isolated
+`COPILOT_HOME`, using environment credentials or authenticated GitHub CLI.
+No fallback roster is installed if analysis fails. `--assessment-only` keeps the
+offline inventory path explicit. Greenfield setup requires a description or
+requirements in the repository; interactive clarification repeats, while
+noninteractive runs persist questions and stop without installing a team.
+
+`init --proposal FILE --apply --guidance skip` installs the team without proposed
+guidance changes; `--guidance apply` includes them. Both create all workflow and
+owner labels. Existing labels are preserved; retries add only missing labels.
+Label failure reports that local setup succeeded and remote setup is incomplete.
+Rerun the same command to repair it. Use `--skip-labels` only for deliberate
+offline setup; rerun without it before hosted intake.
 
 Reassessment proposals bind to the existing configuration fingerprint. A stale
 proposal cannot overwrite intervening policy changes; LF/CRLF checkout differences
@@ -170,17 +243,17 @@ your account supports; the example is not an entitlement guarantee. Apply the
 reviewed proposal and commit the generated configuration, profiles, memory and
 `crewbie-plan.yml` workflow to the default branch.
 
-Configure `CREWBIE_PACKAGE` as described above, set an approved exact
+Override `CREWBIE_PACKAGE` only for a custom package source; set an approved exact
 `CREWBIE_COPILOT_VERSION` (the earlier hosted CLI runs used `1.0.87`), and allow
 Actions to create pull requests. Copilot billing/organization policy still
 applies. No saved user token is required for planning:
 
 ```powershell
-gh label create "crewbie:ready-for-planning" --repo OWNER/REPO --color b11f4b --description "Approved for coordinator planning, not implementation"
 gh variable set CREWBIE_COPILOT_VERSION --repo OWNER/REPO --body "1.0.87"
 ```
 
-Put the PRD in the issue body, then have a configured human approver apply the
+Init creates the ready-for-planning label with the other workflow labels.
+Put the user-authored PRD/spec in the issue body, then have a configured human approver apply the
 label. The workflow checks the actual label-event actor and current issue
 content before analysis. Bots, unapproved actors, closed issues, generated
 execution issues and unrelated labels cannot start planning. Creating an issue
@@ -202,6 +275,9 @@ are sufficient. Merge-enabled plans also include the actual reviewed team files
 and an execution manifest, as described below. Each task names an owner, model and dependencies.
 Custom specialists need domain checks and non-negotiables. Missing requirements
 produce questions rather than fabricated acceptance criteria.
+Crewbie does not create PRDs/specs. The legacy batch `spec` field remains for
+compatibility and holds a deterministic source reference in hosted plans;
+model-authored specification text is discarded. The constitution remains in use.
 
 With merge execution disabled, review the proposal on its branch. Preview and apply `setup.json` through `init`,
 then review/merge the resulting configuration and profiles onto the default

@@ -109,9 +109,10 @@ Reassess the crew from both repository evidence and the requested feature. Built
 Propose arbitrary useful specialist IDs with purpose, explicit model, domain checks and nonNegotiables. Preserve existing roles/models unless a change is explicitly explained for human review.
 Decompose into at most eight small tasks, each with one specialist owner, an explicit model, acceptance criteria and dependencies.
 Use kind: review for reviews of completed unmerged work; implementation dependencies require merged PRs.
-Keep the specification under ${limitsFor(config).spec} words. Never approve execution or claim unrun checks.
+Implement the user-supplied requirements; PRD/spec authoring is outside Crewbie's scope.
+The legacy batch.spec field is a source reference, supplied by Crewbie, not a document to author. Never approve execution or claim unrun checks.
 Links and attachments have NOT been fetched. If essential information is missing, ask at most five concise questions and return batch: null.
-Return only JSON: {"summary":"at most 100 words","questions":[],"roles":[{"id":"role-id","purpose":"specific expertise","model":"explicit proposed model","checks":["domain check"],"nonNegotiables":["invariant"]}],"batch":{"schemaVersion":1,"id":"issue-${source.number}","spec":"short spec","tasks":[{"id":"task-id","title":"short title","body":"scope\\n\\n## Acceptance criteria\\n- observable behavior","owner":"role-id","model":"same proposed model","priority":1,"dependsOn":[]}],"approval":null}}.
+Return only JSON: {"summary":"at most 100 words explaining implementation decomposition","questions":[],"roles":[{"id":"role-id","purpose":"specific expertise","model":"explicit proposed model","checks":["domain check"],"nonNegotiables":["invariant"]}],"batch":{"schemaVersion":1,"id":"issue-${source.number}","tasks":[{"id":"task-id","title":"short title","body":"scope\\n\\n## Acceptance criteria\\n- observable behavior from supplied requirements","owner":"role-id","model":"same proposed model","priority":1,"dependsOn":[]}],"approval":null}}.
 Existing config and word budgets: ${json({ config, limits: limitsFor(config) })}
 Coordinator charter: ${charter}
 Context: ${json(context)}
@@ -140,7 +141,7 @@ export function parsePlan(value: unknown, config: Config, source: Source): Plan 
   if (data.batch !== null) {
     const raw = record(data.batch, "planning batch");
     if (raw.approval != null) throw new Error("The coordinator cannot approve its own plan.");
-    batch = parseBatch({ ...raw, id: `issue-${source.number}`, approval: null, sources: [{
+    batch = parseBatch({ ...raw, id: `issue-${source.number}`, spec: `Implement the user-supplied requirements at https://github.com/${config.repository}/issues/${source.number}. Source revision: ${source.revision}. Task acceptance criteria below map that scope to specialist-owned work.`, approval: null, sources: [{
       uri: `https://github.com/${config.repository}/issues/${source.number}`,
       revision: source.revision, fingerprint: hash(`${source.title}\n\n${source.body}`),
     }] }, proposed);

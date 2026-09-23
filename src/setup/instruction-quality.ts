@@ -21,7 +21,7 @@ export interface InstructionQuality {
   signalsOmitted: number;
 }
 export function instructionFile(path: string): boolean {
-  return path === ".crewbie/instructions.md" || /(^|\/)(AGENTS\.md|CLAUDE\.md|copilot-instructions\.md)$|\.instructions\.md$|(^|\/)\.github\/agents\/[^/]+\.agent\.md$/.test(path);
+  return path === ".crewbie/instructions.md" || /(^|\/)(AGENTS\.md|CLAUDE\.md|GEMINI\.md|copilot-instructions\.md)$|\.instructions\.md$|(^|\/)\.github\/agents\/[^/]+\.agent\.md$|(^|\/)\.claude\/agents\/[^/]+\.md$/.test(path);
 }
 const normalize = (text: string) => text.replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 const generic = /^(?:write clean(?:,? readable)?(?: and maintainable)? code|follow (?:coding )?best practices|be (?:thorough|helpful|concise)|ensure (?:high )?code quality|run (?:the )?tests|write (?:good |unit )?tests)[.!]?$/i;

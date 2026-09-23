@@ -10,8 +10,7 @@ import { githubReader } from "./execution/github.js";
 import { dispatch, eligible, inspectWork } from "./execution/dispatch.js";
 import { watchBatch } from "./execution/watch.js";
 import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/review-loop.js";
-import { assess } from "./setup/assessment.js";
-import { applyInstallation, installation } from "./setup/install.js";
+import { initCommand } from "./setup/init.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning } from "./specification/planning.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
@@ -25,11 +24,16 @@ import { applyMaintenance, prepareMaintenance } from "./memory/runner.js";
 import { dashboard } from "./reporting/dashboard.js";
 import { collectRecords, parseRecords } from "./reporting/records.js";
 
-const HELP = `Crewbie: a small AI crew for existing repositories.
+const HELP = `Crewbie: a project-specific AI implementation crew.
 
-  init [--out setup.json]                         Read-only brownfield assessment
+  init [--model MODEL] [--out setup.json]          LLM assessment, tailored team and approval
+    --description "project intent"                Greenfield context; asks again when unclear
+    --repo owner/name --approver LOGIN             Setup repository and human approvers
+  init --assessment-only [--out setup.json]        Offline inventory; no LLM
   init --update --out team.json                   Reassess an installed crew without resetting policy
-  init --proposal setup.json --apply              Apply the reviewed setup
+  init --proposal setup.json --apply --guidance apply|skip
+                                                 Install reviewed team and GitHub labels
+    --skip-labels                                Explicit offline setup; no GitHub writes
   init --proposal setup.json --update             Preview safe managed-file upgrades
   doctor --repo owner/name [--agent stem] [--model id] [--json]
   approve --batch batch.json --yes [--execute]     Approve exact local scope
@@ -73,6 +77,8 @@ async function main(): Promise<void> {
       agent: { type: "string" }, model: { type: "string" }, json: { type: "boolean" },
       out: { type: "string" }, proposal: { type: "string" }, apply: { type: "boolean" },
       update: { type: "boolean" }, batch: { type: "string" }, yes: { type: "boolean" },
+      description: { type: "string" }, approver: { type: "string", multiple: true },
+      guidance: { type: "string" }, "assessment-only": { type: "boolean" }, "skip-labels": { type: "boolean" },
       execute: { type: "boolean" }, source: { type: "string" }, issue: { type: "string" },
       "ado-id": { type: "string" }, "ado-create": { type: "boolean" },
       "dispatch-local": { type: "boolean" },
@@ -95,18 +101,7 @@ async function main(): Promise<void> {
   if (command === "publish" && values.pr !== undefined && values.batch) throw new Error("Choose either batch publication or PR finalization, not both.");
   const root = resolve(values.path ?? ".");
   if (command === "init") {
-    if (values.proposal) {
-      const changes = await installation(root, await readJson(await safePath(root, values.proposal)));
-      console.log(json(changes));
-      if (values.apply) { await applyInstallation(root, changes); console.log(`Applied ${changes.length} reviewed file changes.`); }
-      else console.log("Preview only. Add --apply after reviewing the complete diff.");
-    } else {
-      if (values.apply) throw new Error("Use --proposal with --apply; assessment alone never installs files.");
-      const proposal = await assess(root);
-      if (values.update && proposal.configBeforeHash === null) throw new Error("No installed crew to reassess. Run init without --update first.");
-      if (values.out) await writeAtomic(root, values.out, json(proposal));
-      console.log(json(proposal));
-    }
+    await initCommand(root, values, { client: () => api(token()) });
     return;
   }
   if (command === "doctor") {

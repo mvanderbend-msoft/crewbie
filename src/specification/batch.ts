@@ -31,8 +31,8 @@ export interface Batch {
 export function parseBatch(value: unknown, config?: Config): Batch {
   const data = record(value, "batch");
   if (data.schemaVersion !== 1) throw new Error("Unsupported batch version.");
-  const spec = string(data.spec, "specification");
-  bounded(spec, limitsFor(config).spec, "Specification");
+  const spec = string(data.spec, "user-supplied scope or source reference");
+  bounded(spec, limitsFor(config).spec, "User-supplied scope or source reference");
   const sources = sourceReferences(data.sources);
   if (!Array.isArray(data.tasks) || !data.tasks.length || data.tasks.length > 100) throw new Error("A batch must contain 1-100 tasks.");
   const tasks = data.tasks.map((item): Task => {

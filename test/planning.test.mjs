@@ -204,6 +204,11 @@ test("model output supports custom expertise and clarification, but cannot self-
   const role = { id: "catalogue-performance", purpose: "Own catalogue query performance.", model: "proposed-model", checks: ["Measure bounded query work."], nonNegotiables: ["Preserve stable paging contracts."] };
   const custom = { ...f.candidate, roles: [role], batch: { ...f.candidate.batch, tasks: [{ ...task("query"), owner: role.id, model: role.model }] } };
   assert.equal(parsePlan(custom, f.cfg, source).batch.tasks[0].owner, role.id);
+  const sourceOnly = parsePlan({ ...custom, batch: { ...custom.batch, spec: "Invented requirements that the user never supplied." } }, f.cfg, source).batch;
+  assert.match(sourceOnly.spec, /https:\/\/github.com\/example\/project\/issues\/12/);
+  assert.doesNotMatch(sourceOnly.spec, /Invented requirements/);
+  const { spec: _unused, ...withoutSpec } = custom.batch;
+  assert.equal(parsePlan({ ...custom, batch: withoutSpec }, f.cfg, source).batch.spec, sourceOnly.spec);
   assert.equal(parsePlan({ ...custom, batch: null, questions: ["Which catalogue sort order is required?"] }, f.cfg, source).batch, null);
   assert.throws(() => parsePlan({ ...custom, batch: null }, f.cfg, source), /clarification/);
   assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, approval: { digest: "fake", execute: true } } }, f.cfg, source), /cannot approve/);
