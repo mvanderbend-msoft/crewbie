@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -240,8 +240,10 @@ test("new custom-agent guidance changes are hash-checked and generated-profile c
 test("real init CLI invokes isolated tool-free Copilot transport and persists its domain team", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" });
   const assessment = await assess(root);
-  const fakeScript = `import { readFileSync, existsSync } from "node:fs";
+  const fakeScript = `import { readFileSync, existsSync, realpathSync } from "node:fs";
 import assert from "node:assert/strict";
+import { basename, dirname } from "node:path";
+process.chdir(realpathSync(process.cwd()));
 const prompt = readFileSync(0, "utf8");
 assert.match(prompt, /smallest useful implementation crew/);
 assert.match(prompt, /src\\/catalogue.ts/);
@@ -250,7 +252,8 @@ assert.ok(process.argv.includes("--no-custom-instructions"));
 assert.ok(process.argv.includes("--no-ask-user"));
 assert.equal(process.env.COPILOT_ALLOW_ALL, "false");
 assert.equal(process.env.COPILOT_PROVIDER_BASE_URL, undefined);
-assert.ok(process.env.COPILOT_HOME.startsWith(process.cwd()));
+assert.equal(realpathSync(dirname(process.env.COPILOT_HOME)), realpathSync(process.cwd()));
+assert.equal(basename(process.env.COPILOT_HOME), "config");
 assert.ok(!existsSync("src"));
 console.log(${JSON.stringify(JSON.stringify(response(assessment)))});
 `;
@@ -263,7 +266,10 @@ console.log(${JSON.stringify(JSON.stringify(response(assessment)))});
     const { chmod } = await import("node:fs/promises");
     await chmod(join(tools, "copilot"), 0o755);
   }
-  const env = { ...process.env, GH_TOKEN: "fixture-only", COPILOT_GITHUB_TOKEN: "fixture-only", COPILOT_ALLOW_ALL: "true", COPILOT_PROVIDER_BASE_URL: "http://must-not-use.invalid" };
+  await mkdir(join(tools, "temp-real"));
+  const tempAlias = join(tools, "temp-alias");
+  await symlink(join(tools, "temp-real"), tempAlias, process.platform === "win32" ? "junction" : "dir");
+  const env = { ...process.env, TEMP: tempAlias, TMP: tempAlias, TMPDIR: tempAlias, GH_TOKEN: "fixture-only", COPILOT_GITHUB_TOKEN: "fixture-only", COPILOT_ALLOW_ALL: "true", COPILOT_PROVIDER_BASE_URL: "http://must-not-use.invalid" };
   const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
   env[pathKey] = `${tools}${process.platform === "win32" ? ";" : ":"}${env[pathKey]}`;
   const result = spawnSync(process.execPath, [

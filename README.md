@@ -71,11 +71,10 @@ gh auth login
 ```
 
 > [!NOTE]
-> **Release pending:** the command above becomes available when the
-> `v0.1.0-alpha.5` GitHub release has its package asset attached.
-> npm registry publication is deferred; the release tarball is an npm package
-> and needs no npm account to install. Until the release is available, build
-> from this repository and install the local package:
+> This alpha is distributed as an **npm-installable GitHub release tarball**,
+> with a `SHA256SUMS` file attached to the release. npm registry publication
+> remains deferred; no npm account is needed to install the release tarball.
+> To build and install directly from this repository instead:
 >
 > ```powershell
 > npm ci --ignore-scripts
