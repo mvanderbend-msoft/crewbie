@@ -17,6 +17,10 @@ export interface Config {
   planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
 }
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
+export function isRoleContextPath(path: string): boolean {
+  return /^(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+\.md$/i.test(path)
+    && !path.includes("..") && !path.toLowerCase().startsWith(".git/");
+}
 export function parseConfig(value: unknown): Config {
   const data = record(value, "Configuration");
   if (data.schemaVersion !== 1) throw new Error("Unsupported configuration version.");
@@ -37,8 +41,9 @@ export function parseConfig(value: unknown): Config {
       if (entries.length > 10 || entries.some((entry) => !entry.trim())) throw new Error(`Role ${key} needs at most ten nonempty entries.`);
       guidance[key] = entries;
     }
-    if (guidance.contextPaths?.some((path) => !/^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.md$/.test(path) || path.includes("..") || path.startsWith(".git/"))) {
-      throw new Error("Role contextPaths must be repository-relative Markdown paths.");
+    const invalidPath = guidance.contextPaths?.find((path) => !isRoleContextPath(path));
+    if (invalidPath !== undefined) {
+      throw new Error(`Role ${result.id} contextPaths contains ${JSON.stringify(invalidPath)}; use repository-relative Markdown paths.`);
     }
     return { ...result, ...guidance };
   });

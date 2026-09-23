@@ -128,6 +128,155 @@ test("empty and truncated Copilot responses produce actionable errors, not raw J
   assert.throws(() => parseSetupReview('{"summary":', report, "Catalogue", "chosen-model"), /incomplete or invalid JSON/);
 });
 
+test("assessment accepts harmless path spelling variants only for inspected Markdown guidance", async (t) => {
+  const report = await assess(await fixture(t, { ".github/agents/catalogue.agent.md": "Catalogue constraints." }));
+  for (const path of [".\\.github\\agents\\catalogue.agent.md", "./.github/agents/catalogue.agent.md"]) {
+    const review = response(report);
+    review.roles[0].contextPaths = [path];
+    const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
+    assert.deepEqual(proposal.config.roles[0].contextPaths, [".github/agents/catalogue.agent.md"]);
+  }
+});
+
+test("invalid role context identifies the specialist and offending path", async (t) => {
+  const report = await assess(await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" }));
+  const review = response(report);
+  review.roles[0].contextPaths = ["src/catalogue.ts"];
+  assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "chosen-model"), /catalogue.*src\/catalogue\.ts.*Markdown/);
+});
+
+test("slow assessment reports elapsed wait and validation without exposing model output", async (t) => {
+  const report = await assess(await fixture(t));
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const messages = [];
+  let complete;
+  const pending = proposeSetup(report, "Catalogue", "chosen-model", {
+    analyze: () => new Promise((resolve) => { complete = resolve; }),
+    report: (message) => messages.push(message),
+  });
+  let duringWait;
+  try {
+    t.mock.timers.tick(15_000);
+    duringWait = [...messages];
+  } finally {
+    complete(JSON.stringify(response(report)));
+    await pending;
+  }
+  assert.ok(duringWait.some((message) => /Waiting.*15s/.test(message)));
+  assert.ok(messages.some((message) => /validating/i.test(message)));
+  const after = messages.length;
+  t.mock.timers.tick(30_000);
+  assert.equal(messages.length, after);
+});
+
+test("prompt and parser share the exact eligible Markdown context list", async (t) => {
+  const report = await assess(await fixture(t, {
+    "docs/decisions/Team Guide.MD": "Preserve order identities.",
+    "AGENTS.md": "Keep retries explicit.",
+    "src/catalogue.ts": "export const pageSize = 20;",
+    ".github/agents/private.agent.md": "api_key=sk-abcdefghijklmnopqrstuvwxyz",
+    ".vscode/mcp.json": '{"servers":{}}',
+  }));
+  const prompt = setupPrompt(report, "");
+  const allowed = JSON.parse(prompt.match(/allowedContextPaths: (\[[\s\S]*?\])/)[1]);
+  assert.deepEqual(new Set(allowed), new Set(["AGENTS.md", "docs/decisions/Team Guide.MD"]));
+  assert.match(prompt, /at most ten entries/);
+  assert.match(prompt, /Source code and MCP configuration.*NOT contextPaths/);
+  const review = response(report);
+  review.roles[0].contextPaths = allowed;
+  const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
+  assert.deepEqual(proposal.config.roles[0].contextPaths, allowed);
+  assert.match(profile(proposal.config.roles[0], proposal.config), /docs\/decisions\/Team Guide.MD/);
+});
+
+test("unsafe, invented, omitted and redacted context paths cannot be normalized into accepted links", async (t) => {
+  const report = await assess(await fixture(t, {
+    "AGENTS.md": "Keep retries explicit.",
+    ".github/agents/private.agent.md": "api_key=sk-abcdefghijklmnopqrstuvwxyz",
+    "src/AGENTS.md": "x".repeat(64_001),
+  }));
+  for (const path of ["../AGENTS.md", "folder/../AGENTS.md", "/AGENTS.md", "C:\\AGENTS.md",
+    "\\\\server\\AGENTS.md", "https://example.invalid/AGENTS.md", "**/AGENTS.md", "AGENTS.md:12",
+    ".git/config.md", "missing.md", "src/AGENTS.md", ".github/agents/private.agent.md"]) {
+    const review = response(report);
+    review.roles[0].contextPaths = [path];
+    assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "chosen-model"), /context was not inspected/);
+  }
+});
+
+test("interactive init repairs rejected context links locally without another assessment", async (t) => {
+  const root = await fixture(t, {
+    "AGENTS.md": "Keep retries explicit.",
+    "src/catalogue.ts": "export const pageSize = 20;",
+  });
+  const report = await assess(root);
+  const review = response(report);
+  review.roles[0].contextPaths = ["AGENTS.md", "src/catalogue.ts"];
+  const answers = ["99", "1", "save"], messages = [];
+  let calls = 0;
+  await initCommand(root, { model: "chosen-model" }, {
+    analyze: async () => { calls++; return JSON.stringify(review); },
+    ask: async () => { assert.ok(answers.length); return answers.shift(); },
+    report: (message) => messages.push(message),
+    client() { throw new Error("No GitHub writes"); },
+  });
+  assert.equal(calls, 1);
+  assert.ok(messages.some((message) => /src\/catalogue.ts.*Markdown/.test(message)));
+  assert.ok(messages.some((message) => /Invalid selection/.test(message)));
+  assert.ok(messages.some((message) => /Continuing validation without another AI request/.test(message)));
+  const proposal = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.deepEqual(proposal.config.roles[0].contextPaths, ["AGENTS.md"]);
+  assert.equal(proposal.review.summary, review.summary);
+  assert.equal(proposal.config.roles[0].model, "chosen-model");
+  await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
+});
+
+test("removing rejected links requires explicit consent and cancelling leaves no setup", async (t) => {
+  for (const answer of ["none", "cancel"]) {
+    const root = await fixture(t, { "src/catalogue.ts": "export const pageSize = 20;" });
+    const report = await assess(root);
+    const review = response(report);
+    review.roles[0].contextPaths = ["src/catalogue.ts"];
+    let calls = 0;
+    const pending = initCommand(root, { model: "chosen-model" }, {
+      analyze: async () => { calls++; return JSON.stringify(review); },
+      ask: async (question) => question.startsWith("Replace rejected") ? answer : "save",
+      report() {}, client() { throw new Error("No GitHub writes"); },
+    });
+    if (answer === "cancel") {
+      await assert.rejects(pending, /cancelled during context-link review/);
+      await assert.rejects(readFile(join(root, "crewbie-setup.json")), /ENOENT/);
+    } else {
+      await pending;
+      assert.deepEqual(JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8")).config.roles[0].contextPaths, []);
+    }
+    assert.equal(calls, 1);
+  }
+});
+
+test("progress timers stop after provider failures as well as successful responses", async (t) => {
+  const report = await assess(await fixture(t));
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const messages = [];
+  await assert.rejects(proposeSetup(report, "", "chosen-model", {
+    analyze: async () => { throw new Error("Provider unavailable"); },
+    report: (message) => messages.push(message),
+  }), /Provider unavailable/);
+  t.mock.timers.tick(30_000);
+  assert.equal(messages.length, 0);
+});
+
+test("oversized context lists fail before offering an impossible repair", async (t) => {
+  const report = await assess(await fixture(t, { "AGENTS.md": "Keep retries explicit." }));
+  const review = response(report);
+  review.roles[0].contextPaths = [...Array(11).fill("AGENTS.md"), "src/catalogue.ts"];
+  await assert.rejects(proposeSetup(report, "", "chosen-model", {
+    analyze: async () => JSON.stringify(review),
+    ask: async () => { throw new Error("Must not offer unrepairable context choices"); },
+    report() {},
+  }), /catalogue contextPaths.*at most ten/);
+});
+
 test("reassessment preserves existing models, approvals and policy; retirement is explicit", async (t) => {
   const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config({ maxActive: 1 })) });
   const report = await assess(root);
@@ -219,7 +368,7 @@ test("interactive init shows assessment and preview before applying team-only ch
     client: () => remote.client, report: (text) => reports.push(text),
   });
   assert.equal(prompts.length, 2);
-  assert.match(reports[1], /Use a catalogue specialist/);
+  assert.ok(reports.some((text) => /Use a catalogue specialist/.test(text)));
   assert.ok(reports.some((text) => /"labels"/.test(text)));
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Existing guidance.");
   const installed = JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8"));

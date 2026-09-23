@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.6 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.7 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -216,6 +216,23 @@ process stdout. Startup/model discovery have 30-second timeouts and assessment
 has a five-minute timeout. Empty or malformed JSON produces an explicit error;
 check authentication/model access for runtime errors, or retry/narrow the context
 for incomplete output.
+While waiting, init reports elapsed time every 15 seconds and announces validation
+when the response arrives. This heartbeat does not claim token-level progress or
+predict completion time.
+
+`contextPaths` is a reusable-guidance list, not a list of implementation targets.
+The prompt and validator share the eligible inspected, unredacted Markdown paths.
+Spaces in document names and `.MD` extensions are supported. Onboarding normalizes
+Windows separators and leading `./` only when the result matches an eligible
+file; traversal, absolute paths, source files, globs and uninspected links remain
+rejected. Errors identify the specialist and invalid paths.
+
+Interactive init can repair those links in the existing response: choose numbered
+replacement documents, `none` to explicitly remove only the rejected links, or
+`cancel`. Already-valid links remain. This does not invoke the model again; the
+whole proposal still passes validation and human review before installation.
+Noninteractive runs fail explicitly on invalid links rather than guessing fixes.
+
 No fallback roster is installed if analysis fails. `--assessment-only` keeps the
 offline inventory path explicit. Greenfield setup requires a description or
 requirements in the repository; interactive clarification repeats, while

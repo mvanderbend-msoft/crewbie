@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, mkdir, realpath, symlink } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, symlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { CopilotClient } from "@github/copilot-sdk";
 import { copilotAccess } from "../dist/setup/copilot.js";
+import { initCommand } from "../dist/setup/init.js";
 import { fixture } from "./helpers.mjs";
 
 function environment(t, key, value) {
@@ -120,8 +121,19 @@ test("startup and cleanup failures remain explicit and never disclose the creden
   await assert.rejects(access(directory), /ENOENT/);
 });
 
-test("bundled SDK runtime handles a complete local provider response through stdio", { timeout: 60_000 }, async (t) => {
-  const root = await fixture(t);
+test("real SDK assessment survives local context-link repair and saves the reviewed team", { timeout: 60_000 }, async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Retain loaded catalogue entries.", "src/catalogue.ts": "export const pageSize = 20;" });
+  const review = JSON.stringify({
+    summary: "Use a catalogue specialist.",
+    findings: ["instructions", "mcp", "agents", "constitution", "project"].map((area) => ({
+      area, path: area === "instructions" ? "AGENTS.md" : null,
+      assessment: `Reviewed ${area}.`, recommendation: "Retain useful guidance.",
+    })),
+    questions: [],
+    roles: [{ id: "catalogue", purpose: "Own catalogue pagination.", checks: ["Retain loaded entries after page failure."],
+      nonNegotiables: ["Preserve catalogue IDs."], contextPaths: ["src/catalogue.ts"] }],
+    instructions: [], constitutionText: null,
+  });
   await mkdir(join(root, "temp-real"));
   const alias = join(root, "temp-alias");
   await symlink(join(root, "temp-real"), alias, process.platform === "win32" ? "junction" : "dir");
@@ -135,14 +147,14 @@ test("bundled SDK runtime handles a complete local provider response through std
     if (!parsed.stream) {
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ id: "fixture", object: "chat.completion", created: 1, model: "gpt-4.1",
-        choices: [{ index: 0, message: { role: "assistant", content: '{"summary":"complete"}' }, finish_reason: "stop" }],
+        choices: [{ index: 0, message: { role: "assistant", content: review }, finish_reason: "stop" }],
         usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
       }));
       return;
     }
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     const chunk = (delta, finish_reason = null) => `data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", created: 1, model: "gpt-4.1", choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
-    response.end(chunk({ role: "assistant", content: '{"summary":' }) + chunk({ content: '"complete"}' }) + chunk({}, "stop") + "data: [DONE]\n\n");
+    response.end(chunk({ role: "assistant", content: review.slice(0, 20) }) + chunk({ content: review.slice(20) }) + chunk({}, "stop") + "data: [DONE]\n\n");
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -158,8 +170,16 @@ test("bundled SDK runtime handles a complete local provider response through std
     });
     return client;
   }, () => "fixture-only");
-  assert.equal(await adapter.analyze('Return JSON for synthetic test: "quotes" & newlines\nonly.', "gpt-4.1"), '{"summary":"complete"}');
-  assert.ok(requests.length > 0);
+  await initCommand(root, { model: "gpt-4.1", description: 'A synthetic test: "quotes" & newlines\nonly.' }, {
+    analyze: adapter.analyze,
+    ask: async (question) => question.startsWith("Replace rejected") ? "1" : "save",
+    report() {}, client() { throw new Error("No GitHub writes"); },
+  });
+  const proposal = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.deepEqual(proposal.config.roles[0].contextPaths, ["AGENTS.md"]);
+  assert.equal(proposal.config.roles[0].model, "gpt-4.1");
+  assert.equal(proposal.review.summary, "Use a catalogue specialist.");
+  assert.equal(requests.length, 1);
   for (const request of requests) {
     assert.match(request.path, /chat\/completions/);
     assert.equal(request.body.model, "gpt-4.1");

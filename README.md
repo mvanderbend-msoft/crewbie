@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.6/crewbie-cli-0.1.0-alpha.6.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.7/crewbie-cli-0.1.0-alpha.7.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.6.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.7.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -119,7 +119,18 @@ directory, authenticating through `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`,
 `GITHUB_TOKEN`, or `gh auth login`. It does not run repository scripts or MCP
 servers. Personal/global MCP configuration is outside the assessment.
 The SDK uses shell-free stdio and waits for a completed assistant response;
-empty or malformed JSON stops onboarding with an actionable error instead of
+init reports elapsed waiting time every 15 seconds, then announces validation.
+This is a status heartbeat, not a completion estimate; model responses can take
+several minutes.
+
+Role context links must point to inspected, unredacted Markdown documents, not
+source-code files or directories. Init supplies the model with the eligible paths
+and normalizes harmless Windows separators and `./` prefixes. If a model still
+returns invalid links, interactive init lets you select replacements, explicitly
+remove rejected links, or cancel **without another paid assessment**. Valid links
+are retained; nothing is silently dropped or installed.
+
+Empty or malformed JSON stops onboarding with an actionable error instead of
 installing a fallback team. Use `--assessment-only` for an explicitly offline
 inventory instead; it does not discover models or contact Copilot.
 
