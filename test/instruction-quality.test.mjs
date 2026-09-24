@@ -106,3 +106,14 @@ test("large warning sets stay readable and disclose unshown signals", async (t) 
   assert.equal(result.instructionQuality.signalsOmitted, 8);
   assert.match(result.findings.find((finding) => finding.area === "Instruction quality").detail, /20 advisory signals detected; showing 12/);
 });
+
+test("a noisy root instruction file cannot hide findings in other guidance files", async (t) => {
+  const root = await fixture(t, {
+    "AGENTS.md": Array.from({ length: 20 }, (_, i) => `Read [guide ${i}](missing-${i}.md).`).join("\n"),
+    "frontend/AGENTS.md": "Follow best practices.",
+    ".github/instructions/backend.instructions.md": "Preserve database boundaries.",
+  });
+  const quality = (await assess(root)).instructionQuality;
+  assert.ok(quality.signals.some((signal) => signal.path === "frontend/AGENTS.md" && signal.code === "generic-only"));
+  assert.ok(quality.signals.some((signal) => signal.path === ".github/instructions/backend.instructions.md" && signal.code === "missing-path-scope"));
+});

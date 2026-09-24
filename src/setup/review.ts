@@ -61,7 +61,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
   for (const role of config.roles) {
     lines.push(`### ${role.id}`, "");
     if (role.sourceAgent) lines.push(`Original: \`${role.sourceAgent}\` -> \`.github/agents/crewbie-${role.id}.agent.md\`.`,
-      `Archive: \`${agentArchivePath(role.sourceAgent)}\`. Original domain guidance remains mandatory and original tool restrictions are preserved.`, "");
+      `Archive: \`${agentArchivePath(role.sourceAgent)}\` (backup provenance). The active charter contains the complete original instructions, with tool restrictions and persona preserved. Oversized charters must be shortened by the user; limits are not raised automatically.`, "");
     if (role.checks?.length) lines.push("**Checks**", ...role.checks.map((check) => `- ${check}`), "");
     if (role.modelReason) lines.push(`**Model proposal (${role.complexity ?? "unclassified"}):** ${role.modelReason}`, "");
     if (role.nonNegotiables?.length) lines.push("**Boundaries**", ...role.nonNegotiables.map((rule) => `- ${rule}`), "");
@@ -89,7 +89,9 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     for (const raw of review.findings) {
       const finding = record(raw, "assessment finding");
       lines.push(`### ${string(finding.area, "finding area")}${typeof finding.path === "string" ? ` - ${finding.path}` : ""}`, "",
-        string(finding.assessment, "finding assessment"), "", `**Recommendation:** ${string(finding.recommendation, "finding recommendation")}`, "");
+        string(finding.assessment, "finding assessment"), "", `**Recommendation:** ${string(finding.recommendation, "finding recommendation")}`, "",
+        ...(typeof finding.action === "string" ? [`**Disposition:** ${finding.action}`, ""] : []),
+        ...(typeof finding.deferReason === "string" ? [`**Deferred because:** ${finding.deferReason}`, ""] : []));
     }
   }
   if (data.inventory !== undefined) {
@@ -107,9 +109,19 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
 
 export function renderInstallationPreview(changes: FileChange[], labels: readonly string[], repository: string): string {
   return [
-    `Installation preview: ${changes.filter((change) => change.before === null).length} files to create, ${changes.filter((change) => change.before !== null && change.after !== null).length} to update, ${changes.filter((change) => change.after === null).length} originals to archive/remove.`,
-    ...changes.map(filePreview),
-    labels.length ? `Ensure ${labels.length} workflow and specialist labels in ${repository || "(repository not set)"}:\n${labels.join(", ")}` : "GitHub labels skipped.",
-    "Preview only. Review the Markdown assessment and setup JSON before applying.",
+    `\nInstallation preview: ${changes.length} files`, "",
+    ...[
+      { label: "CREATE", files: changes.filter((change) => change.before === null) },
+      { label: "UPDATE", files: changes.filter((change) => change.before !== null && change.after !== null) },
+      { label: "ARCHIVE / REMOVE ORIGINAL", files: changes.filter((change) => change.after === null) },
+    ].flatMap((group) => group.files.length ? [
+      `${group.label} | ${group.files.length} files`,
+      ...group.files.map((change) => {
+        const detail = describeInstallationFile(change);
+        return `  ${change.path}\n    ${detail.ownership}: ${detail.purpose}`;
+      }), "",
+    ] : []),
+    labels.length ? `GITHUB LABELS | ${labels.length} in ${repository || "(repository not set)"}\n${labels.map((label) => `  ${label}`).join("\n")}` : "GitHub labels skipped.",
+    "", "Preview only. Nothing above is applied until confirmed.",
   ].join("\n");
 }

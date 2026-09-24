@@ -127,7 +127,7 @@ test("real SDK assessment survives local context-link repair and saves the revie
     summary: "Use a catalogue specialist.",
     findings: ["instructions", "mcp", "agents", "constitution", "project"].map((area) => ({
       area, path: area === "instructions" ? "AGENTS.md" : null,
-      assessment: `Reviewed ${area}.`, recommendation: "Retain useful guidance.",
+      assessment: `Reviewed ${area}.`, recommendation: "Retain useful guidance.", action: "retain",
     })),
     questions: [],
     roles: [{ id: "catalogue", purpose: "Own catalogue pagination.", model: "gpt-4.1", complexity: "standard", modelReason: "Use the available test model for catalogue contracts.", checks: ["Retain loaded entries after page failure."],

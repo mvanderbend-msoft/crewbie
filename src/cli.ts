@@ -27,9 +27,14 @@ import { applyMaintenance, prepareMaintenance } from "./memory/runner.js";
 import { dashboard } from "./reporting/dashboard.js";
 import { collectRecords, parseRecords } from "./reporting/records.js";
 import { collectPrUsage, renderPrUsage } from "./reporting/pr-usage.js";
+import { createOutput } from "./presentation.js";
 
 const HELP = `Crewbie: a project-specific AI implementation crew.
 
+USAGE
+  crewbie <command> [options]
+
+SETUP AND GUIDANCE
   init [--model MODEL] [--out setup.json]          LLM assessment, tailored team and approval
     --model-policy cost-aware|fixed               New specialists: reviewed catalog choices (default cost-aware)
     --specialist-model MODEL                      Explicit new-specialist model override
@@ -44,9 +49,10 @@ const HELP = `Crewbie: a project-specific AI implementation crew.
   init --proposal setup.json --update             Preview safe managed-file upgrades
     --json                                       Machine-readable installation preview
   update [--apply] [--offline] [--json]            Update repository integration without AI reassessment
+
+PLANNING AND EXECUTION
   revise-plan --pr N --feedback-file feedback.txt [--apply]
                                                  Preview/request one same-PR planning revision
-  doctor --repo owner/name [--agent stem] [--model id] [--json]
   preflight [--batch-id ID] [--json]              Preview approvals, specialist/model and remaining launch limits
   pause | resume [--apply]                        Control future implementation/review launches, not running sessions
   cancel --issue N --run-id ID [--apply]           Preview/cancel an attributable cloud-agent Actions run
@@ -56,6 +62,9 @@ const HELP = `Crewbie: a project-specific AI implementation crew.
     --watch [--timeout-seconds 3600] [--poll-seconds 30]  Reconcile until handoff
   publish --pr 123 --proposal handoff.json [--apply]  Preview/finalize PR metadata
   publish --review-loop review.json [--apply] [--watch]  Review, correct and re-review
+
+STATUS AND REPORTS
+  doctor --repo owner/name [--agent stem] [--model id] [--json]
   status --batch batch.json                       Validate a task/dependency graph
   status --source requirements.md                 Import text with a content revision
   status --issue 123 | --ado-id 456                Import a remote work item
@@ -65,6 +74,10 @@ const HELP = `Crewbie: a project-specific AI implementation crew.
   dashboard --records runs.json --out report.html
   dashboard --collect --out report.html
 
+OUTPUT AND AUTHENTICATION
+Terminal output uses grouped sections and responsive tables.
+--json preserves machine-readable data on supported commands.
+Redirected output stays plain; NO_COLOR disables terminal colours.
 Use --path to select a local repository (default: current directory).
 Paths supplied for input/output files are relative to that repository.
 Remote commands use GH_TOKEN/GITHUB_TOKEN or authenticated GitHub CLI.
@@ -110,9 +123,11 @@ async function main(): Promise<void> {
       "review-loop": { type: "string" },
     },
   });
-  if (values.help || positionals.length === 0) { console.log(HELP); return; }
+  const output = createOutput({ machine: values.json === true || positionals[0]?.startsWith("internal-") === true });
+  if (values.help || positionals.length === 0) { output.text(HELP); return; }
   if (positionals.length !== 1) throw new Error("Choose exactly one command.");
   const command = positionals[0];
+  if (command !== "init") output.heading(command!);
   if (values["review-loop"] && (command !== "publish" || values.batch || values.pr || values["dispatch-local"])) throw new Error("--review-loop requires publish and cannot be combined with batch/PR publication.");
   if (values.watch && (command !== "publish" || (!values["review-loop"] && (!values.batch || !values["dispatch-local"])))) throw new Error("--watch requires publish --batch and --dispatch-local, or publish --review-loop.");
   if (!values.watch && (values["timeout-seconds"] !== undefined || values["poll-seconds"] !== undefined)) throw new Error("Watch timing options require --watch.");
@@ -121,11 +136,11 @@ async function main(): Promise<void> {
   if (command === "publish" && values.pr !== undefined && values.batch) throw new Error("Choose either batch publication or PR finalization, not both.");
   const root = resolve(values.path ?? ".");
   if (command === "init") {
-    await initCommand(root, values, { client: () => api(token()) });
+    await initCommand(root, values, { client: () => api(token()), report: output.text });
     return;
   }
   if (command === "update") {
-    console.log(await updateRepository(root, values, values.offline ? undefined : api(token())));
+    output.text(await updateRepository(root, values, values.offline ? undefined : api(token())));
     return;
   }
   if (command === "doctor") {
@@ -134,7 +149,7 @@ async function main(): Promise<void> {
       repository: values.repo, ...(values.agent === undefined ? {} : { agent: values.agent }),
       ...(values.model === undefined ? {} : { model: values.model }),
     });
-    console.log(values.json ? json(report) : renderReport(report));
+    output.data(report, renderReport(report));
     if (report.findings.some((finding) => finding.status === "blocked")) process.exitCode = 2;
     return;
   }
@@ -144,34 +159,34 @@ async function main(): Promise<void> {
     const content = await optionalText(path);
     if (content === null) throw new Error("Source file does not exist.");
     if (content.length > 1_000_000 || content.includes("\0")) throw new Error("Source is too large or not plain text. Split or convert it first.");
-    console.log(json({ uri: values.source, revision: hash(content), text: content }));
+    output.data({ uri: values.source, revision: hash(content), text: content });
     return;
   }
   if (command === "dashboard" && values.records) {
     const records = parseRecords(await readJson(await safePath(root, values.records)));
     if (!values.out) throw new Error("Choose a report path with --out.");
     await writeAtomic(root, values.out, dashboard(records));
-    console.log(`Report written to ${values.out}. Unavailable measurements remain unknown.`);
+    output.text(`Report written to ${values.out}. Unavailable measurements remain unknown.`);
     return;
   }
   const config = await loadConfig(root);
   if (command === "budget") {
     if (!values.issue || !values["historical-attempts"]) throw new Error("Use budget --issue N --historical-attempts N; review historical attempts before --apply.");
-    console.log(await baselineLaunches(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["historical-attempts"]), "historical attempts"), values.apply === true));
+    output.text(await baselineLaunches(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["historical-attempts"]), "historical attempts"), values.apply === true));
     return;
   }
   if (command === "pause" || command === "resume") {
-    console.log(await setLaunchPause(api(token()), config, command === "pause", values.apply === true));
+    output.text(await setLaunchPause(api(token()), config, command === "pause", values.apply === true));
     return;
   }
   if (command === "cancel") {
     if (!values.issue || !values["run-id"]) throw new Error("Use cancel --issue N --run-id ID; preview first, then --apply.");
-    console.log(await cancelRun(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["run-id"]), "run ID"), values.apply === true));
+    output.text(await cancelRun(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["run-id"]), "run ID"), values.apply === true));
     return;
   }
   if (command === "preflight") {
     const report = await preflight(api(token()), config, values["batch-id"], undefined, config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined);
-    console.log(values.json ? json(report) : [report.notice, ...report.tasks.map((task) =>
+    output.data(report, [report.notice, ...report.tasks.map((task) =>
       `#${task.issue} ${task.specialist} / ${task.model}: ${task.ready ? "READY" : "NOT READY"} - ${task.reason}\n  Approval: ${task.approved}; launches ${task.allowance.used}/${task.allowance.maxLaunchesPerBatch}; task attempts ${task.allowance.taskUsed}/${task.allowance.maxAttemptsPerTask}`)].join("\n"));
     return;
   }
@@ -179,20 +194,20 @@ async function main(): Promise<void> {
     if (!values.pr || !values["feedback-file"]) throw new Error("Use revise-plan --pr N --feedback-file feedback.txt; --apply explicitly requests a potentially billable revision.");
     const feedback = await optionalText(await safePath(root, values["feedback-file"]));
     if (feedback === null) throw new Error("Feedback file does not exist.");
-    console.log(await requestPlanningRevision(api(token()), config, integer(Number(values.pr), "planning PR"), feedback, values.apply === true));
+    output.text(await requestPlanningRevision(api(token()), config, integer(Number(values.pr), "planning PR"), feedback, values.apply === true));
     return;
   }
   if (command === "publish" && values["review-loop"]) {
     const plan = parseReviewPlan(await readJson(await safePath(root, values["review-loop"])));
-    console.log(json({ repository: config.repository, plan, authorization: "Applying authorizes bounded review and same-specialist correction sessions, real GitHub reviews and metadata updates. No merges." }));
-    if (!values.apply) { console.log("Preview only. Review the exact issues, correction paths and round budget before --apply."); return; }
+    output.data({ repository: config.repository, plan, authorization: "Applying authorizes bounded review and same-specialist correction sessions, real GitHub reviews and metadata updates. No merges." });
+    if (!values.apply) { output.text("Preview only. Review the exact issues, correction paths and round budget before --apply."); return; }
     const client = api(token());
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
     if (values.watch) {
-      const outcome = await watchReviews(client, config, plan, { timeoutMs, pollMs, progress: console.log, ...(ado ? { ado } : {}) });
-      console.log(`Review loop: ${outcome}. No PRs were merged.`);
+      const outcome = await watchReviews(client, config, plan, { timeoutMs, pollMs, progress: output.text, ...(ado ? { ado } : {}) });
+      output.text(`Review loop: ${outcome}. No PRs were merged.`);
       if (outcome !== "clean") process.exitCode = 2;
-    } else console.log(json(await reconcileReview(client, config, plan, ado)));
+    } else output.data(await reconcileReview(client, config, plan, ado));
     return;
   }
   if (command === "approve" || (command === "status" && values.batch) || (command === "publish" && values.pr === undefined)) {
@@ -202,13 +217,13 @@ async function main(): Promise<void> {
     if (command === "approve") {
       if (!values.yes) throw new Error("Review the spec, tasks, owner/model and prerequisites, then use --yes to record approval.");
       await writeAtomic(root, values.batch, json(approvedBatch(batch, values.execute === true)));
-      console.log(`Approved exact batch ${batch.id}; execution ${values.execute ? "authorized" : "not authorized"}.`);
-    } else if (command === "status") console.log(json(batch));
+      output.text(`Approved exact batch ${batch.id}; execution ${values.execute ? "authorized" : "not authorized"}.`);
+    } else if (command === "status") output.data(batch);
     else {
       requireApproval(batch);
       if (values.watch && !batch.approval?.execute) throw new Error("Watching requires execution approval.");
-      console.log(json({ batch: batch.id, repository: config.repository, tasks: batch.tasks, createAdoWorkItems: values["ado-create"] === true, executionApproved: batch.approval?.execute, dispatch: values["dispatch-local"] ? "local" : "workflow" }));
-      if (!values.apply) { console.log("Preview only. Add --apply to publish the approved work."); return; }
+      output.data({ batch: batch.id, repository: config.repository, tasks: batch.tasks, createAdoWorkItems: values["ado-create"] === true, executionApproved: batch.approval?.execute, dispatch: values["dispatch-local"] ? "local" : "workflow" });
+      if (!values.apply) { output.text("Preview only. Add --apply to publish the approved work."); return; }
       const github = api(token());
       await requireApprover(github, config.approvers);
       const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
@@ -221,7 +236,7 @@ async function main(): Promise<void> {
         for (const task of batch.tasks) if (!adoMapping.has(task.id)) {
           const id = await createWorkItem(client, config.ado, batch, task);
           adoMapping.set(task.id, id);
-          console.log(`ADO mapping confirmed: ${task.id} -> ${id}.`);
+          output.text(`ADO mapping confirmed: ${task.id} -> ${id}.`);
         }
       }
       if (adoMapping.size && !config.ado) throw new Error("Tasks reference ADO work items but the repository has no ADO integration policy.");
@@ -236,7 +251,7 @@ async function main(): Promise<void> {
           }
         }
       }
-      console.log(json(published));
+      output.data(published);
       if (values["dispatch-local"] && batch.approval?.execute) {
         const reconcile = async () => {
           const work = await dispatch(github, config, ado, { batch, issueNumbers: published.map((item) => item.issue) });
@@ -245,55 +260,55 @@ async function main(): Promise<void> {
         };
         if (values.watch) {
           const result = await watchBatch(batch, reconcile, { timeoutMs, pollMs, progress: (work) => {
-            console.log(json(work.map((item) => ({ issue: item.issue.number, task: item.metadata.task.id, state: item.state, reason: item.reason }))));
+            output.data(work.map((item) => ({ issue: item.issue.number, task: item.metadata.task.id, state: item.state, reason: item.reason })));
           } });
-          console.log(`Watch ${result.outcome} after ${result.rounds} reconciliation rounds. No PRs were merged.`);
+          output.text(`Watch ${result.outcome} after ${result.rounds} reconciliation rounds. No PRs were merged.`);
           if (result.outcome !== "handoff") {
-            console.error("Work needs attention or more time. Existing cloud sessions continue; inspect their status before resuming the same approved batch.");
+            output.error("Work needs attention or more time. Existing cloud sessions continue; inspect their status before resuming the same approved batch.");
             process.exitCode = 2;
           }
-        } else console.log(json(await reconcile()));
+        } else output.data(await reconcile());
       }
     }
     return;
   }
   if (command === "publish" && values.pr !== undefined) {
     if (!values.proposal) throw new Error("Provide a PR description proposal with body, headSha and beforeHash.");
-    console.log(json(await publishDescription(api(token()), config, Number(values.pr), await readJson(await safePath(root, values.proposal)), values.apply === true)));
-    if (!values.apply) console.log("Preview only. Confirm the handoff and actual checks before --apply.");
+    output.data(await publishDescription(api(token()), config, Number(values.pr), await readJson(await safePath(root, values.proposal)), values.apply === true));
+    if (!values.apply) output.text("Preview only. Confirm the handoff and actual checks before --apply.");
     return;
   }
   if (command === "status" && values.memory) {
-    console.log(json(await memoryContext(root, config, values.memory, values.topic ?? [])));
+    output.data(await memoryContext(root, config, values.memory, values.topic ?? []));
     return;
   }
   if (command === "status" && values["ado-id"]) {
     if (!config.ado) throw new Error("Configure ADO before importing work items.");
-    console.log(json(await importWorkItem(adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? ""), config.ado, integer(Number(values["ado-id"]), "ADO ID"))));
+    output.data(await importWorkItem(adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? ""), config.ado, integer(Number(values["ado-id"]), "ADO ID")));
     return;
   }
   const github = api(token());
   if (command === "status" && values.pr) {
     const pr = record(await github.request("GET", `/repos/${config.repository}/pulls/${integer(Number(values.pr), "PR number")}`), "pull request");
     const usage = await collectPrUsage(github, config.repository, pr);
-    console.log(values.json ? json(usage) : `${renderPrUsage(usage)}\n${usage.warnings.join("\n")}`);
+    output.data(usage, `${renderPrUsage(usage)}\n${usage.warnings.join("\n")}`);
   } else if (command === "status" && values.issue) {
     const number = integer(Number(values.issue), "issue number");
     const issue = record(await github.request("GET", `/repos/${config.repository}/issues/${number}`), "issue");
-    console.log(json({
+    output.data({
       uri: string(issue.html_url, "issue URL"), revision: string(issue.updated_at, "issue revision"),
       fingerprint: hash(`${string(issue.title, "issue title")}\n\n${typeof issue.body === "string" ? issue.body : ""}`),
       text: `${string(issue.title, "issue title")}\n\n${typeof issue.body === "string" ? issue.body : ""}`,
-    }));
+    });
   } else if (command === "status") {
     const work = await inspectWork(github, config);
     eligible(work, config.maxActive);
-    console.log(json(work.map((item) => ({ issue: item.issue.number, task: item.metadata.task.id, state: item.state, reason: item.reason }))));
+    output.data(work.map((item) => ({ issue: item.issue.number, task: item.metadata.task.id, state: item.state, reason: item.reason })));
   } else if (command === "internal-pr-check") {
     const number = integer(Number(values.pr), "PR number");
     const pr = record(await github.request("GET", `/repos/${config.repository}/pulls/${number}`), "PR");
     checkPrDescription(string(pr.body, "PR description"), limitsFor(config).pr);
-    console.log("PR has concise what/why/checks sections. Human review still judges the reasoning and evidence.");
+    output.text("PR has concise what/why/checks sections. Human review still judges the reasoning and evidence.");
   } else if (command === "internal-dispatch") {
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
     const hints = (process.env.CREWBIE_ISSUE_NUMBERS ?? "").trim();
@@ -301,12 +316,12 @@ async function main(): Promise<void> {
     if (issueNumbers.length > 100) throw new Error("At most 100 confirmed issue IDs can be reconciled at once.");
     const work = await dispatch(github, config, ado, issueNumbers.length ? { issueNumbers } : undefined);
     const summary = renderDispatchResult(work, config);
-    console.log(summary);
+    output.text(summary);
     if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, summary + "\n");
     if (config.ado) await syncAdo(github, adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? ""), config, work);
   } else if (command === "internal-maintain") {
     if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply, not both.");
-    console.log(values.prepare ? `Selected ${await prepareMaintenance(root, github, config)} new evidence records.` : await applyMaintenance(root, github, config));
+    output.text(values.prepare ? `Selected ${await prepareMaintenance(root, github, config)} new evidence records.` : await applyMaintenance(root, github, config));
   } else if (command === "internal-plan") {
     if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply for planning.");
     if (values.prepare) {
@@ -314,26 +329,27 @@ async function main(): Promise<void> {
       const result = await preparePlanning(root, github, config, await readJson(process.env.GITHUB_EVENT_PATH),
         process.env.GITHUB_RUN_ID ? integer(Number(process.env.GITHUB_RUN_ID), "workflow run ID") : undefined);
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
-      console.log(result.reason);
-    } else console.log(await publishPlanning(root, github, config));
+      output.text(result.reason);
+    } else output.text(await publishPlanning(root, github, config));
   } else if (command === "internal-release-plan") {
     if (!values.pr) throw new Error("Choose a merged planning PR with --pr.");
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
-    console.log(await releaseMergedPlan(github, config, integer(Number(values.pr), "planning PR"), ado));
+    output.text(await releaseMergedPlan(github, config, integer(Number(values.pr), "planning PR"), ado));
   } else if (command === "internal-pages") {
     if (!["private", "public"].includes(values["pages-mode"] ?? "")) throw new Error("Explicitly select private or public Pages mode.");
     const pages = record(await github.request("GET", `/repos/${config.repository}/pages`), "Pages configuration");
     if (values["pages-mode"] === "private" && pages.public !== false) throw new Error("Private Pages was not confirmed. Use the access-controlled Actions artifact instead.");
     if (values["pages-mode"] === "public" && pages.public !== true) throw new Error("Configured Pages visibility does not match the explicitly selected public mode.");
-    console.log(`Pages visibility confirmed: ${values["pages-mode"]}.`);
+    output.text(`Pages visibility confirmed: ${values["pages-mode"]}.`);
   } else if (command === "dashboard" && values.collect) {
     if (!values.out) throw new Error("Choose a report path with --out.");
     await writeAtomic(root, values.out, dashboard(await collectRecords(github, config)));
-    console.log(`Report written to ${values.out}.`);
+    output.text(`Report written to ${values.out}.`);
   } else throw new Error(`Unknown command or missing input: ${command}. Use --help.`);
 }
 
 main().catch((error: unknown) => {
-  console.error(`Crewbie: ${error instanceof Error ? error.message : "Unexpected failure."}`);
+  createOutput({ machine: process.argv.includes("--json") || process.argv.some((arg) => arg.startsWith("internal-")) })
+    .error(error instanceof Error ? error.message : "Unexpected failure.");
   process.exitCode = 1;
 });

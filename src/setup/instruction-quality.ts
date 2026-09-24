@@ -47,8 +47,11 @@ export async function assessInstructions(root: string, paths: readonly string[])
     interpretation: "Advisory static heuristics, not a quality score or a causal prediction. The study does not establish a harmful word-count threshold or prove these individual patterns cause failures. Preserve justified policy; compare task outcomes before and after approved changes.",
     inspected: [], omitted: [], signals: [], signalsOmitted: 0,
   };
+  const signalCounts = new Map<string, number>();
   const add = (signal: InstructionSignal) => {
-    if (result.signals.length < 12) result.signals.push(signal);
+    const count = signalCounts.get(signal.path) ?? 0;
+    signalCounts.set(signal.path, count + 1);
+    if (count < 12) result.signals.push(signal);
     else result.signalsOmitted++;
   };
   const visible = new Set(paths);

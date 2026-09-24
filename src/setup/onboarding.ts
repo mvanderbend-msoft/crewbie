@@ -3,13 +3,14 @@ import { agentArchivePath, isExistingAgentPath, isRoleContextPath, limitsFor, pa
 import type { Assessment } from "./assessment.js";
 import { redact } from "./inventory.js";
 import { profile } from "./templates.js";
-import { validateInstructionScope } from "./instruction-quality.js";
+import { instructionFile, validateInstructionScope } from "./instruction-quality.js";
+import { adoptedProfile } from "./agents.js";
 import { analyzeWithCopilot, explicitModel, type Analyze, type ModelChoice } from "./copilot.js";
 export { analyzeWithCopilot, explicitModel, type Analyze } from "./copilot.js";
 
 export interface SetupReview {
   summary: string;
-  findings: { area: string; path: string | null; assessment: string; recommendation: string; action?: string; editPaths?: string[] }[];
+  findings: { area: string; path: string | null; assessment: string; recommendation: string; action: string; editPaths?: string[]; deferReason?: string }[];
   agentDecisions?: { path: string; action: "adopt" | "retain"; reason: string }[];
 }
 export interface SetupProposal extends Assessment {
@@ -43,7 +44,7 @@ Explain useful guidance, conflicts, redundancy, gaps, proposed changes and how e
 Include one finding each for areas instructions, mcp, agents, constitution, project even when absent. Disclose coverage omissions.
 Choose arbitrary domain-specific role IDs, not a preset roster. Each role needs a purpose, actionable domain checks, nonNegotiables and contextPaths pointing to reusable inventoried guidance.
 Adopt suitable EXISTING specialists first: preserve frontend, backend, testing and review responsibilities rather than merging them into invented end-to-end roles. maxActive limits concurrent sessions, NOT team size.
-For each adopted role, set sourceAgent to its exact existing agent path and use a recognizable role ID derived from that agent. Its original charter will be archived and remain mandatory guidance for its crewbie-prefixed replacement, with original tool restrictions preserved.
+For each adopted role, set sourceAgent to its exact existing agent path and use a recognizable role ID derived from that agent. The installer copies the complete original instructions into the active Crewbie charter and archives the original as backup provenance. Tool restrictions and professional persona boundaries remain in the active file. Put adoption mechanics in agentDecisions.reason, not in checks or nonNegotiables; those fields contain actual domain behavior only. Supply only useful additional checks, not summaries replacing the original expertise.
 Actively consider useful additional specialists alongside existing agents: domain depth, independent verification, performance, accessibility, data and integration boundaries. Existing broad ownership is not a reason to reject a justified specialization. Explain each addition's distinct contribution and collaboration boundary; avoid aliases and idle roles without repository or feature evidence.
 Return an agentDecisions entry {path,action,reason} for EVERY existing candidate: action adopt if a role has that sourceAgent, otherwise retain with a concrete reason. Retained agents remain standalone; edits require explicit instructions entries and separate guidance approval. Use agentDecisions: [] when there are no candidates.
 Existing agent candidates: ${json(assessment.inventory.files.filter((file) => isExistingAgentPath(file.path) && !file.redacted).map((file) => file.path))}
@@ -61,17 +62,19 @@ Economy: prefer the least expensive capable option; explain any uncertainty abou
 Balanced: balance expected quality, rework risk and reported cost; use stronger reasoning where failures would be expensive.
 Quality: prioritize expected correctness and difficult reasoning; disclose the price tradeoff rather than blindly choosing the most expensive model.
 ${models.length ? `For NEW roles, choose model ONLY from the account catalog below, classify complexity as routine, standard or complex, and include modelReason explaining suitability and the selected profile's cost/capability tradeoff. Compare reported token prices as AI credits per batchSize tokens, including context tiers. Unknown pricing stays unknown. Legacy multipliers are not token prices or measured capability scores. Treat capability judgments as proposals for human review, not benchmark facts. Preserve installed models. Account catalog: ${json(models)}` : "New roles use the explicitly selected specialist model; preserve installed models."}
-Propose only necessary instruction/agent edits as path/content/reason, preserving existing policy. MCP changes are recommendations for manual review, never raw credentials/config rewrites.
+Review EVERY inspected guidance file independently against the rubric below, not only the first file or the highest-priority warning. Include all evidence-backed, safe improvements in instructions as path/content/reason, preserving existing policy. There is no one-file edit quota. A file with no justified improvement should remain unchanged. MCP changes are recommendations for manual review, never raw credentials/config rewrites.
 Put safe, concrete guidance improvements into instructions as actual complete replacement text. Clearly distinguish recommendations requiring human decisions from edits ready to apply. Preserve unresolved policy instead of implying advisory recommendations will be installed.
-Classify each finding's action as retain, edit or defer. For edit, list editPaths matching concrete instructions replacements (including both source and destination when splitting). A recommendation without replacement text must be explicitly deferred, not presented as an applicable edit.
+Classify EVERY finding's action as retain, edit or defer. For edit, list editPaths matching concrete instructions replacements (including both source and destination when splitting). For defer, provide deferReason identifying a concrete blocker such as conflicting policy, missing evidence or a required human design decision; routine approval is not a blocker because all writes already need approval. For retain, explain why the guidance earns its context cost. Never disguise an actionable improvement as a retain recommendation. A recommendation without replacement text must be explicitly deferred, not presented as an applicable edit.
 Apply evidence-grounded guidance review: retain non-obvious constraints, decision rationale, gotchas and essential runtime setup. Prefer the repository itself for readily discoverable file layouts, dependencies and scripts; replace unnecessary repetition with conditional pointers. Gloaguen et al. (https://arxiv.org/abs/2602.11988) found task/cost tradeoffs in their evaluated settings, not a universal ban on instructions or a causal word-count limit.
 Keep root AGENTS.md and .github/copilot-instructions.md focused on cross-cutting rules. Where domain guidance is justified, propose nested domain AGENTS.md or .github/instructions/<domain>.instructions.md with valid YAML applyTo globs for the actual paths. Preserve rules' applicability when moving them; propose the source reduction AND scoped destination together. Split by relevance, not arbitrary length, and honor each host's supported scoping.
-Review custom-agent responsibilities, permissions, handoffs, duplicated boilerplate, model choices and relevance. Preserve safety restrictions and useful domain rules. For each finding recommending a concrete edit, supply replacement text or explicitly explain why it is deferred; human approval must apply real file edits, not only generate a team.
+For every instruction file, check discoverable repository facts, generic advice, duplication, stale commands/links, contradictions, rule applicability, conditional pointers and non-obvious constraints. Account for every supplied static signal, explaining false positives instead of blindly rewriting policy. The static heuristics are a starting point, not the complete review.
+Review custom-agent responsibilities, permissions, handoffs, duplicated boilerplate, model choices and relevance. Preserve safety restrictions, professional persona and useful domain rules. For each finding recommending a concrete edit, supply replacement text or explicitly explain why it is deferred; human approval must apply real file edits, not only generate a team.
 For adopted agents, express added checks on their roles; archive their original charter unchanged rather than also rewriting that source file.
-Keep each charter under ${limitsFor(assessment.config).charter} words including shared context. Keep proposed guidance/constitution under ${limitsFor(assessment.config).constitution} words.
+Keep each complete active charter under ${limitsFor(assessment.config).charter} words, including the original body and Crewbie additions for adopted agents. If preservation cannot fit, ask the user to shorten the original; never discard original details or raise the limit. Keep proposed guidance/constitution under ${limitsFor(assessment.config).constitution} words.
 Reuse the constitution if present. Optionally propose a short constitution if absent; the human can decline it.
 Return ONLY JSON:
 {"summary":"concise human-readable assessment and rationale","findings":[{"area":"instructions|mcp|agents|constitution|project","path":null,"assessment":"evidence-linked assessment","recommendation":"retain, reuse, concrete edit or explicit deferral with reason","action":"retain","editPaths":[]}],"questions":[],"roles":[{"id":"domain-specialist","sourceAgent":null,"purpose":"project-specific ownership","model":"catalog model ID when supplied","complexity":"standard","modelReason":"task-specific cost/capability rationale","checks":["observable check"],"nonNegotiables":["invariant"],"contextPaths":[]}],"agentDecisions":[],"instructions":[{"path":"AGENTS.md","content":"complete proposed text","reason":"why"}],"constitutionText":null}
+For a deferred finding add "deferReason":"specific blocker and the decision/evidence needed".
 Project description and clarification answers: ${json(redact(description))}
 Existing policy and static detection hints (hints are NOT the team): ${json({ config: assessment.config, installedRoles: assessment.installedRoles, findings: assessment.findings, instructionQuality: assessment.instructionQuality })}
 Repository inventory and coverage: ${json(assessment.inventory)}`;
@@ -94,12 +97,13 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
   if (!Array.isArray(data.findings)) throw new Error("Setup findings must be a list.");
   const findings = data.findings.map((raw) => {
     const finding = record(raw, "setup finding");
-    if (finding.action !== undefined && !["retain", "edit", "defer"].includes(String(finding.action))) throw new Error("Finding action must be retain, edit or defer.");
+    if (!["retain", "edit", "defer"].includes(String(finding.action))) throw new Error(`Finding action must be retain, edit or defer: ${finding.path ?? finding.area}.`);
     return {
       area: string(finding.area, "assessment area"), path: finding.path === null ? null : string(finding.path, "assessment path"),
       assessment: string(finding.assessment, "assessment"), recommendation: string(finding.recommendation, "recommendation"),
-      ...(finding.action === undefined ? {} : { action: string(finding.action, "finding action") }),
+      action: string(finding.action, "finding action"),
       ...(finding.editPaths === undefined ? {} : { editPaths: strings(finding.editPaths, "finding edits") }),
+      ...(finding.action === "defer" ? { deferReason: string(finding.deferReason, `deferral reason for ${finding.path ?? finding.area}`) } : {}),
     };
   });
   for (const area of ["instructions", "mcp", "agents", "constitution", "project"]) {
@@ -182,8 +186,13 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
       if (!assessment.inventory.files.some((file) => file.path === path && !file.redacted)) throw new Error(`Specialist context was not inspected: ${path}`);
     }
     role.contextPaths = (role.contextPaths ?? []).filter((path) => path !== role.sourceAgent)
-      .map((path) => config.roles.some((owner) => owner.sourceAgent === path) ? agentArchivePath(path) : path);
-    bounded(profile(role, config), limitsFor(config).charter, `${role.id} charter`);
+      .map((path) => {
+        const owner = config.roles.find((owner) => owner.sourceAgent === path);
+        return owner ? `.github/agents/crewbie-${owner.id}.agent.md` : path;
+      });
+    const original = role.sourceAgent && (assessment.inventory.files.find((file) => file.path === role.sourceAgent)
+      ?? assessment.inventory.files.find((file) => file.path === agentArchivePath(role.sourceAgent!)));
+    bounded(original ? adoptedProfile(role, config, original.content) : profile(role, config), limitsFor(config).charter, `${role.id} charter`);
   }
   result.config = config;
   if (!Array.isArray(data.instructions)) throw new Error("Proposed instructions must be a list.");
@@ -206,6 +215,10 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
     if (finding.action === "edit" && (!finding.editPaths?.length || finding.editPaths.some((path) => !result.instructions.some((edit) => edit.path === path)))) {
       throw new Error(`Assessment promises guidance edits without replacement text: ${finding.path ?? finding.area}. Supply the edits or explicitly defer the recommendation.`);
     }
+    if (finding.action !== "edit" && finding.editPaths?.length) throw new Error(`Only edit findings may list editPaths: ${finding.path ?? finding.area}.`);
+    if (finding.action === "edit" && finding.path !== null && instructionFile(finding.path) && !finding.editPaths?.includes(finding.path)) {
+      throw new Error(`Include the source replacement for ${finding.path}; scoped moves must update both source and destination.`);
+    }
   }
   if (data.constitutionText !== null && data.constitutionText !== undefined) {
     if (config.constitution) throw new Error("Reuse the existing constitution. Amendments require separate human review.");
@@ -223,7 +236,7 @@ export async function proposeSetup(
   let answers = description;
   for (let attempt = 0; attempt < 6; attempt++) {
     const started = Date.now();
-    const waiting = setInterval(() => io.report(`Still analysing your codebase and existing guidance (${Math.floor((Date.now() - started) / 1000)}s elapsed). Thanks for waiting - I'll show you the proposed crew before changing anything.`), 15_000);
+    const waiting = setInterval(() => io.report(`  Still analysing... ${Math.floor((Date.now() - started) / 1000)}s elapsed. No installation changes.`), 15_000);
     waiting.unref();
     let output: string;
     try {
@@ -270,10 +283,20 @@ export async function proposeSetup(
 }
 
 export function renderSetupReview(proposal: SetupProposal): string {
+  const deferred = proposal.review.findings.filter((finding) => finding.action === "defer");
   return [
-    `Assessment complete: ${proposal.review.findings.length} findings; ${proposal.inventory.omitted.length} files outside inspection coverage.`,
-    ...(proposal.status === "ready" ? proposal.config.roles.map((role) => `${proposal.installedRoles.some((existing) => existing.id === role.id) ? "Keep/update" : role.sourceAgent ? "Adopt" : "Specialist"} ${role.id} (${role.model})${role.sourceAgent ? ` from ${role.sourceAgent}` : ""}`) : proposal.questions.map((question) => `Needs clarification: ${question}`)),
-    proposal.instructions.length ? `${proposal.instructions.length} existing-guidance edits proposed; see the Markdown report for the exact text.` : "No existing guidance edits proposed. Assessment recommendations are advisory, not changes that will be applied.",
+    "\n2. Review", "", proposal.review.summary, "",
+    `TEAM | ${proposal.config.roles.length} proposed specialists`,
+    ...(proposal.status === "ready" ? proposal.config.roles.flatMap((role) => [
+      `  ${proposal.installedRoles.some((existing) => existing.id === role.id) ? "Keep/update" : role.sourceAgent ? "Adopt" : "Specialist"} ${role.id} | ${role.model}`,
+      `    ${role.purpose}${role.sourceAgent ? `\n    Source: ${role.sourceAgent} (full instructions retained)` : ""}`,
+    ]) : proposal.questions.map((question) => `  Needs clarification: ${question}`)),
+    "", `GUIDANCE | ${proposal.instructions.length} proposed edits`,
+    ...proposal.instructions.map((edit) => `  ${edit.beforeHash === null ? "Create" : "Update"} ${edit.path}\n    ${edit.reason ?? "Reviewed replacement text."}`),
+    ...(proposal.instructions.length ? ["  Exact replacement text is in the Markdown assessment."] : ["  No concrete guidance edits proposed."]),
+    ...(deferred.length ? ["", `DEFERRED | ${deferred.length} recommendations not included in All`,
+      ...deferred.map((finding) => `  ${finding.path ?? finding.area}\n    ${finding.deferReason}`)] : []),
+    "", `COVERAGE | ${proposal.review.findings.length} findings; ${proposal.inventory.omitted.length} files outside inspection coverage.`,
     proposal.constitutionText ? "A new constitution is proposed for separate approval." : "Existing constitution policy is unchanged.",
   ].join("\n");
 }

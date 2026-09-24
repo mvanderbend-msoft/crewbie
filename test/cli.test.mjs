@@ -83,6 +83,7 @@ test("CLI routes PR finalization to description validation rather than batch pub
     ".crewbie/config.json": JSON.stringify(config()),
     "handoff.json": JSON.stringify({ headSha: "head", beforeHash: "hash", body: "Missing required sections." }),
   });
+
   const result = spawnSync(process.execPath, [cli, "--path", root, "publish", "--pr", "2", "--proposal", "handoff.json"], {
     encoding: "utf8", env: { ...process.env, GH_TOKEN: "fixture-only" },
   });
@@ -92,4 +93,22 @@ test("CLI routes PR finalization to description validation rather than batch pub
   const ambiguous = spawnSync(process.execPath, [cli, "--path", root, "publish", "--pr", "2", "--batch", "batch.json"], { encoding: "utf8" });
   assert.equal(ambiguous.status, 1);
   assert.match(ambiguous.stderr, /either batch publication or PR finalization/);
+});
+
+test("CLI formats real terminal status while JSON and redirected status remain parseable", async (t) => {
+  const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config()), "batch.json": JSON.stringify(batch()) });
+  const terminalRun = (...args) => execFileSync(process.execPath, [
+    "--import", "data:text/javascript," + encodeURIComponent("Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 60 } });"),
+    cli, "--path", root, ...args,
+  ], { encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } });
+  const readable = terminalRun("status", "--batch", "batch.json");
+  assert.match(readable, /CREWBIE \/ STATUS/);
+  assert.match(readable, /TASKS/);
+  assert.doesNotMatch(readable, /"schemaVersion"/);
+  const machine = terminalRun("status", "--batch", "batch.json", "--json");
+  assert.equal(JSON.parse(machine).id, batch().id);
+  assert.deepEqual(JSON.parse(machine), JSON.parse(run(root, "status", "--batch", "batch.json")));
+  const help = run(root, "--help");
+  for (const section of ["SETUP AND GUIDANCE", "PLANNING AND EXECUTION", "STATUS AND REPORTS", "OUTPUT AND AUTHENTICATION"]) assert.ok(help.includes(section));
+  assert.doesNotMatch(help, /\x1b/);
 });

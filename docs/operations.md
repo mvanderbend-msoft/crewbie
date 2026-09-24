@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.10 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.11 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -184,11 +184,16 @@ An adopted role records `sourceAgent` in configuration. Its original moves from
 `.github/agents/NAME.agent.md` to
 `.crewbie/agent-archive/github/agents/NAME.agent.md` (or the corresponding `claude`
 archive). The new active profile is `.github/agents/crewbie-ROLE.agent.md`.
-The archive preserves the complete original bytes; the active profile requires
-reading that charter before work, retains frontmatter tool restrictions, and
-adds Crewbie memory, identity and handoff rules. Known adopted-agent handoffs are
+The archive preserves the complete original bytes as backup provenance. The active
+profile embeds the complete original instruction body, retains the description,
+persona and frontmatter tool restrictions, and adds Crewbie memory, identity and
+handoff rules. The archive is not a substitute for the active instructions.
+Known adopted-agent handoffs are
 retargeted. The selected model governs the active profile. Unsupported tool
 metadata requires manual review rather than silently widening permissions.
+The existing charter word limit covers the entire active file. If the preserved
+body plus Crewbie additions exceed it, init stops before adoption and asks the
+user to shorten the original; it neither truncates instructions nor raises limits.
 
 Archival requires the exact inspected source hash, rejects conflicting archives
 or edited originals, and is idempotent. Archives are written before originals
@@ -219,6 +224,26 @@ Advisory recommendations and unresolved policy decisions are not executable
 changes. If `instructions` is empty and no constitution is proposed, choosing
 guidance application cannot modify existing instruction files; init states this
 explicitly. Skipping guidance preserves those proposals for later review.
+
+Interactive terminals use arrow-key selectors for models and **Team / All / Save**,
+with Save selected by default. Hosted planning and final installation have separate
+confirmations defaulting to no. Ctrl+C cancels; a proposal already saved remains
+available. Noninteractive automation keeps the existing explicit model, proposal,
+apply and guidance flags; it never waits for a selection menu. Previews group
+creation, updates and archival separately.
+
+These selector and active-charter preservation changes, along with the stricter
+review below, are available from alpha.11.
+
+The shared CLI presentation layer also formats other commands: grouped help,
+command headings, status-coloured tables, stacked nested records and separated
+errors. It wraps to terminal width (up to 120 columns), measures Unicode display
+width and falls back to stacked fields when a table would be too narrow.
+`NO_COLOR`, `FORCE_COLOR=0` and `TERM=dumb` disable colours without removing the
+readable layout. Redirected streams retain their previous output shapes; supported
+`--json` views skip terminal decoration. Internal workflow commands remain plain,
+including their unchanged Actions summaries and output files. No formatter changes
+approval, execution or exit-code semantics.
 Use `init --proposal FILE --json` for the machine-readable installation preview.
 
 Init includes every inventoried instruction, custom-agent and MCP configuration
@@ -502,16 +527,24 @@ need semantic review and representative before/after task evidence.
 The 600-word root-guidance review threshold is advisory, not a gate. Scoped
 Copilot instructions need valid YAML `applyTo` globs. When relocating domain
 guidance, review the source reduction and destination together; preserve policy
-coverage and host-specific instruction support. Findings marked as concrete edits
-must reference actual replacement text; recommendations needing decisions remain
-deferred. See the [README sources](../README.md#sources-behind-guidance-assessment).
+coverage and host-specific instruction support. Every finding must explicitly
+select `retain`, `edit` or `defer`. Concrete edits require complete replacements
+listed in `editPaths`; a scoped move must include its source reduction.
+Deferred recommendations require a nonempty `deferReason` identifying the blocker
+and appear separately in the terminal and Markdown report. Routine approval alone
+is not a reason to defer a safe proposal: approval already gates every write.
+The model must assess every inspected file for all justified improvements, not
+stop after one file or the static warning list. Retained guidance needs an
+evidence-based rationale; nothing forces edits to already useful rules.
+See the [README sources](../README.md#sources-behind-guidance-assessment).
 
 The scanner reads visible non-ignored instruction files, README/CONTRIBUTING
 documents and package manifests. It checks at most 32 instruction files, 12
 reference documents and 20 manifests, with 64 KB per file and 512 KB total;
 omissions are reported. Root guidance is prioritized before specialist profiles.
-At most twelve signal details are shown; `signalsOmitted` reports the remaining
-detected warnings rather than silently presenting the sample as complete.
+At most twelve signal details **per instruction file** are included, so a noisy
+root file cannot exhaust the coverage for other files. `signalsOmitted` reports
+remaining detected warnings rather than presenting the sample as complete.
 These are inspection resource limits, **not quality thresholds**. No project
 script or linked URL is executed. The existing configurable charter/spec word
 budgets remain readability constraints, not research-derived quality scores.

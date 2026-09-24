@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.10/crewbie-cli-0.1.0-alpha.10.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.11/crewbie-cli-0.1.0-alpha.11.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.10.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.11.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -94,9 +94,10 @@ Crewbie source repository:
 crewbie init
 ```
 
-Init presents a numbered list of models available to your account, with names,
-IDs and billing multipliers when supplied by Copilot. Choose a number or an exact
-listed ID; invalid choices are reprompted, and `q` cancels. This selects the
+In an interactive terminal, init presents an arrow-key model selector with names,
+IDs and billing multipliers when supplied by Copilot. Use **Up/Down** and **Enter**;
+**Ctrl+C** cancels. Redirected/scripted runs use explicit flags instead of a menu.
+This selects the
 **assessment model**. By default, new specialists receive cost-aware model
 proposals from your live account catalog, with complexity and a rationale in the
 report. Reported token prices/capabilities inform the proposal; missing prices
@@ -125,8 +126,13 @@ boundaries. Broad existing ownership does not rule out a justified specializatio
 For example, existing frontend and backend engineers become distinct
 `crewbie-frontend-engineer` and `crewbie-backend-engineer` specialists, not an
 unrelated combined role. After approval, originals move into
-`.crewbie/agent-archive/`; their complete domain charters remain mandatory context
-and original tool restrictions carry over. Every inspected candidate receives an
+`.crewbie/agent-archive/` as backup provenance. Their **complete original instructions
+remain inside the active Crewbie charter**, alongside Crewbie context and handoff
+rules; tool restrictions, descriptions and professional persona are preserved.
+The selected model and adopted handoff targets are synchronized. The configured
+charter limit stays unchanged: if the full charter cannot fit, init asks you to
+shorten the original before adoption rather than truncating it or raising the limit.
+Every inspected candidate receives an
 adopt/retain decision with a reason. Static detection is evidence, not the roster;
 `maxActive` limits simultaneous work, not the number of specialists.
 
@@ -135,12 +141,34 @@ main behavior, stack/platform (or freedom to choose) and constraints. Init asks
 follow-up questions when the description is insufficient; it never installs a
 guessed team. You can supply context with `--description "..."`.
 
-Review the proposal, then choose **team only**, **team plus guidance/constitution
-changes**, or **save without installing**. Init previews the exact files and
-GitHub labels before confirmation. Existing constitutions remain reusable.
+Review the grouped **Team / Guidance / Deferred / Coverage** summary, then select
+**Team**, **All** (team plus guidance/constitution edits), or **Save** from the
+arrow-key menu. **Save is the default.** Init groups the exact file changes by
+create/update/archive and shows GitHub labels before a separate confirmation,
+which defaults to no. Existing constitutions remain reusable.
 Recommendations are clearly separated from concrete edits: if no guidance edits
 were proposed, init says so. Team-only installation keeps those proposals saved
 for later review instead of discarding them.
+
+Each inspected guidance file receives an explicit **retain**, **edit**, or
+**defer** decision. The review covers discoverable facts, duplication, stale
+commands/links, generic advice, scoping and non-obvious constraints—not just the
+first warning or one file. Safe improvements require complete proposed replacement
+text; scoped moves include both the source reduction and destination. Deferrals
+must name a concrete blocker and are shown separately; **All** does not apply them.
+Static warnings remain evidence to assess, not automatic rewrite instructions.
+
+> Available from alpha.11. Earlier releases use typed choices and
+> archived-charter references.
+
+The terminal formatting also extends beyond init: grouped help, command headings,
+status colours, aligned tables and readable nested details are shared by status,
+doctor, preflight, publication previews and other commands. Narrow terminals use
+stacked fields instead of cramped tables; long paths and Unicode text wrap without
+discarding information. Errors are separated visually from normal output.
+Set `NO_COLOR` to disable colours. Redirected output keeps its existing plain/JSON
+format, and supported `--json` views remain machine-readable even in a terminal.
+These presentation changes are available from alpha.11.
 
 Init separately asks whether to enable hosted planning with the selected model.
 Opting in permits potentially billable planning when a trusted human applies

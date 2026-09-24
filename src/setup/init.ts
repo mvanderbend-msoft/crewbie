@@ -1,4 +1,3 @@
-import { createInterface } from "node:readline/promises";
 import { json, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
 import { modelProfile, parseConfig } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
@@ -9,6 +8,7 @@ import { applyInstallation, installation, setupConfiguration } from "./install.j
 import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
 import { explicitModel, listCopilotModels, type ModelChoice } from "./copilot.js";
 import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
+import { terminalPrompts, type SetupPrompts } from "./terminal.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
@@ -22,6 +22,8 @@ interface InitIO {
   analyze?: Analyze;
   listModels?: () => Promise<ModelChoice[]>;
   ask?: (question: string) => Promise<string>;
+  select?: SetupPrompts["select"];
+  confirm?: SetupPrompts["confirm"];
   report?: (text: string) => void;
 }
 
@@ -54,8 +56,10 @@ export async function installSetup(root: string, value: unknown, options: { appl
 
 export async function initCommand(root: string, options: InitOptions, io: InitIO): Promise<void> {
   const report = io.report ?? console.log;
-  const terminal = !io.ask && process.stdin.isTTY && process.stdout.isTTY ? createInterface({ input: process.stdin, output: process.stdout }) : null;
-  const ask = io.ask ?? (terminal ? async (question: string) => terminal.question(`${question}\n> `) : undefined);
+  const terminal = !io.ask && !options.json && process.stdin.isTTY && process.stdout.isTTY ? terminalPrompts() : undefined;
+  const ask = io.ask ?? terminal?.ask;
+  const select = io.select ?? terminal?.select;
+  const confirm = io.confirm ?? terminal?.confirm;
   try {
     if (options.guidance !== undefined && !["apply", "skip"].includes(options.guidance)) throw new Error("--guidance must be apply or skip.");
     if (options["model-policy"] !== undefined && !["fixed", "cost-aware"].includes(options["model-policy"])) throw new Error("--model-policy must be fixed or cost-aware.");
@@ -73,7 +77,11 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       const hasGuidance = (Array.isArray(proposal.instructions) && proposal.instructions.length > 0) || proposal.constitutionText;
       if (!hasGuidance && !options.json) report("No existing guidance edits proposed; recommendations in the assessment are advisory only.");
       let guidance = options.guidance;
-      if (options.apply && hasGuidance && !guidance && ask) guidance = (await ask("Apply proposed guidance/constitution too? Enter apply or skip (team only).")).trim();
+      if (options.apply && hasGuidance && !guidance && select) guidance = await select("Apply proposed guidance and constitution too?", [
+        { value: "skip", name: "Team only", description: "Keep existing guidance unchanged." },
+        { value: "apply", name: "Team + guidance", description: "Apply the concrete replacements in the reviewed proposal." },
+      ], "skip");
+      else if (options.apply && hasGuidance && !guidance && ask) guidance = (await ask("Apply proposed guidance/constitution too? Enter apply or skip (team only).")).trim();
       if (options.apply && hasGuidance && !guidance) throw new Error("Choose --guidance apply or --guidance skip; guidance changes need a separate decision.");
       if (guidance && !["apply", "skip"].includes(guidance)) throw new Error("Choose apply or skip for guidance.");
       report(await installSetup(root, proposal, {
@@ -93,20 +101,29 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       report(json(assessment));
       return;
     }
+    if (!options.json) report(`\nCrewbie | Setup\n${options.update ? "Reassess the installed team" : "Build a repository-specific team"}\n\n1. Assess  >  2. Review  >  3. Apply\n`);
     let model = options.model ?? "";
     let catalog: ModelChoice[] | undefined;
     if (!model && ask) {
       const models = await (io.listModels ?? listCopilotModels)();
       catalog = models;
       if (!models.length) throw new Error("No available models were returned. Check Copilot access before onboarding.");
-      report("Choose a Copilot model for the assessment (specialist choices are reviewed separately):\n" + models.map((choice, index) =>
+      if (select) {
+        model = await select("Assessment model (specialist models are reviewed separately)", models.map((choice) => ({
+          value: choice.id, name: `${choice.name} (${choice.id})`,
+          description: choice.multiplier === undefined ? "Billing multiplier unavailable; assessment may consume AI credits." : `${choice.multiplier}x billing multiplier; not a token-price estimate.`,
+        })), models[0]!.id);
+        if (!models.some((choice) => choice.id === model)) throw new Error("Choose an assessment model from the inspected catalog.");
+      } else {
+        report("Choose a Copilot model for the assessment (specialist choices are reviewed separately):\n" + models.map((choice, index) =>
         `${index + 1}. ${choice.name} (${choice.id})${choice.multiplier === undefined ? "" : ` - ${choice.multiplier}x billing multiplier`}`).join("\n"));
-      while (!model) {
-        const selected = (await ask("Enter a model number or an exact model ID from the list (q to cancel).")).trim();
-        if (selected.toLowerCase() === "q") throw new Error("Setup cancelled before analysis. No files or labels were changed.");
-        const choice = /^\d+$/.test(selected) ? models[Number(selected) - 1] : models.find((item) => item.id === selected);
-        if (choice) model = choice.id;
-        else report("Invalid choice. Select one of the listed models.");
+        while (!model) {
+          const selected = (await ask("Enter a model number or an exact model ID from the list (q to cancel).")).trim();
+          if (selected.toLowerCase() === "q") throw new Error("Setup cancelled before analysis. No files or labels were changed.");
+          const choice = /^\d+$/.test(selected) ? models[Number(selected) - 1] : models.find((item) => item.id === selected);
+          if (choice) model = choice.id;
+          else report("Invalid choice. Select one of the listed models.");
+        }
       }
     }
     if (!model) throw new Error("Use --model MODEL for LLM onboarding, or --assessment-only for offline inventory.");
@@ -121,7 +138,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield" && !assessment.inventory.files.some((file) => /(?:README|requirements|spec|prd)/i.test(file.path))) {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
-    report("I'm analysing your codebase, existing agents and project guidance to put your crew together. This may take a few minutes and consume AI credits. I'll show you the recommendations before changing anything; no project scripts or MCP servers are run.");
+    report(`\n1. Assess\n  Model: ${model}\n  Reviewing project, instructions, agents and MCP metadata.\n  This may take a few minutes and consume AI credits.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
     const proposal = await proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
       models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
@@ -130,7 +147,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     const markdown = setupReportPath(output);
     await writeAtomic(root, output, json(proposal));
     await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
-    report(`Readable assessment: ${markdown}\nEditable setup: ${output}`);
+    report(`\nSaved for review\n  Assessment: ${markdown}\n  Editable setup: ${output}\n`);
     if (proposal.status === "clarification") {
       throw new Error(`Setup needs clarification; questions saved in ${output}. Rerun init with an expanded --description. No team was installed.`);
     }
@@ -138,13 +155,23 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       report(`Assessment and tailored team saved to ${output}. Review, then run init --proposal ${output} --apply --guidance apply|skip. GitHub labels are created on apply.`);
       return;
     }
-    const choice = (await ask(`Install this proposal? Enter team (adopt/create agents; skip guidance edits), all (also apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " and the proposed constitution" : ""}), or save (no installation).`)).trim().toLowerCase();
+    const choices = [
+      { value: "team", name: "Team", description: "Adopt/create the proposed agents; leave existing guidance unchanged." },
+      { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}.` },
+      { value: "save", name: "Save", description: "Keep the assessment and proposal for later. No installation or GitHub changes." },
+    ];
+    const choice = select ? await select("Install this proposal?", choices, "save")
+      : (await ask(`Install this proposal? Enter team (adopt/create agents; skip guidance edits), all (also apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " and the proposed constitution" : ""}), or save (no installation).`)).trim().toLowerCase();
     if (!["team", "all", "save"].includes(choice)) throw new Error(`Unknown choice; proposal saved to ${output}. Nothing installed.`);
-    if (choice === "save") return;
+    if (choice === "save") { report(`Saved only. No files installed or GitHub labels changed.\nResume: crewbie init --proposal "${output}" --apply --guidance apply|skip`); return; }
     if (!proposal.config.planning?.enabled) {
       let planning: string;
-      do { planning = (await ask(`Enable hosted planning using ${model}? Enter yes or no. New installations default to paid implementation after your exact-head approval and merge; existing explicit execution opt-outs are preserved.`)).trim().toLowerCase(); }
-      while (!["yes", "no"].includes(planning));
+      const message = `Enable hosted planning using ${model}? New installations allow paid implementation after your exact-head approval and merge; existing execution opt-outs are preserved.`;
+      if (confirm) planning = await confirm(message, false) ? "yes" : "no";
+      else {
+        do { planning = (await ask(`${message} Enter yes or no.`)).trim().toLowerCase(); }
+        while (!["yes", "no"].includes(planning));
+      }
       if (planning === "yes") proposal.config.planning = { enabled: true, model,
         executeOnMerge: assessment.configBeforeHash === null ? true : proposal.config.planning?.executeOnMerge === true };
       else report("Hosted planning stays disabled. The ready-for-planning label will not create a plan.");
@@ -157,12 +184,16 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     await writeAtomic(root, output, json(proposal));
     await writeAtomic(root, markdown, renderSetupMarkdown(proposal, await installation(root, selected))
       + `\n## Installation choice\n\n${choice === "all" ? "Team plus the concrete guidance edits listed above." : "Team only. Proposed guidance edits remain in the saved proposal but will not be applied in this run."}\n`);
+    report("\n3. Apply");
     report(await installSetup(root, selected, { apply: false, guidance: "apply", skipLabels: options["skip-labels"] === true }));
-    if ((await ask("Apply exactly these files and labels? Enter yes to confirm.")).trim().toLowerCase() !== "yes") return;
+    const approved = confirm ? await confirm("Apply exactly these files and labels?", false)
+      : (await ask("Apply exactly these files and labels? Enter yes to confirm.")).trim().toLowerCase() === "yes";
+    if (!approved) { report("Not applied. The saved proposal remains available for review."); return; }
     report(await installSetup(root, selected, { apply: true, guidance: "apply", skipLabels: options["skip-labels"] === true }, options["skip-labels"] ? undefined : io.client()));
     proposal.configBeforeHash = textHash(json(selected.config));
     await writeAtomic(root, output, json(proposal));
-  } finally {
-    terminal?.close();
+  } catch (error) {
+    if (error instanceof Error && error.name === "ExitPromptError") throw new Error("Setup cancelled. Any saved proposal remains available; no installation was performed.");
+    throw error;
   }
 }

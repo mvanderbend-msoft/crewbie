@@ -86,7 +86,7 @@ ${role.checks?.length && !["coordinator", "improver"].includes(role.id) ? "" : O
 ${role.checks?.length ? `## Repository checks\n${role.checks.map((check) => `- ${check}`).join("\n")}\n` : ""}${role.nonNegotiables?.length ? `## Repository non-negotiables\n${role.nonNegotiables.map((rule) => `- ${rule}`).join("\n")}\n` : ""}
 
 ## Context and handoff
-${role.sourceAgent ? `Before any task, read the complete original charter at \`${agentArchivePath(role.sourceAgent)}\`. Its ownership, domain rules and tool restrictions remain binding. Identity/model follow this active charter; resolve adopted-agent references through \`.crewbie/config.json\`. Stop for human direction if guidance conflicts.\n` : ""}Before work, read \`.crewbie/instructions.md\` for shared scope, learning and handoff rules,
+${role.sourceAgent ? `The original instructions are included above. Backup provenance: \`${agentArchivePath(role.sourceAgent)}\`. Resolve adopted-agent references through \`.crewbie/config.json\`; surface conflicting guidance for human direction.\n` : ""}Before work, read \`.crewbie/instructions.md\` for shared scope, learning and handoff rules,
 ${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions.md\`,
 \`.crewbie/team/${role.id}/hot.md\`, and \`.crewbie/team/${role.id}/index.md\`.
 Read linked cold/archive detail only when relevant. Follow applicable repository instructions.
