@@ -78,7 +78,8 @@ export async function publishProposal(client: GitHubApi, config: Config, proposa
     "## Checks\nValidated allowed paths, current content fingerprints, evidence references and word budgets. Application tests were not run for these guidance changes. Human review and merge are required.",
     marker,
   ].filter(Boolean).join("\n\n");
-  bounded(body.replace(/<!--[\s\S]*?-->/g, ""), limitsFor(config).pr, "Combined improvement PR description; review or curate the pending proposal");
+  const prLimit = limitsFor(config).pr;
+  if (prLimit !== undefined) bounded(body.replace(/<!--[\s\S]*?-->/g, ""), prLimit, "Combined improvement PR description; review or curate the pending proposal");
   let parent = baseSha;
   if (pulls.length) {
     const ref = record(await client.request("GET", `${prefix}/git/ref/heads/${branch}`), "improvement ref");

@@ -2,8 +2,9 @@ import { readJson, record, string, strings, slug, integer, safePath } from "./co
 
 export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
-export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1500, pr: 250 };
-export type WordLimits = typeof DEFAULT_LIMITS;
+export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1500 };
+/** `pr` has no evidence-backed default; it is enforced only when a repository sets it explicitly. */
+export type WordLimits = typeof DEFAULT_LIMITS & { pr?: number };
 export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
 export function modelProfile(value: unknown): ModelProfile {
@@ -90,6 +91,7 @@ export function parseConfig(value: unknown): Config {
   if (ado && !/^[A-Za-z0-9-]+$/.test(ado.organization)) throw new Error("Use an ADO organization name, not a URL.");
   const rawLimits = data.limits === undefined ? {} : record(data.limits, "word limits");
   const limits = Object.fromEntries(Object.entries(DEFAULT_LIMITS).map(([key, fallback]) => [key, integer(rawLimits[key] ?? fallback, `${key} word limit`, 1, 10000)])) as WordLimits;
+  if (rawLimits.pr !== undefined) limits.pr = integer(rawLimits.pr, "pr word limit", 1, 10000);
   let planning: Config["planning"];
   if (data.planning !== undefined) {
     const value = record(data.planning, "planning");

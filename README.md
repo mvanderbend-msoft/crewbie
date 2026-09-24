@@ -472,7 +472,7 @@ its own permissions or edit application code.
 | Specialist charter | No word limit; GitHub's 30,000-character agent prompt maximum |
 | Role hot memory | 600 words |
 | Role index / active shared decisions | No word limit |
-| PR description | Normally 150-250 words |
+| PR description | No word limit (set `limits.pr` to enforce one) |
 | Concurrent implementation sessions | 2 per repository |
 | Nightly input / improvement PRs | 20 new records / 1 active PR |
 

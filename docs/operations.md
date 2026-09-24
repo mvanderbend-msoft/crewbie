@@ -719,11 +719,12 @@ timeline mentions. A review PR can discuss another task without becoming that
 task's implementation PR or releasing its dependencies.
 
 GitHub's cloud agent runs the Crewbie specialist as a subagent, and its final
-summary replaces the specialist's own PR description. After attribution,
+summary replaces the specialist's own PR description. During attribution,
 reconciliation recovers the specialist's last description from the PR edit
-history (Copilot edits containing `Specialist: crewbie-<role>`) and posts it once
-as a PR comment. This keeps the specialist's voice and handoff visible. If no such
-edit exists, nothing is posted. Adopted personas apply to everything a specialist
+history (Copilot edits containing `Specialist: crewbie-<role>`), restores it as
+the PR body and keeps Copilot's summary as a PR comment. This keeps the
+specialist's voice, handoff and required headings in the PR. If no such edit
+exists, the body is only attributed. Adopted personas apply to everything a specialist
 writes for humans; memory files stay neutral.
 
 With `publish --dispatch-local`, orchestration is one-shot: re-run publication
@@ -860,9 +861,16 @@ There is no silent truncation. Oversized external PR feedback is explicitly
 omitted with a source link, not partially presented as a complete summary.
 
 The report workflow also checks Copilot PR wording using trusted default-branch
-code: short What changed, Why and Checks sections, normally no more than 250 words.
-This checks structure and length, not whether a claimed test actually ran. Human
+code: non-empty What changed, Why and Checks sections. There is no default word
+limit because none is evidence-backed; set `limits.pr` to enforce one.
+This checks structure, not whether a claimed test actually ran. Human
 review still evaluates rationale and evidence.
+
+Copilot's final session summary replaces the specialist's own PR description.
+During attribution Crewbie restores the specialist's last description (its own
+Copilot edit containing `Specialist: crewbie-<role>`) as the PR body and saves
+Copilot's summary as a PR comment first. If that comment cannot be saved, the
+summary stays in the body.
 
 Installation proposes a short PR template only when no existing template is
 found in GitHub's supported repository locations. Existing templates are preserved.

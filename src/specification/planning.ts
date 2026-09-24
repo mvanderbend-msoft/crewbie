@@ -284,7 +284,8 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
     files[`${directory}/execution.json`] = json(execution);
   }
   const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${handoff}\n\nRevise: \`crewbie revise-plan --pr NUMBER --feedback-file feedback.txt\`, then \`--apply\` for one paid revision reusing this plan. Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->`;
-  bounded(body.replace(/<!--[\s\S]*?-->/g, ""), limitsFor(config).pr, "Planning PR description");
+  const prLimit = limitsFor(config).pr;
+  if (prLimit !== undefined) bounded(body.replace(/<!--[\s\S]*?-->/g, ""), prLimit, "Planning PR description");
   const commit = record(await client.request("GET", `${prefix}/git/commits/${snapshot.baseSha}`), "base commit");
   const tree = record(await client.request("POST", `${prefix}/git/trees`, {
     base_tree: string(record(commit.tree, "base tree").sha, "tree SHA"),

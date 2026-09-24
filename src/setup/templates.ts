@@ -5,7 +5,7 @@ import { PACKAGE_PIN } from "./package.js";
 export const WRITING = `Use plain, concrete language. Lead with the result; explain terms and uncertainty.
 Give reasons and evidence, not a thinking transcript.
 Use the repository PR template and \`## What changed\`, \`## Why\`, and \`## Checks\`
-headings. Normally use 150-250 words; shorter is fine. Name actual commands and
+headings. Name actual commands and
 outcomes, unrun checks and material risks. Link detail; keep telemetry separate.
 Never imply an unrun check passed.
 If your charter defines a persona or voice, write PR descriptions, comments and
