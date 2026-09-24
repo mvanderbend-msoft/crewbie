@@ -9,13 +9,26 @@ export type DiscoverModels = () => Promise<ModelChoice[]>;
 export { listCopilotModels };
 const PAUSE = "tags/crewbie/paused";
 
+const LOCK_REF = "tags/crewbie/dispatch-lock";
+export const LOCK_WAIT = { attempts: 60, delayMs: 5_000 };
+
 export async function withDispatchLock<T>(client: GitHubApi, config: Config, action: () => Promise<T>): Promise<T> {
   requireExecution(config);
   const sha = await defaultHead(client, config);
   const prefix = `/repos/${config.repository}`;
-  await client.request("POST", `${prefix}/git/refs`, { ref: "refs/tags/crewbie/dispatch-lock", sha });
+  // Dispatch and plan-release workflows both fire on a planning merge; wait for the short-lived holder instead of failing.
+  for (let attempt = 1; ; attempt++) {
+    try { await client.request("POST", `${prefix}/git/refs`, { ref: `refs/${LOCK_REF}`, sha }); break; }
+    catch (error) {
+      if (!(error instanceof GitHubError) || error.status !== 422) throw error;
+      if (attempt >= LOCK_WAIT.attempts) {
+        throw new Error(`Another Crewbie run still holds refs/${LOCK_REF} after ${Math.round(LOCK_WAIT.attempts * LOCK_WAIT.delayMs / 1000)}s. Nothing was launched. If no Crewbie workflow is running, delete that tag and rerun this workflow.`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT.delayMs));
+    }
+  }
   try { return await action(); }
-  finally { await client.request("DELETE", `${prefix}/git/refs/tags/crewbie/dispatch-lock`); }
+  finally { await client.request("DELETE", `${prefix}/git/refs/${LOCK_REF}`); }
 }
 async function defaultHead(client: GitHubApi, config: Config): Promise<string> {
   const prefix = `/repos/${config.repository}`;

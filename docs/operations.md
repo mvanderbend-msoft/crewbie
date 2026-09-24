@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.16 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.17 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -741,7 +741,10 @@ normal request timeout. Stopping the watcher does not cancel remote sessions.
 Resume with the same approved command after inspecting the reported condition.
 
 The dispatcher obtains an atomic `crewbie/dispatch-lock` Git tag, and a
-`crewbie/claims/<issue-number>` tag before each assignment. These hold no
+`crewbie/claims/<issue-number>` tag before each assignment. When another Crewbie
+run holds the lock (for example, the dispatch and plan-release workflows both fire
+on a planning merge), the run waits up to five minutes. If the lock is still held
+and no Crewbie workflow is running, delete the tag and rerun. These hold no
 transcripts or secrets. Claims deliberately survive unknown network outcomes;
 repeated runs do not blindly start another paid session. Claims also identify
 already-running work when a workflow restarts.

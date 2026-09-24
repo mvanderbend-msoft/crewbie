@@ -196,11 +196,17 @@ test("owner-label tampering cannot redirect an approved task", async () => {
   assert.ok(!fixture.claims.has(1));
 });
 
-test("a concurrent dispatcher cannot acquire the same global capacity lock", async () => {
+test("a concurrent dispatcher waits for the global capacity lock and never double-launches", async () => {
+  const { LOCK_WAIT } = await import("../dist/execution/controls.js");
+  const saved = { ...LOCK_WAIT };
+  Object.assign(LOCK_WAIT, { attempts: 50, delayMs: 5 });
   const fixture = githubFixture();
-  const results = await Promise.allSettled([dispatch(fixture.client, config()), dispatch(fixture.client, config())]);
-  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  try {
+    const results = await Promise.allSettled([dispatch(fixture.client, config()), dispatch(fixture.client, config())]);
+    assert.deepEqual(results.map((result) => result.status), ["fulfilled", "fulfilled"]);
+  } finally { Object.assign(LOCK_WAIT, saved); }
   assert.equal(fixture.assignments.length, 2);
+  assert.equal(new Set(fixture.assignments.map((body) => body.agent_assignment.custom_instructions.match(/issue #(\d+)/)[1])).size, 2);
   assert.equal(fixture.locked, false);
 });
 
@@ -376,4 +382,29 @@ test("closing-reference reads paginate, exclude other repositories and reject pa
   assert.equal((await linkedPull(client, "example/project", 1)).number, 101);
   assert.equal(calls, 2);
   await assert.rejects(linkedPull({ request: async () => ({ errors: [{ message: "Denied" }], data: {} }) }, "example/project", 1), /could not establish/);
+});
+
+test("dispatch lock waits for a concurrent holder and reports a stuck lock", async () => {
+  const { withDispatchLock, LOCK_WAIT } = await import("../dist/execution/controls.js");
+  const saved = { ...LOCK_WAIT };
+  Object.assign(LOCK_WAIT, { attempts: 3, delayMs: 1 });
+  let busy = 2, held = false;
+  const client = {
+    async request(method, path, body) {
+      if (path === "/repos/example/project") return { default_branch: "main" };
+      if (path.endsWith("/branches/main")) return { commit: { sha: "base-sha" } };
+      if (method === "POST" && body?.ref === "refs/tags/crewbie/dispatch-lock") {
+        if (busy-- > 0) throw new GitHubError(422, "locked");
+        held = true; return {};
+      }
+      if (method === "DELETE" && path.endsWith("/dispatch-lock")) { held = false; return null; }
+      throw new Error(`Unexpected ${method} ${path}`);
+    },
+  };
+  try {
+    assert.equal(await withDispatchLock(client, config(), async () => { assert.equal(held, true); return "ran"; }), "ran");
+    assert.equal(held, false);
+    busy = 10;
+    await assert.rejects(withDispatchLock(client, config(), async () => "never"), /still holds refs\/tags\/crewbie\/dispatch-lock/);
+  } finally { Object.assign(LOCK_WAIT, saved); }
 });
