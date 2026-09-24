@@ -2,6 +2,7 @@ import { agentArchivePath, loadConfig } from "../config.js";
 import { GitHubError, hash, json, optionalText, readJson, record, safePath, string, textHash } from "../core.js";
 import { requireApprover, type GitHubApi } from "../tracking/github.js";
 import { applyInstallation, installation } from "./install.js";
+import { copilotVersionCommand, copilotVersionVariable } from "./copilot-version.js";
 import { PACKAGE_PIN, PACKAGE_VERSION } from "./package.js";
 import { describeInstallationFile, renderInstallationPreview } from "./review.js";
 
@@ -26,9 +27,12 @@ export async function updateRepository(root: string, options: { apply?: boolean;
     catch (error) { if (!(error instanceof GitHubError && error.status === 404)) throw error; }
   }
   const variableChange = override !== null && override !== PACKAGE_PIN ? { before: override, after: PACKAGE_PIN } : null;
+  const copilotMissing = !options.offline && !!config.repository && config.planning?.enabled === true && !!client
+    && await copilotVersionVariable(client, config.repository) === null;
+  const copilotNote = copilotMissing ? ` Hosted planning fails until an approved Copilot CLI version is set: ${copilotVersionCommand(config.repository)}` : "";
   const preview = {
     version: PACKAGE_VERSION, files: changes.map(describeInstallationFile), conflicts, packageVariable: variableChange,
-    remoteChecked: !options.offline && !!config.repository,
+    remoteChecked: !options.offline && !!config.repository, ...(copilotMissing ? { copilotVersionMissing: true } : {}),
   };
   if (!options.apply) return options.json ? json(preview) : [
     `Repository integration update using installed CLI ${PACKAGE_VERSION}. No AI assessment or model/policy changes.`,
@@ -36,6 +40,7 @@ export async function updateRepository(root: string, options: { apply?: boolean;
     conflicts.length ? `Preserved edited files (resolve before applying):\n${conflicts.join("\n")}` : "No edited-file conflicts.",
     variableChange ? `Actions CREWBIE_PACKAGE override will change from ${override} to ${PACKAGE_PIN}.`
       : options.offline ? "Offline: Actions variables were not checked; an old CREWBIE_PACKAGE override can still select an older runtime." : "No package-variable change needed.",
+    ...(copilotMissing ? [copilotNote.trim()] : []),
     "Review, then repeat with --apply. Upgrade the CLI separately with npm.",
   ].join("\n");
   if (conflicts.length) throw new Error(`Update blocked; no changes applied. Preserve and reconcile these edited files, then preview again: ${conflicts.join(", ")}`);
@@ -51,5 +56,5 @@ export async function updateRepository(root: string, options: { apply?: boolean;
       throw new Error(`Local integration updated, but CREWBIE_PACKAGE was not updated. Rerun update after resolving GitHub access. ${error instanceof Error ? error.message : "GitHub update failed."}`);
     }
   }
-  return `Updated ${changes.length} repository files to CLI ${PACKAGE_VERSION}; existing policy, models and memory preserved. ${variableChange ? "CREWBIE_PACKAGE updated." : options.offline ? "Offline: remote package override remains unchecked." : "No package-variable change needed."} Commit the reviewed file changes. No workflows or agents were started.`;
+  return `Updated ${changes.length} repository files to CLI ${PACKAGE_VERSION}; existing policy, models and memory preserved. ${variableChange ? "CREWBIE_PACKAGE updated." : options.offline ? "Offline: remote package override remains unchecked." : "No package-variable change needed."}${copilotNote} Commit the reviewed file changes. No workflows or agents were started.`;
 }

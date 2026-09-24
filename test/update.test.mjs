@@ -6,7 +6,7 @@ import { config, fixture } from "./helpers.mjs";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { updateRepository } from "../dist/setup/update.js";
 import { PACKAGE_PIN } from "../dist/setup/package.js";
-import { hash } from "../dist/core.js";
+import { GitHubError, hash } from "../dist/core.js";
 
 async function installed(t) {
   const root = await fixture(t);
@@ -60,6 +60,15 @@ test("repository update previews and synchronizes an old Actions package overrid
   await updateRepository(root, { apply: true }, client);
   assert.equal(value, PACKAGE_PIN);
   assert.equal(writes.length, 1);
+});
+
+test("repository update tells planning installs how to set a missing Copilot CLI version", async (t) => {
+  const root = await installed(t);
+  await writeFile(join(root, ".crewbie/config.json"), JSON.stringify(config({ planning: { enabled: true, model: "planner", executeOnMerge: true } })));
+  const client = { async request() { throw new GitHubError(404, null); } };
+  const preview = await updateRepository(root, {}, client);
+  assert.match(preview, /gh variable set CREWBIE_COPILOT_VERSION --repo example\/project/);
+  assert.equal(JSON.parse(await updateRepository(root, { json: true }, client)).copilotVersionMissing, true);
 });
 
 test("repository update refreshes an unedited old shared policy but preserves an explicit execution opt-out", async (t) => {

@@ -23,7 +23,7 @@ export const PR_TEMPLATE = `## What changed
 
 export function profile(role: Role, config: Config): string {
   const duties: Record<string, string> = {
-    coordinator: "Decompose user-supplied PRDs, specs or issue requirements into implementation tasks. Ask for missing acceptance criteria rather than authoring a PRD/spec. Reassess expertise against repository evidence and each feature. The roster is not fixed: propose custom roles, specialization or retirement with reasons; preserve existing models, history and task ownership until human approval. Give each task one specialist owner, explicit model, dependencies and memory scope. For labeled issue intake, produce a reviewable implementation plan, not execution approval. Batch sources contain requirement inputs only; code, guidance and memory are planning context. Set kind: review for reviews dependent on completed sessions; implementation dependencies require merged PRs. Publish or dispatch implementation only with human approval.",
+    coordinator: "Decompose user-supplied PRDs, specs or issue requirements into implementation tasks. Ask for missing acceptance criteria rather than authoring a PRD/spec. Reassess expertise against repository evidence and each feature. The roster is not fixed: during reviewed init --update, propose custom roles, specialization or retirement with reasons; preserve existing models, history and task ownership until human approval. Planning runs never change the team: assign tasks to existing roles and list missing expertise as team suggestions. Give each task one specialist owner, explicit model, dependencies and memory scope. For labeled issue intake, produce a reviewable implementation plan, not execution approval. Batch sources contain requirement inputs only; code, guidance and memory are planning context. Set kind: review for reviews dependent on completed sessions; implementation dependencies require merged PRs. Publish or dispatch implementation only with human approval.",
     frontend: `## Focus
 Own user-visible behavior, component state and browser/API boundaries. Reuse the existing design system and data-fetching conventions.
 
@@ -158,13 +158,14 @@ Apply reviewed team changes before approving tasks that need those specialists.
 
 For hosted planning, an approved human labels the source issue
 \`crewbie:ready-for-planning\`. With \`planning.enabled\` and an explicit model,
-the coordinator maps supplied requirements to a team and specialist-owned tasks in a PR.
-Review its questions and source revision. With \`planning.executeOnMerge\`,
-the PR includes actual team files and an execution manifest. A configured human
+the coordinator maps supplied requirements to existing specialists in a PR that
+only adds plan files under \`.crewbie/plans/\`; team changes are listed as
+suggestions, never applied. Review its questions and source revision. With \`planning.executeOnMerge\`,
+the PR includes an execution manifest. A configured human
 must approve the exact final head and merge it; Actions then publishes tasks and
 requests guarded native dispatch. Preserve the generated fingerprints; regenerate
 and re-review edited plans. Clarification-only PRs cannot authorize execution.
-Otherwise install the reviewed setup and approve/publish the batch locally.
+Otherwise approve/publish the batch locally.
 The ready label alone authorizes planning, not coding or a verified check.
 
 For implementation, read the user's PRD/spec or issue requirements and capture

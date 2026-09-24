@@ -9,25 +9,39 @@ import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
 import { explicitModel, listCopilotModels, type ModelChoice } from "./copilot.js";
 import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
 import { terminalPrompts, type SetupPrompts } from "./terminal.js";
+import { COPILOT_VERSION_VARIABLE, copilotVersion as copilotVersionOf, copilotVersionCommand, copilotVersionVariable, setCopilotVersion } from "./copilot-version.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
   model?: string; repo?: string; approver?: string[]; description?: string;
   guidance?: string; "assessment-only"?: boolean; "skip-labels"?: boolean;
-  json?: boolean;
+  json?: boolean; "copilot-version"?: string;
   "model-policy"?: string; "specialist-model"?: string; "model-profile"?: string;
 }
 interface InitIO {
   client: () => GitHubApi;
   analyze?: Analyze;
   listModels?: () => Promise<ModelChoice[]>;
+  latestCopilotVersion?: () => Promise<string | undefined>;
   ask?: (question: string) => Promise<string>;
   select?: SetupPrompts["select"];
   confirm?: SetupPrompts["confirm"];
   report?: (text: string) => void;
 }
 
-export async function installSetup(root: string, value: unknown, options: { apply: boolean; guidance: "apply" | "skip"; skipLabels: boolean; json?: boolean }, client?: GitHubApi): Promise<string> {
+async function planningVariable(client: GitHubApi, repository: string, version: string | undefined): Promise<string> {
+  let existing: string | null;
+  try {
+    existing = await copilotVersionVariable(client, repository);
+    if (existing) return `Hosted planning uses Copilot CLI ${existing} (${COPILOT_VERSION_VARIABLE}).`;
+    if (version) { await setCopilotVersion(client, repository, version); return `${COPILOT_VERSION_VARIABLE} set to ${version} for hosted planning.`; }
+  } catch (error) {
+    return `Could not check or set ${COPILOT_VERSION_VARIABLE} (${error instanceof Error ? error.message : "GitHub request failed"}). Hosted planning fails until it is set: ${copilotVersionCommand(repository, version)}`;
+  }
+  return `Hosted planning fails until an approved Copilot CLI version is set: ${copilotVersionCommand(repository)}`;
+}
+
+export async function installSetup(root: string, value: unknown, options: { apply: boolean; guidance: "apply" | "skip"; skipLabels: boolean; json?: boolean; copilotVersion?: string | undefined }, client?: GitHubApi): Promise<string> {
   const raw = record(value, "setup proposal");
   if (raw.status === "clarification") throw new Error("Answer the setup questions and rerun init before creating a team.");
   const config = setupConfiguration(raw);
@@ -38,7 +52,11 @@ export async function installSetup(root: string, value: unknown, options: { appl
   };
   const changes = await installation(root, proposal);
   const labels = options.skipLabels ? [] : setupLabels(config);
-  if (!options.apply) return options.json ? json({ files: changes.map(describeInstallationFile), labels, repository: config.repository }) : renderInstallationPreview(changes, labels, config.repository);
+  const copilotVersion = options.copilotVersion === undefined ? undefined : copilotVersionOf(options.copilotVersion);
+  const planning = config.planning?.enabled === true && !options.skipLabels;
+  if (!options.apply) return options.json ? json({ files: changes.map(describeInstallationFile), labels, repository: config.repository, ...(planning && copilotVersion ? { copilotVersion } : {}) })
+    : renderInstallationPreview(changes, labels, config.repository)
+      + (planning && copilotVersion ? `\nACTIONS VARIABLE | ${COPILOT_VERSION_VARIABLE}=${copilotVersion} if unset` : "");
   if (!options.skipLabels) {
     if (!config.repository || !config.approvers.length) throw new Error("Set repository and human approvers before creating GitHub labels, or explicitly use --skip-labels for offline setup.");
     if (!client) throw new Error("GitHub authentication is required to create setup labels.");
@@ -51,7 +69,8 @@ export async function installSetup(root: string, value: unknown, options: { appl
       throw new Error(`Local setup was applied, but GitHub labels are incomplete. Rerun the same init --proposal ... --apply command; matching labels are preserved. ${error instanceof Error ? error.message : "Label creation failed."}`);
     }
   }
-  return `Applied ${changes.length} reviewed file changes (${changes.filter((change) => change.before !== null && change.after !== null).length} existing files updated, ${changes.filter((change) => change.after === null).length} original agents archived). ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}`;
+  const variable = planning && client ? ` ${await planningVariable(client, config.repository, copilotVersion)}` : "";
+  return `Applied ${changes.length} reviewed file changes (${changes.filter((change) => change.before !== null && change.after !== null).length} existing files updated, ${changes.filter((change) => change.after === null).length} original agents archived). ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}${variable}`;
 }
 
 export async function initCommand(root: string, options: InitOptions, io: InitIO): Promise<void> {
@@ -86,6 +105,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       if (guidance && !["apply", "skip"].includes(guidance)) throw new Error("Choose apply or skip for guidance.");
       report(await installSetup(root, proposal, {
         apply: options.apply === true, guidance: guidance === "skip" ? "skip" : "apply", skipLabels: options["skip-labels"] === true, json: options.json === true,
+        copilotVersion: options["copilot-version"],
       }, options.apply && !options["skip-labels"] ? io.client() : undefined));
       return;
     }
@@ -180,16 +200,28 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (!proposal.config.approvers.length && !options["skip-labels"]) {
       proposal.config.approvers = (await ask("Human GitHub approver logins, comma-separated?")).split(",").map((login) => login.trim()).filter(Boolean);
     }
+    let copilotVersion = options["copilot-version"] === undefined ? undefined : copilotVersionOf(options["copilot-version"]);
+    if (proposal.config.planning?.enabled && !options["skip-labels"] && proposal.config.repository && copilotVersion === undefined
+      && await Promise.resolve().then(() => copilotVersionVariable(io.client(), proposal.config.repository)).catch(() => null) === null) {
+      const latest = await io.latestCopilotVersion?.();
+      const message = `Copilot CLI version for hosted planning? Sets the missing ${COPILOT_VERSION_VARIABLE} Actions variable.`
+        + (latest ? ` Press Enter for the latest release, ${latest}.` : " Leave empty to set it later.");
+      for (;;) {
+        const answer = (await ask(message)).trim() || latest;
+        if (!answer) { report(`Hosted planning fails until you run: ${copilotVersionCommand(proposal.config.repository)}`); break; }
+        try { copilotVersion = copilotVersionOf(answer); break; } catch (error) { report(error instanceof Error ? error.message : String(error)); }
+      }
+    }
     const selected = selectGuidance(proposal, choice === "all");
     await writeAtomic(root, output, json(proposal));
     await writeAtomic(root, markdown, renderSetupMarkdown(proposal, await installation(root, selected))
       + `\n## Installation choice\n\n${choice === "all" ? "Team plus the concrete guidance edits listed above." : "Team only. Proposed guidance edits remain in the saved proposal but will not be applied in this run."}\n`);
     report("\n3. Apply");
-    report(await installSetup(root, selected, { apply: false, guidance: "apply", skipLabels: options["skip-labels"] === true }));
+    report(await installSetup(root, selected, { apply: false, guidance: "apply", skipLabels: options["skip-labels"] === true, copilotVersion }));
     const approved = confirm ? await confirm("Apply exactly these files and labels?", false)
       : (await ask("Apply exactly these files and labels? Enter yes to confirm.")).trim().toLowerCase() === "yes";
     if (!approved) { report("Not applied. The saved proposal remains available for review."); return; }
-    report(await installSetup(root, selected, { apply: true, guidance: "apply", skipLabels: options["skip-labels"] === true }, options["skip-labels"] ? undefined : io.client()));
+    report(await installSetup(root, selected, { apply: true, guidance: "apply", skipLabels: options["skip-labels"] === true, copilotVersion }, options["skip-labels"] ? undefined : io.client()));
     proposal.configBeforeHash = textHash(json(selected.config));
     await writeAtomic(root, output, json(proposal));
   } catch (error) {

@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.14/crewbie-cli-0.1.0-alpha.14.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.15/crewbie-cli-0.1.0-alpha.15.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.14.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.15.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -211,7 +211,8 @@ Without a terminal, init saves the assessment/team JSON for review. Apply with
 `--guidance skip` to keep existing guidance, or `--guidance apply` to include
 the proposed changes. All workflow labels, including `crewbie:ready-for-planning`
 and dynamic owner labels, are created on apply. `--skip-labels` explicitly opts
-out for offline setup. Edited-file conflicts stop installation.
+out for offline setup. With hosted planning enabled, `--copilot-version X.Y.Z`
+sets a missing `CREWBIE_COPILOT_VERSION` (interactive init asks). Edited-file conflicts stop installation.
 Installation previews are readable file/action lists; use
 `crewbie init --proposal crewbie-setup.json --json` for a JSON preview.
 
@@ -294,12 +295,13 @@ With [hosted planning enabled](docs/operations.md#ready-label-issue-intake):
 
 1. Put the spec/PRD text in a GitHub issue.
 2. A configured human approver adds **`crewbie:ready-for-planning`**.
-3. The hosted coordinator reads its charter/history and repository assessment,
-   proposes the right crew, and decomposes the work into specialist-owned tasks.
+3. The hosted coordinator reads its charter/history and repository assessment
+   and decomposes the work into tasks owned by the existing specialists.
 4. A ready-for-review, **non-draft** planning PR presents specialist-owned tasks and
-   dependencies. Files use readable paths such as
-   `.crewbie/plans/saved-signals-favorites-issue-1/`. In merge-enabled mode it includes
-   the actual team files too. Clarification-only plans remain drafts; repository
+   dependencies. It only adds files under readable paths such as
+   `.crewbie/plans/saved-signals-favorites-issue-1/`; agents, memory and
+   configuration are never changed (missing expertise is listed as a suggestion).
+   Clarification-only plans remain drafts; repository
    checks and review requirements still apply.
 5. **Approve the final planning commit and merge the PR.** With
    `planning.executeOnMerge` enabled, Actions publishes the approved tasks and

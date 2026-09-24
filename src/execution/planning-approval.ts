@@ -56,10 +56,8 @@ function executionManifest(value: unknown): PlanExecution {
     configHash: digest(data.configHash), batchDigest: digest(data.batchDigest), files,
   };
 }
-export function allowedPlanningFile(path: string, directory: string, config: Config): boolean {
-  if ([`${directory}/setup.json`, `${directory}/batch.json`, `${directory}/plan.md`, ".crewbie/config.json", ".crewbie/managed.json"].includes(path)) return true;
-  return config.roles.some((role) => path === `.github/agents/crewbie-${role.id}.agent.md`
-    || ["hot", "index"].some((tier) => path === `.crewbie/team/${role.id}/${tier}.md`));
+export function allowedPlanningFile(path: string, directory: string): boolean {
+  return [`${directory}/setup.json`, `${directory}/batch.json`, `${directory}/plan.md`].includes(path);
 }
 export function planningLocation(ref: string): { sourceIssue: number; keyPrefix: string; directory: string } {
   const match = /^crewbie\/plans\/((?:[a-z0-9]+(?:-[a-z0-9]+)*-)?issue-(\d+))-([a-f0-9]{16})$/.exec(ref);
@@ -129,7 +127,7 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   }
   const contents = new Map<string, string>();
   for (const path of expected) {
-    if (path !== manifestPath && !allowedPlanningFile(path, directory, config)) throw new Error(`Planning manifest contains an unapproved file: ${path}`);
+    if (path !== manifestPath && !allowedPlanningFile(path, directory)) throw new Error(`Planning manifest contains a non-plan file: ${path}. Planning PRs may only add plan files; regenerate the plan.`);
     const approved = path === manifestPath ? manifestFile : await repoText(client, config.repository, path, headSha);
     const file = changed.get(path);
     if (file) {

@@ -40,35 +40,6 @@ async function checkedChanges(root: string, files: Record<string, string | null>
   }
   return changes;
 }
-export async function teamInstallation(root: string, current: Config, proposed: Config): Promise<Record<string, string>> {
-  if (json({ ...current, roles: [] }) !== json({ ...proposed, roles: [] })) throw new Error("A planning PR may change the team, not execution permissions or unrelated policy.");
-  const owned = record(await readJson(await safePath(root, ".crewbie/managed.json")), "managed file manifest");
-  const files: Record<string, string> = { ".crewbie/config.json": json(proposed) };
-  for (const role of proposed.roles) {
-    const previous = current.roles.find((existing) => existing.id === role.id);
-    const path = `.github/agents/crewbie-${role.id}.agent.md`;
-    if (!previous || json(previous) !== json(role)) {
-      if (role.sourceAgent !== previous?.sourceAgent) throw new Error("Adopt original agents through reviewed init, not a planning PR.");
-      const charter = await roleProfile(root, role, proposed);
-      agentPrompt(charter, `${role.id} charter`);
-      files[path] = charter;
-    } else if (await optionalText(await safePath(root, path)) === null) throw new Error(`Restore the existing specialist charter before planning: ${path}`);
-    for (const tier of ["hot", "index"]) {
-      const memory = `.crewbie/team/${role.id}/${tier}.md`;
-      if (await optionalText(await safePath(root, memory)) !== null) continue;
-      if (previous) throw new Error(`Restore existing role memory before planning: ${memory}`);
-      files[memory] = memorySeed(role.id, tier);
-    }
-  }
-  const changes = await checkedChanges(root, files, owned);
-  const result: Record<string, string> = {};
-  for (const change of changes) {
-    if (change.after === null) throw new Error("Planning cannot delete team files.");
-    result[change.path] = change.after;
-  }
-  if (changes.length) result[".crewbie/managed.json"] = json({ ...owned, ...Object.fromEntries(Object.entries(result).map(([path, content]) => [path, textHash(content)])) });
-  return result;
-}
 export async function installation(root: string, proposal: unknown, conflicts?: string[]): Promise<FileChange[]> {
   const data = record(proposal, "setup proposal");
   if (data.status === "clarification") throw new Error("Resolve setup clarification questions before installation.");

@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { assess } from "../dist/setup/assessment.js";
 import { parseSetupReview, proposeSetup, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
 import { initCommand as runInit, installSetup } from "../dist/setup/init.js";
-import { installation, applyInstallation, teamInstallation } from "../dist/setup/install.js";
+import { installation, applyInstallation } from "../dist/setup/install.js";
 import { profile } from "../dist/setup/templates.js";
 import { setupLabels } from "../dist/tracking/issues.js";
 import { config, fixture } from "./helpers.mjs";
+import { GitHubError } from "../dist/core.js";
 
 const initCommand = (root, options, io) => runInit(root, { "model-policy": "fixed", ...options }, io);
 
@@ -416,6 +417,25 @@ test("label failure reports partial setup and a retry repairs remote state", asy
   await installSetup(root, proposal, { apply: true, guidance: "skip", skipLabels: false }, remote.client);
 });
 
+test("planning install sets a missing Copilot CLI version and never overwrites an existing one", async (t) => {
+  const root = await fixture(t);
+  const proposal = { config: config({ planning: { enabled: true, model: "planner", executeOnMerge: true } }), constitutionText: null, instructions: [] };
+  const remote = githubLabels(), variables = {};
+  const request = remote.client.request;
+  remote.client.request = async (method, path, body) => {
+    const name = path.match(/\/actions\/variables\/(.+)$/)?.[1];
+    if (method === "GET" && name) { if (!variables[name]) throw new GitHubError(404, null); return { value: variables[name] }; }
+    if (method === "POST" && path.endsWith("/actions/variables")) { variables[body.name] = body.value; return null; }
+    return request(method, path, body);
+  };
+  await assert.rejects(installSetup(root, proposal, { apply: false, guidance: "skip", skipLabels: false, copilotVersion: "latest" }), /must be exact/);
+  const missing = await installSetup(root, proposal, { apply: true, guidance: "skip", skipLabels: false }, remote.client);
+  assert.match(missing, /gh variable set CREWBIE_COPILOT_VERSION --repo example\/project/);
+  assert.match(await installSetup(root, proposal, { apply: true, guidance: "skip", skipLabels: false, copilotVersion: "1.0.88" }, remote.client), /set to 1\.0\.88/);
+  assert.match(await installSetup(root, proposal, { apply: true, guidance: "skip", skipLabels: false, copilotVersion: "1.0.99" }, remote.client), /uses Copilot CLI 1\.0\.88/);
+  assert.equal(variables.CREWBIE_COPILOT_VERSION, "1.0.88");
+});
+
 test("interactive init shows assessment and preview before applying team-only choice", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export const value = 1;", "AGENTS.md": "Existing guidance." });
   const report = await assess(root);
@@ -434,6 +454,30 @@ test("interactive init shows assessment and preview before applying team-only ch
   const installed = JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8"));
   assert.deepEqual(installed.roles.map((role) => role.id), ["catalogue"]);
   assert.ok(remote.labels.some((label) => label.name === "crewbie:owner:catalogue"));
+});
+
+test("interactive init with hosted planning asks for a missing Copilot CLI version and sets it", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const value = 1;", "AGENTS.md": "Existing guidance." });
+  const report = await assess(root);
+  const prompts = [], answers = ["team", "yes", "", "yes"], variables = {};
+  const remote = githubLabels();
+  const request = remote.client.request;
+  remote.client.request = async (method, path, body) => {
+    if (method === "GET" && path.endsWith("/actions/variables/CREWBIE_COPILOT_VERSION")) {
+      if (!variables.CREWBIE_COPILOT_VERSION) throw new GitHubError(404, null);
+      return { value: variables.CREWBIE_COPILOT_VERSION };
+    }
+    if (method === "POST" && path.endsWith("/actions/variables")) { variables[body.name] = body.value; return null; }
+    return request(method, path, body);
+  };
+  await initCommand(root, { model: "chosen-model", repo: "example/project", approver: ["maintainer"] }, {
+    analyze: async () => JSON.stringify(response(report)),
+    ask: async (question) => { prompts.push(question); return answers.shift(); },
+    latestCopilotVersion: async () => "1.0.88",
+    client: () => remote.client, report: () => {},
+  });
+  assert.ok(prompts.some((question) => /Copilot CLI version.*1\.0\.88/.test(question)));
+  assert.equal(variables.CREWBIE_COPILOT_VERSION, "1.0.88");
 });
 
 test("adopted agents become Crewbie specialists and originals are archived, not duplicated", async (t) => {
@@ -480,12 +524,6 @@ test("four existing specialists can be adopted while concurrency stays at two", 
   const refreshed = parseSetupReview(JSON.stringify(response(reassessment, { roles: proposal.config.roles })), reassessment, "", "another-model");
   assert.equal(refreshed.config.roles[0].model, "chosen-model");
   assert.deepEqual(await installation(root, refreshed), []);
-  const planned = structuredClone(refreshed.config);
-  planned.roles[0].purpose = "Own accessible frontend flows.";
-  const filesForPlan = await teamInstallation(root, refreshed.config, planned);
-  assert.match(filesForPlan[".github/agents/crewbie-frontend-engineer.agent.md"], /tools:.*read/);
-  assert.match(filesForPlan[".github/agents/crewbie-frontend-engineer.agent.md"], /agent-archive/);
-  assert.ok(!Object.keys(filesForPlan).some((path) => path.startsWith(".crewbie/agent-archive")));
 });
 
 test("agent adoption refuses edited originals, archive collisions and duplicate ownership", async (t) => {

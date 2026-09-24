@@ -13,6 +13,7 @@ import { cancelRun } from "./execution/cancel.js";
 import { watchBatch } from "./execution/watch.js";
 import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/review-loop.js";
 import { initCommand } from "./setup/init.js";
+import { latestCopilotVersion } from "./setup/copilot-version.js";
 import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning, requestPlanningRevision } from "./specification/planning.js";
@@ -46,6 +47,7 @@ SETUP AND GUIDANCE
   init --proposal setup.json --apply --guidance apply|skip
                                                  Install reviewed team and GitHub labels
     --skip-labels                                Explicit offline setup; no GitHub writes
+    --copilot-version X.Y.Z                      Set CREWBIE_COPILOT_VERSION for hosted planning if unset
   init --proposal setup.json --update             Preview safe managed-file upgrades
     --json                                       Machine-readable installation preview
   update [--apply] [--offline] [--json]            Update repository integration without AI reassessment
@@ -111,6 +113,7 @@ async function main(): Promise<void> {
       update: { type: "boolean" }, batch: { type: "string" }, yes: { type: "boolean" },
       description: { type: "string" }, approver: { type: "string", multiple: true },
       guidance: { type: "string" }, "assessment-only": { type: "boolean" }, "skip-labels": { type: "boolean" },
+      "copilot-version": { type: "string" },
       execute: { type: "boolean" }, source: { type: "string" }, issue: { type: "string" },
       "ado-id": { type: "string" }, "ado-create": { type: "boolean" },
       "dispatch-local": { type: "boolean" },
@@ -136,7 +139,7 @@ async function main(): Promise<void> {
   if (command === "publish" && values.pr !== undefined && values.batch) throw new Error("Choose either batch publication or PR finalization, not both.");
   const root = resolve(values.path ?? ".");
   if (command === "init") {
-    await initCommand(root, values, { client: () => api(token()), report: output.text });
+    await initCommand(root, values, { client: () => api(token()), report: output.text, latestCopilotVersion });
     return;
   }
   if (command === "update") {

@@ -119,7 +119,7 @@ async function planningFixture(t, automatic = false) {
   };
   const candidate = {
     summary: "Propose catalogue paging with bounded requests and explicit retry.",
-    questions: [], roles: cfg.roles,
+    questions: [], teamSuggestions: [],
     batch: { schemaVersion: 1, id: "model-id", spec: "Load a page at a time. Preserve cards and require explicit retry after failure.", tasks: [task("paging")], approval: null },
   };
   const output = (value = candidate) => writeFile(join(root, ".crewbie-planning-output.txt"), JSON.stringify(value));
@@ -148,7 +148,7 @@ test("ready label loads the actual coordinator charter/history and proposes owne
   assert.match(prompt, /name: crewbie-coordinator/);
   assert.match(prompt, /coordinator\/hot\.md/);
   assert.match(prompt, /Preserve posted ledger balances/);
-  assert.match(prompt, /not a fixed roster/);
+  assert.match(prompt, /only writes the plan/);
   assert.match(prompt, /Attachments|attachments have NOT been fetched/);
   assert.match(prompt, /frontend/);
   assert.equal(f.state.writes.length, 0, "Preparation has no remote write capability.");
@@ -221,12 +221,17 @@ test("existing plans are skipped and uncertain branch publication is never overw
   assert.equal(f.state.writes.length, writes);
 });
 
-test("model output supports custom expertise and clarification, but cannot self-approve or bypass role/domain validation", async (t) => {
+test("model output supports clarification and team suggestions, but cannot change the team, self-approve or use unknown owners", async (t) => {
   const f = await planningFixture(t);
   const source = { ...f.state.source, revision: f.state.source.updated_at, labelEvent: 77 };
   const role = { id: "catalogue-performance", purpose: "Own catalogue query performance.", model: "proposed-model", checks: ["Measure bounded query work."], nonNegotiables: ["Preserve stable paging contracts."] };
-  const custom = { ...f.candidate, roles: [role], batch: { ...f.candidate.batch, tasks: [{ ...task("query"), owner: role.id, model: role.model }] } };
-  assert.equal(parsePlan(custom, f.cfg, source).batch.tasks[0].owner, role.id);
+  const custom = { ...f.candidate, teamSuggestions: ["A catalogue performance specialist could own query budgets."] };
+  const plan = parsePlan({ ...custom, roles: [role] }, f.cfg, source);
+  assert.equal(plan.batch.tasks[0].owner, "developer");
+  assert.equal(plan.roles, undefined, "Returned roles are ignored; planning never changes the team.");
+  assert.deepEqual(plan.teamSuggestions, custom.teamSuggestions);
+  assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, tasks: [{ ...task("query"), owner: role.id, model: role.model }] } }, f.cfg, source), /owner\/model/);
+  assert.throws(() => parsePlan({ ...custom, teamSuggestions: ["a", "b", "c", "d"] }, f.cfg, source), /three team suggestions/);
   const sourceOnly = parsePlan({ ...custom, batch: { ...custom.batch, spec: "Invented requirements that the user never supplied." } }, f.cfg, source).batch;
   assert.match(sourceOnly.spec, /https:\/\/github.com\/example\/project\/issues\/12/);
   assert.doesNotMatch(sourceOnly.spec, /Invented requirements/);
@@ -235,22 +240,18 @@ test("model output supports custom expertise and clarification, but cannot self-
   assert.equal(parsePlan({ ...custom, batch: null, questions: ["Which catalogue sort order is required?"] }, f.cfg, source).batch, null);
   assert.throws(() => parsePlan({ ...custom, batch: null }, f.cfg, source), /clarification/);
   assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, approval: { digest: "fake", execute: true } } }, f.cfg, source), /cannot approve/);
-  assert.throws(() => parsePlan({ ...custom, roles: [{ ...role, checks: [] }] }, f.cfg, source), /domain checks/);
-  assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, tasks: [task("wrong-owner")] } }, f.cfg, source), /owner\/model/);
+  assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, tasks: [{ ...task("wrong-model"), model: "other-model" }] } }, f.cfg, source), /owner\/model/);
   assert.throws(() => parsePlan({ ...custom, summary: "word ".repeat(101) }, f.cfg, source), /100 words/);
   assert.throws(() => parsePlan({ ...custom, summary: "-----BEGIN PRIVATE KEY-----" }, f.cfg, source), /secret/);
 });
 
-test("planning preserves adopted role identities even when omitted by the model", async (t) => {
+test("published plans list team suggestions without writing team files", async (t) => {
   const f = await planningFixture(t);
-  const cfg = structuredClone(f.cfg);
-  cfg.roles[0].sourceAgent = ".github/agents/developer.agent.md";
-  const source = { ...f.state.source, revision: f.state.source.updated_at, labelEvent: 77 };
-  const plan = parsePlan(f.candidate, cfg, source);
-  assert.equal(plan.roles[0].sourceAgent, cfg.roles[0].sourceAgent);
-  const changed = structuredClone(f.candidate);
-  changed.roles[0].sourceAgent = ".github/agents/other.agent.md";
-  assert.throws(() => parsePlan(changed, cfg, source), /through reviewed init/);
+  await preparePlanning(f.root, f.client, f.cfg, f.event);
+  await f.output({ ...f.candidate, teamSuggestions: ["Consider a catalogue performance specialist."], roles: [{ id: "new-role" }] });
+  await publishPlanning(f.root, f.client, f.cfg);
+  assert.ok(f.state.tree.every((entry) => entry.path.startsWith(".crewbie/plans/")));
+  assert.match(f.state.tree.find((entry) => entry.path.endsWith("plan.md")).content, /Team suggestions \(not applied\)[\s\S]*catalogue performance/);
 });
 test("malformed or oversized analysis output cannot write a planning branch", async (t) => {
   const f = await planningFixture(t);
@@ -298,23 +299,18 @@ test("closed, unlabeled and oversized source issues cannot start paid planning",
   assert.equal(f.state.writes.length, 0);
 });
 
-test("description budgets are checked before remote writes and replacing roles cannot bypass the growth cap", async (t) => {
+test("description budgets are checked before remote writes", async (t) => {
   const f = await planningFixture(t);
   const cfg = { ...f.cfg, limits: { ...f.cfg.limits, pr: 30 } };
   await preparePlanning(f.root, f.client, cfg, f.event);
   await f.output();
   await assert.rejects(publishPlanning(f.root, f.client, cfg), /30 words/);
   assert.equal(f.state.writes.length, 0);
-  const role = { purpose: "Specific subsystem.", model: "model", checks: ["Check the contract."], nonNegotiables: ["Preserve data."] };
-  const roles = Array.from({ length: 5 }, (_, i) => ({ ...role, id: `specialist-${i}` }));
-  assert.throws(() => parsePlan({ ...f.candidate, roles }, config({ roles: Array.from({ length: 8 }, (_, i) => ({ ...role, id: `old-${i}` })) }), f.state.source), /four additional roles/);
 });
 
 async function mergedFixture(t, unchangedPaths = []) {
   const f = await planningFixture(t, true);
-  const frontend = { id: "frontend", purpose: "Own the catalogue UI.", model: "approved-model", checks: ["Check progressive loading and explicit retry."], nonNegotiables: ["Preserve loaded cards on failure."] };
-  f.candidate.roles = [...f.cfg.roles, frontend];
-  f.candidate.batch.tasks = [{ ...task("catalogue-ui"), owner: "frontend" }];
+  f.candidate.batch.tasks = [task("catalogue-ui")];
   await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
   await f.output();
   await publishPlanning(f.root, f.client, f.cfg);
@@ -326,16 +322,13 @@ async function mergedFixture(t, unchangedPaths = []) {
   return { ...f, active };
 }
 
-test("merge-enabled planning materializes team files and verifies the exact human-reviewed merge", async (t) => {
+test("merge-enabled planning adds only plan files and verifies the exact human-reviewed merge", async (t) => {
   const f = await mergedFixture(t);
-  for (const path of [".crewbie/config.json", ".github/agents/crewbie-frontend.agent.md", ".crewbie/team/frontend/hot.md", ".crewbie/managed.json", ".crewbie/plans/progressive-catalogue-loading-issue-12/execution.json"]) {
-    assert.ok(f.state.tree.some((entry) => entry.path === path), path);
-  }
-  assert.ok(!f.state.tree.some((entry) => entry.path.startsWith(".github/workflows/")));
+  assert.deepEqual(f.state.tree.map((entry) => entry.path).sort(), ["batch.json", "execution.json", "plan.md", "setup.json"].map((name) => `.crewbie/plans/progressive-catalogue-loading-issue-12/${name}`));
   const proof = await approvedMergedPlan(f.client, f.active, 13);
   assert.equal(proof.batch.approval.execute, true);
   assert.equal(proof.approver, "maintainer");
-  assert.equal(proof.batch.tasks[0].owner, "frontend");
+  assert.equal(proof.batch.tasks[0].owner, "developer");
   assert.equal(f.state.writes.length, 0, "Authorization is read-only.");
 });
 
@@ -404,7 +397,7 @@ test("unchanged manifest entries cannot authorize unrelated files", async (t) =>
   }
   f.state.diff.find((file) => file.filename === manifestPath).sha =
     (await f.client.request("GET", `/repos/example/project/contents/${manifestPath}?ref=${"b".repeat(40)}`)).sha;
-  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /unapproved/);
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /non-plan file/);
   assert.equal(f.state.writes.length, 0);
 });
 
@@ -432,7 +425,7 @@ test("approved merge automatically publishes specialist issues, records provenan
   const f = await mergedFixture(t);
   assert.match(await releaseMergedPlan(f.client, f.active, 13), /dispatch requested/);
   assert.equal(f.state.executionIssues.length, 1);
-  assert.ok(f.state.executionIssues[0].labels.includes("crewbie:owner:frontend"));
+  assert.ok(f.state.executionIssues[0].labels.includes("crewbie:owner:developer"));
   assert.equal(f.state.comments.get(100).length, 2);
   assert.match(f.state.comments.get(100)[0].body, /Execution: approved/);
   assert.match(f.state.comments.get(100)[1].body, /approval and maintainer's merge/);

@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.14 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.15 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -212,9 +212,10 @@ manifest inspection: at most 20 manifests, 64 KB each and 512 KB total. Omitted
 or malformed manifests are disclosed. Fixture, example and generated paths do
 not automatically grow the team. No project script is executed.
 
-Built-in signals are not a role enum. The coordinator must also consider the
-feature's domain and can propose custom roles, splits, specialization or
-retirement. Review proposed purpose, checks, non-negotiables and models before
+Built-in signals are not a role enum. During init, the coordinator must also consider the
+project's domain and can propose custom roles, splits, specialization or
+retirement. Planning runs never change the team; they only list suggestions.
+Review proposed purpose, checks, non-negotiables and models before
 applying. New roles use the explicitly selected init model, subject to setup review.
 Existing roles and their domain guidance remain intact unless explicitly edited.
 
@@ -364,13 +365,16 @@ the listed conflicts rather than changing ownership hashes blindly. `--offline`
 leaves remote variables unchecked. Existing execution opt-outs and models remain
 unchanged.
 
-Set an approved exact
-`CREWBIE_COPILOT_VERSION` (the earlier hosted CLI runs used `1.0.87`), and allow
+Hosted planning needs an approved exact `CREWBIE_COPILOT_VERSION`. When planning
+is enabled and the variable is unset, interactive init asks for it (Enter accepts
+the latest `@github/copilot` release) and creates it on apply; scripted
+`init --proposal ... --apply` takes `--copilot-version X.Y.Z`. An existing value
+is never overwritten, and `crewbie update` reports a missing one. Also allow
 Actions to create pull requests. Copilot billing/organization policy still
-applies. No saved user token is required for planning:
+applies. No saved user token is required for planning. To set it manually:
 
 ```powershell
-gh variable set CREWBIE_COPILOT_VERSION --repo OWNER/REPO --body "1.0.87"
+gh variable set CREWBIE_COPILOT_VERSION --repo OWNER/REPO --body "1.0.88"
 ```
 
 Init creates the ready-for-planning label with the other workflow labels.
@@ -391,10 +395,10 @@ measurements are not inferred.
 
 The publisher rechecks the source, label approval, policy and default-branch
 revision. It creates a non-draft PR with `.crewbie/plans/<feature>-issue-N/` files: a concise
-human-facing plan, a setup proposal and an unapproved task batch when requirements
-are sufficient. Merge-enabled plans also include the actual reviewed team files
-and an execution manifest, as described below. Each task names an owner, model and dependencies.
-Custom specialists need domain checks and non-negotiables. Missing requirements
+human-facing plan, an unchanged configuration copy and an unapproved task batch when requirements
+are sufficient. Merge-enabled plans also include an execution manifest, as described
+below. Each task names an existing owner, its model and dependencies; missing
+expertise appears as team suggestions, not new roles. Missing requirements
 produce questions rather than fabricated acceptance criteria; those PRs remain drafts.
 Non-draft means ready for review, not permission to bypass branch protection.
 Already-generated legacy `issue-N` directories remain executable.
@@ -449,15 +453,16 @@ Enable `crewbie-execute-plan.yml` and `crewbie-dispatch.yml` if previously disab
 The built-in job token is sufficient for planning, **not native assignment**.
 
 For subsequent features, your only handoff is to review the planning PR, approve
-its exact final commit, and merge it into the default branch. Ready plans include:
+its exact final commit, and merge it into the default branch. Ready plans only add
+files under `.crewbie/plans/<issue>/`:
 
-- The concise spec and task batch.
-- Actual configuration, changed/new specialist charters and missing new-role
-  hot/index seeds. Existing history and unchanged human-customized charters stay intact.
+- The concise plan, task batch and any team suggestions (never applied).
+- A copy of the unchanged configuration used for revisions (`setup.json`).
 - A bounded execution manifest identifying the planning run and reviewed files.
 
-The planning PR may change roles, not approvers, concurrency, workflow permissions,
-secrets or unrelated policy. It includes no application changes. Clarification-only
+The planning PR never changes roles, agent charters, memory, configuration,
+approvers, workflows or secrets; any other file blocks execution. Change the team
+through reviewed `crewbie init --update`. It includes no application changes. Clarification-only
 plans do not contain an executable manifest and cannot start work when merged.
 If a generated plan needs edits, regenerate it and review the new commit; changing
 files without refreshing its fingerprints blocks execution rather than accepting
