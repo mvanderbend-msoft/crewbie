@@ -502,6 +502,7 @@ test("adopted agents become Crewbie specialists and originals are archived, not 
   assert.ok(charter.includes(original.split("---\n").at(-1)), "The complete original instructions belong in the active charter.");
   assert.doesNotMatch(charter, /\bedit\b|\bexecute\b/);
   assert.match(charter, /agent-archive\/github\/agents\/frontend-engineer.agent.md/);
+  assert.match(charter, /define a persona or voice, write every PR description/);
   assert.deepEqual(await installation(root, proposal), []);
 });
 

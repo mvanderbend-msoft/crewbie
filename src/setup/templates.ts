@@ -95,7 +95,7 @@ Read linked cold/archive detail only when relevant. Follow applicable repository
 ${role.contextPaths?.length ? `Reuse existing guidance: ${role.contextPaths.map((path) => `\`${path}\``).join(", ")}.\n` : ""}Work from the supplied requirements and approved acceptance criteria.
 Identify yourself as \`crewbie-${role.id}\` in the PR description; distinguish implementation from review.
 Use \`## What changed\`, \`## Why\`, and \`## Checks\`; name real outcomes and remaining risks.
-`;
+${role.sourceAgent ? "If the original instructions define a persona or voice, write every PR description, comment, Learning note and final summary in it; the headings set structure, not tone. Keep memory files neutral.\n" : ""}`;
 }
 
 export const SHARED_INSTRUCTIONS = `# Crewbie shared working rules
