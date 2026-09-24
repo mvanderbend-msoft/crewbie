@@ -8,9 +8,11 @@ export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1
 export type WordLimits = typeof DEFAULT_LIMITS & { pr?: number };
 export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
+export const ADDRESS_REVIEW_LABEL = "crewbie:address-review";
 export type MergeMethod = "merge" | "squash" | "rebase";
-/** A configured approver's approval of the current head is the human gate; Crewbie merges once checks pass. */
-export const DEFAULT_MERGE: { auto: boolean; method: MergeMethod } = { auto: true, method: "merge" };
+/** manual: a human merges. auto: Crewbie merges once the session completed, the reviewer passed the current head and checks passed. */
+export const DEFAULT_MERGE: { mode: "auto" | "manual"; method: MergeMethod } = { mode: "manual", method: "merge" };
+export interface ReviewConfig { enabled: boolean; role: string; model?: string }
 export function modelProfile(value: unknown): ModelProfile {
   if (value !== "economy" && value !== "balanced" && value !== "quality") throw new Error("Model profile must be economy, balanced or quality.");
   return value;
@@ -29,8 +31,16 @@ export interface Config {
   modelProfile?: ModelProfile;
   execution?: typeof DEFAULT_EXECUTION_LIMITS;
   merge?: typeof DEFAULT_MERGE;
+  review?: ReviewConfig;
 }
 export function mergeFor(config: Config): typeof DEFAULT_MERGE { return config.merge ?? DEFAULT_MERGE; }
+/** The enabled reviewer role and the model it runs with, or null when PR review is off. */
+export function reviewerFor(config: Config): { role: string; model: string } | null {
+  if (!config.review?.enabled) return null;
+  const role = config.roles.find((role) => role.id === config.review?.role);
+  if (!role) throw new Error(`review.role ${config.review.role} is not a configured role.`);
+  return { role: role.id, model: config.review.model ?? role.model };
+}
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
 export function isRoleContextPath(path: string): boolean {
   return /^(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+\.md$/i.test(path)
@@ -112,11 +122,23 @@ export function parseConfig(value: unknown): Config {
   let merge: Config["merge"];
   if (data.merge !== undefined) {
     const value = record(data.merge, "merge");
-    if (typeof value.auto !== "boolean") throw new Error("merge.auto must be true or false.");
+    const mode = value.mode ?? DEFAULT_MERGE.mode;
+    if (mode !== "auto" && mode !== "manual") throw new Error("merge.mode must be auto or manual.");
     const method = value.method ?? DEFAULT_MERGE.method;
     if (method !== "merge" && method !== "squash" && method !== "rebase") throw new Error("merge.method must be merge, squash or rebase.");
-    merge = { auto: value.auto, method };
+    merge = { mode, method };
   }
+  let review: ReviewConfig | undefined;
+  if (data.review !== undefined) {
+    const value = record(data.review, "review");
+    if (typeof value.enabled !== "boolean") throw new Error("review.enabled must be true or false.");
+    const role = slug(value.role, "review.role");
+    if (value.enabled && !roles.some((item) => item.id === role)) throw new Error(`review.role ${role} is not a configured role.`);
+    const model = value.model === undefined ? undefined : string(value.model, "review.model");
+    if (model !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) || model.toLowerCase() === "auto")) throw new Error("Choose an explicit review model identifier, not auto.");
+    review = { enabled: value.enabled, role, ...(model === undefined ? {} : { model }) };
+  }
+  if (merge?.mode === "auto" && !review?.enabled) throw new Error("merge.mode auto merges only after the Crewbie reviewer passes the PR; enable review with a reviewer role.");
   return {
     schemaVersion: 1, repository, approvers, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),
@@ -128,6 +150,7 @@ export function parseConfig(value: unknown): Config {
       maxAttemptsPerTask: integer(execution.maxAttemptsPerTask, "maximum attempts per task", 1, 100),
     } }),
     ...(merge ? { merge } : {}),
+    ...(review ? { review } : {}),
   };
 }
 export async function loadConfig(root: string): Promise<Config> {

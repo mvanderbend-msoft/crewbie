@@ -17,6 +17,7 @@ import { latestCopilotVersion } from "./setup/copilot-version.js";
 import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning, requestPlanningRevision } from "./specification/planning.js";
+import { prepareReview, publishReview } from "./execution/pr-review.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
 import { checkPrDescription } from "./specification/prose.js";
 import { api, requireApprover } from "./tracking/github.js";
@@ -334,6 +335,16 @@ async function main(): Promise<void> {
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
       output.text(result.reason);
     } else output.text(await publishPlanning(root, github, config));
+  } else if (command === "internal-review") {
+    if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply for review.");
+    if (values.prepare) {
+      const pr = integer(Number(process.env.PR_NUMBER), "PR number");
+      const head = String(process.env.HEAD_SHA ?? "");
+      if (!/^[a-f0-9]{40}$/.test(head)) throw new Error("Review needs the full PR head SHA.");
+      const result = await prepareReview(root, github, config, pr, head, integer(Number(process.env.GITHUB_RUN_ID), "workflow run ID"));
+      if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
+      output.text(result.reason);
+    } else output.text(await publishReview(root, github, config));
   } else if (command === "internal-release-plan") {
     if (!values.pr) throw new Error("Choose a merged planning PR with --pr.");
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;

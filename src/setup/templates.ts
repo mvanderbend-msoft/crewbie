@@ -1,5 +1,5 @@
 import { agentArchivePath, type Config, type Role } from "../config.js";
-import { executionWorkflow, planningWorkflow } from "./planning-workflow.js";
+import { executionWorkflow, planningWorkflow, reviewWorkflow } from "./planning-workflow.js";
 import { PACKAGE_PIN } from "./package.js";
 
 export const WRITING = `Use plain, concrete language. Lead with the result; explain terms and uncertainty.
@@ -242,7 +242,8 @@ on:
   issues:
     types: [labeled]
   pull_request_target:
-    types: [closed, ready_for_review, review_requested]
+    types: [closed, ready_for_review, review_requested, labeled]
+
   workflow_dispatch:
     inputs:
       issue_numbers:
@@ -259,8 +260,12 @@ concurrency:
   cancel-in-progress: false
 jobs:
   dispatch:
-    # Copilot requests review when its session finishes; other review requests need no reconciliation.
-    if: github.event.action != 'review_requested' || github.event.sender.login == 'Copilot'
+    # Copilot requests review when its session finishes; of PR labels, only address-review needs reconciliation.
+    if: >-
+      github.event_name != 'pull_request_target'
+      || github.event.action == 'closed' || github.event.action == 'ready_for_review'
+      || (github.event.action == 'review_requested' && github.event.sender.login == 'Copilot')
+      || (github.event.action == 'labeled' && github.event.label.name == 'crewbie:address-review')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -271,27 +276,7 @@ ${setup}      - name: Reconcile approved work
           CREWBIE_ISSUE_NUMBERS: \${{ inputs.issue_numbers }}
         run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-dispatch
 `,
-    ".github/workflows/crewbie-approval.yml": `name: Crewbie approval
-# Review events run this file from the PR merge ref, so it holds no Crewbie secrets and runs no PR code.
-# It only asks the default-branch dispatch workflow to reconcile, which merges approved PRs whose checks passed.
-on:
-  pull_request_review:
-    types: [submitted]
-permissions:
-  actions: write
-jobs:
-  request-merge:
-    if: github.event.review.state == 'approved'
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    steps:
-      - name: Request dispatch reconciliation
-        env:
-          GH_TOKEN: \${{ github.token }}
-          REPOSITORY: \${{ github.repository }}
-          BRANCH: \${{ github.event.repository.default_branch }}
-        run: gh workflow run crewbie-dispatch.yml --repo "$REPOSITORY" --ref "$BRANCH"
-`,
+    ".github/workflows/crewbie-review.yml": reviewWorkflow(setup),
     ".github/workflows/crewbie-maintain.yml": `name: Crewbie improvement
 on:
   workflow_dispatch:

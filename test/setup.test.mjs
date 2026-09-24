@@ -169,9 +169,15 @@ test("generated workflows parse and never execute PR-head code", () => {
   assert.equal(dispatcher.concurrency["cancel-in-progress"], false);
   assert.equal(dispatcher.jobs.dispatch.steps[0].with.ref, "${{ github.event.repository.default_branch }}");
   assert.ok(dispatcher.on.pull_request_target.types.includes("review_requested"));
-  const approval = files[".github/workflows/crewbie-approval.yml"];
-  assert.doesNotMatch(approval, /secrets\.|actions\/checkout|npm /, "Review events run the PR's workflow file; it must hold no secrets or code.");
-  assert.deepEqual(YAML.parse(approval).permissions, { actions: "write" });
+  assert.match(dispatcher.jobs.dispatch.if, /github\.event\.label\.name == 'crewbie:address-review'/);
+  assert.equal(files[".github/workflows/crewbie-approval.yml"], undefined);
+  const review = YAML.parse(files[".github/workflows/crewbie-review.yml"]);
+  assert.deepEqual(Object.keys(review.on), ["workflow_dispatch"], "Only dispatch requests reviews, one per PR head.");
+  assert.equal(review["run-name"], "Crewbie review PR #${{ inputs.pr }} at ${{ inputs.head }}");
+  assert.doesNotMatch(files[".github/workflows/crewbie-review.yml"], /secrets\./, "The reviewer uses only the workflow token.");
+  assert.equal(review.jobs.prepare.steps[0].with.ref, "${{ github.event.repository.default_branch }}", "The PR's code is never checked out.");
+  assert.deepEqual(review.jobs.analyze.permissions, { "copilot-requests": "write" });
+  assert.match(review.jobs.analyze.steps.at(-2).run, /--available-tools --silent --deny-tool shell write url/);
   const maintenance = files[".github/workflows/crewbie-maintain.yml"];
   assert.match(maintenance, /--no-custom-instructions --disable-builtin-mcps --available-tools --silent/);
   assert.doesNotMatch(maintenance, /--allow-all/);

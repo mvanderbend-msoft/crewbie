@@ -39,6 +39,8 @@ The installed workflows use:
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
+| Config `review.enabled` / `review.role` | Have a configured role review every finished PR head in a tool-free Copilot CLI job (`review.model` overrides the role's model) |
+| Config `merge.mode` | `manual` (default): you merge. `auto`: Crewbie merges once the reviewer passed the head and checks passed |
 
 Generated workflows embed the exact installed version's GitHub release tarball
 URL. A missing
@@ -792,7 +794,7 @@ An explicitly approved `kind: "review"` task can depend on completed sessions
 with linked PRs; default implementation tasks still require merged prerequisites.
 Changing a task's kind invalidates its approval like other scope changes.
 
-### Restart, ready for review and merge on approval
+### Restart, ready for review, Crewbie review and auto-merge
 
 - **Restart.** A configured approver adds `crewbie:restart` to a task issue whose
   previous session verifiably ended: Copilot reported it could not start, or its
@@ -800,25 +802,39 @@ Changing a task's kind invalidates its approval like other scope changes.
   the lock, reserves a new ledger entry that counts as an attempt, comments the
   attempt number with a `crewbie-restart` marker, reassigns Copilot and removes
   the label. It refuses (and explains in a comment) for other labellers, closed
-  or unapproved issues, open PRs (ask for a continuation instead), sessions not
-  verified as ended and exhausted allowances. Without a free slot it waits.
+  or unapproved issues, open PRs (use `crewbie:address-review` instead), sessions
+  not verified as ended and exhausted allowances. Without a free slot it waits.
 - **Ready for review.** Copilot requests your review when its session finishes;
   that triggers dispatch, which restores the specialist's description and then
   marks the draft PR ready, so the description check runs on the final body. If
   that trigger waits for workflow approval (Copilot-actor runs can require it; see
   *Settings → Copilot → Cloud agent → Actions workflow approval*), the hourly
   reconcile does it instead.
-- **Merge on approval.** `crewbie-approval.yml` runs on an approving review. It
-  runs from the PR's merge ref, so it holds no Crewbie secrets and only asks the
-  default-branch dispatch workflow to reconcile. Dispatch merges when a configured
-  approver's latest review approves the current head, no approver requests changes,
-  every check on that head passed (the newest run of each check counts), and GitHub
-  reports no conflict. It merges with the head SHA pinned and never bypasses branch
-  protection. If a check is still running, the next reconcile merges. Set
-  `"merge": { "auto": false }` to merge manually; `merge.method` accepts `merge`
-  (default), `squash` or `rebase`. When branch protection requires approvals, your
-  approval of a Copilot PR you requested does not count; GitHub then refuses the merge.
-
+- **Crewbie review.** With `"review": { "enabled": true, "role": "<role id>" }`,
+  dispatch starts `crewbie-review.yml` once for each finished PR head. The
+  reviewer reads its own charter and memory from the default branch plus the PR's
+  API diff (the PR's code is never checked out), runs tool-free in Copilot CLI
+  with the role's model, and posts one PR comment: a verdict, a summary and
+  findings marked blocking or minor, in the reviewer's voice. Any blocking finding
+  makes the verdict "changes". Dispatch trusts only comments posted by that
+  default-branch workflow run, started by an approver, for the PR's current head.
+  A failed review run is reported with its link and not retried automatically;
+  re-run it from Actions. Patches that do not fit the Copilot CLI prompt are
+  listed as not reviewed.
+- **Address the review.** A configured approver adds `crewbie:address-review` to
+  the PR. Dispatch continues the specialist's session on the same branch with the
+  review of the current head plus approver PR comments, reviews and line comments
+  posted since the last such request as feedback. It counts as a task attempt and
+  posts the attempt number on the PR. When the session finishes, the new head is
+  reviewed again. Other labellers, a still-running session, no feedback and
+  exhausted allowances are refused with a comment; without a free slot it waits.
+- **Merge.** `merge.mode` is `manual` by default: you merge. With
+  `"merge": { "mode": "auto" }` (which requires the reviewer), dispatch merges
+  once the session completed, the reviewer passed the current head (minor findings
+  allowed), every check on that head passed (the newest run of each check counts)
+  and GitHub reports no conflict. It pins the head SHA and never bypasses branch
+  protection. A partial review, an `address-review` label or a new head blocks the
+  merge. `merge.method` accepts `merge` (default), `squash` or `rebase`.
 ## Nightly learning and bounded history
 
 Set `nightly.enabled` to true in a reviewed setup proposal and install it.

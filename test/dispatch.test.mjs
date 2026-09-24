@@ -6,6 +6,7 @@ import { approvedBatch, issueBody, issueDigest, parseBatch } from "../dist/speci
 import { watchBatch } from "../dist/execution/watch.js";
 import { approvalComment } from "../dist/tracking/issues.js";
 import { config, batch } from "./helpers.mjs";
+import { parseReview, renderReview } from "../dist/execution/pr-review.js";
 const models = async () => [{ id: "approved-model", name: "Approved model" }];
 const dispatch = (client, cfg, ado, scope) => runDispatch(client, cfg, ado, scope, models);
 
@@ -20,16 +21,20 @@ function githubFixture(input = batch()) {
   const fixture = {
     issues, claims, pulls, assignments, launches, paused: false, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false, extraComments: {},
     events: {}, posted: [], unassigned: [], readied: [], merges: [], reviews: [], checkRuns: [], statuses: [],
+    prComments: {}, reviewRuns: [], reviewRequests: [], continuations: [],
     get locked() { return locked; },
     client: {
       async list(path) {
         if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
         if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
-        if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "restart", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
+        if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "restart", "address-review", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
         if (path.includes("/issues?")) return structuredClone(issues);
         const events = /\/issues\/(\d+)\/events$/.exec(path);
         if (events) return fixture.events[Number(events[1])] ?? [];
         if (/\/pulls\/\d+\/reviews$/.test(path)) return fixture.reviews;
+        if (/\/pulls\/\d+\/comments$/.test(path)) return [];
+        const prComments = /\/issues\/(\d+)\/comments$/.exec(path);
+        if (prComments && !issues.some((item) => item.number === Number(prComments[1]))) return fixture.prComments[Number(prComments[1])] ?? [];
         const match = /\/issues\/(\d+)\/(comments|timeline)$/.exec(path);
         if (match) {
           const issue = issues.find((item) => item.number === Number(match[1]));
@@ -67,6 +72,11 @@ function githubFixture(input = batch()) {
             pageInfo: { hasNextPage: false, endCursor: null },
           } } } } };
         }
+        if (path.includes("/actions/workflows/crewbie-review.yml/runs")) return { workflow_runs: fixture.reviewRuns };
+        if (method === "POST" && path.endsWith("/actions/workflows/crewbie-review.yml/dispatches")) { fixture.reviewRequests.push(body); return null; }
+        const run = /\/actions\/runs\/(\d+)$/.exec(path);
+        if (run) return fixture.reviewRuns.find((item) => item.id === Number(run[1]));
+        if (method === "POST" && path === "/agents/repos/example/project/tasks") { fixture.continuations.push(body); return { id: `task-${fixture.continuations.length + 1}` }; }
         if (path.startsWith("/agents/repos/example/project/tasks?")) {
           if (fixture.cloudStatusDenied) throw new GitHubError(403, "status-denied");
           return { tasks: fixture.cloudTasks };
@@ -95,11 +105,20 @@ function githubFixture(input = batch()) {
         }
         if (method === "DELETE" && path.endsWith("/dispatch-lock")) { locked = false; return null; }
         const match = /\/issues\/(\d+)(.*)$/.exec(path);
+        const onPull = match && !issues.some((item) => item.number === Number(match[1])) ? [...pulls.values()].find((item) => item.number === Number(match[1])) : undefined;
+        if (onPull && match[2] === "/comments" && method === "POST") {
+          (fixture.prComments[onPull.number] ??= []).push({ user: { type: "User", login: "maintainer" }, created_at: `z${fixture.posted.length}`, updated_at: `z${fixture.posted.length}`, body: body.body });
+          fixture.posted.push({ issue: onPull.number, comment: { body: body.body } });
+          return {};
+        }
+        if (onPull && method === "DELETE" && match[2].startsWith("/labels/")) {
+          onPull.labels = onPull.labels.filter((label) => label.name !== decodeURIComponent(match[2].slice(8))); return null;
+        }
         if (match) {
           const issue = issues.find((item) => item.number === Number(match[1]));
           if (!match[2]) return structuredClone(issue);
           if (match[2] === "/comments" && method === "POST") {
-            fixture.posted.push({ issue: issue.number, comment: { user: { type: "User", login: "maintainer" }, created_at: `z${fixture.posted.length}`, updated_at: "posted", body: body.body } });
+            fixture.posted.push({ issue: issue.number, comment: { user: { type: "User", login: "maintainer" }, created_at: `z${fixture.posted.length}`, updated_at: `z${fixture.posted.length}`, body: body.body } });
             return {};
           }
           if (match[2] === "/assignees" && method === "DELETE") { fixture.unassigned.push(body); issue.assignees = []; return issue; }
@@ -469,36 +488,116 @@ test("a replanned batch launches its new issue despite a superseded closed issue
   assert.ok(!launched.includes(99));
 });
 
-test("finished Copilot PRs are marked ready, then merged only after an approver approves the current head with passing checks", async () => {
+const HEAD = "a".repeat(40), HEAD2 = "b".repeat(40);
+const reviewing = (overrides = {}) => config({ maxActive: 2, review: { enabled: true, role: "developer" }, merge: { mode: "auto", method: "squash" }, ...overrides });
+function finishedPull(fixture) {
+  fixture.pulls.set(1, { id: 1001, node_id: "PR_1", number: 101, draft: true, state: "open", mergeable: true, labels: [],
+    head: { sha: HEAD, ref: "copilot/foundation" }, base: { ref: "main" }, user: { login: "Copilot" } });
+  fixture.cloudTasks.push({ id: "task-1", state: "completed", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+}
+function reviewRun(fixture, id, head = HEAD, overrides = {}) {
+  fixture.reviewRuns.push({ id, display_title: `Crewbie review PR #101 at ${head}`, status: "completed", conclusion: "success", html_url: `https://run/${id}`,
+    path: ".github/workflows/crewbie-review.yml", event: "workflow_dispatch", head_branch: "main", head_repository: { full_name: "example/project" },
+    actor: { type: "User", login: "maintainer" }, triggering_actor: { type: "User", login: "maintainer" }, ...overrides });
+}
+function reviewComment(fixture, cfg, runId, findings, { head = HEAD, login = "github-actions[bot]" } = {}) {
+  const review = parseReview(JSON.stringify({ verdict: findings.length ? "changes" : "pass", summary: "Grumpy but fair.", findings }));
+  const body = renderReview(cfg, { schemaVersion: 1, pr: 101, head, issue: 1, owner: "developer", role: "developer", runId, omitted: [] }, review);
+  (fixture.prComments[101] ??= []).push({ user: { type: "Bot", login }, created_at: `r${runId}`, updated_at: `r${runId}`, body, html_url: "https://comment" });
+}
+
+test("without a reviewer, finished PRs are marked ready and left for a human merge", async () => {
   const fixture = githubFixture();
   await dispatch(fixture.client, config({ maxActive: 1 }));
-  fixture.pulls.set(1, { id: 1001, node_id: "PR_1", number: 101, draft: true, state: "open", mergeable: true, head: { sha: "head-1" }, user: { login: "Copilot" } });
-  fixture.cloudTasks.push({ id: "task-1", state: "completed", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
-  await dispatch(fixture.client, config({ maxActive: 1 }));
+  finishedPull(fixture);
+  const work = await dispatch(fixture.client, config({ maxActive: 1 }));
   assert.deepEqual(fixture.readied, [101]);
-  assert.equal(fixture.merges.length, 0, "Marking a PR ready never merges it in the same pass.");
+  assert.match(work[0].reason, /awaits your review and merge/);
+  assert.equal(fixture.reviewRequests.length + fixture.merges.length, 0);
+});
+
+test("the Crewbie reviewer reviews each head once; auto mode merges only a trusted pass with passing checks", async () => {
+  const cfg = reviewing();
+  const fixture = githubFixture();
+  await dispatch(fixture.client, cfg);
+  finishedPull(fixture);
+  let work = await dispatch(fixture.client, cfg);
+  assert.deepEqual(fixture.readied, [101]);
+  assert.deepEqual(fixture.reviewRequests, [{ ref: "main", inputs: { pr: "101", head: HEAD } }]);
+  assert.match(work[0].reason, /marked the PR ready[\s\S]*Requested a Crewbie review/);
+  reviewRun(fixture, 7, HEAD, { status: "in_progress", conclusion: null });
+  work = await dispatch(fixture.client, cfg);
+  assert.match(work[0].reason, /reviewing aaaaaaa/);
+  assert.equal(fixture.reviewRequests.length, 1, "One review run per head.");
+  fixture.reviewRuns[0] = { ...fixture.reviewRuns[0], status: "completed", conclusion: "failure" };
+  work = await dispatch(fixture.client, cfg);
+  assert.match(work[0].reason, /ended failure[\s\S]*does not retry/);
+  assert.equal(fixture.reviewRequests.length, 1, "A failed reviewer is reported, never retried automatically.");
+  reviewComment(fixture, cfg, 7, [], { login: "someone" });
+  reviewRun(fixture, 8, HEAD, { head_branch: "copilot/foundation" });
+  reviewComment(fixture, cfg, 8, []);
+  work = await dispatch(fixture.client, cfg);
+  assert.equal(fixture.merges.length, 0, "Forged comments and runs outside the default-branch workflow are not trusted.");
+  reviewRun(fixture, 9);
+  reviewComment(fixture, cfg, 9, [{ severity: "blocking", path: "src/a.ts", line: 3, body: "Null input crashes." }]);
+  work = await dispatch(fixture.client, cfg);
+  assert.match(work[0].reason, /requested changes on aaaaaaa[\s\S]*crewbie:address-review/);
+  assert.equal(fixture.merges.length, 0);
+  reviewRun(fixture, 10);
+  reviewComment(fixture, cfg, 10, [{ severity: "minor", path: "src/a.ts", line: 4, body: "Rename x." }]);
   fixture.checkRuns.push(
     { id: 1, name: "description", status: "completed", conclusion: "failure", app: { slug: "github-actions" } },
     { id: 2, name: "description", status: "completed", conclusion: "success", app: { slug: "github-actions" } },
-    { id: 3, name: "dispatch", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
-  let work = await dispatch(fixture.client, config({ maxActive: 1 }));
-  assert.match(work[0].reason, /Awaiting a configured approver/);
-  fixture.reviews.push({ user: { type: "User", login: "someone" }, state: "APPROVED", commit_id: "head-1" },
-    { user: { type: "User", login: "maintainer" }, state: "APPROVED", commit_id: "old-head" });
-  work = await dispatch(fixture.client, config({ maxActive: 1 }));
-  assert.equal(fixture.merges.length, 0, "Non-approvers and approvals of an older head never merge.");
-  fixture.reviews.push({ user: { type: "User", login: "maintainer" }, state: "APPROVED", commit_id: "head-1" });
-  fixture.checkRuns.push({ id: 4, name: "build", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
-  work = await dispatch(fixture.client, config({ maxActive: 1 }));
-  assert.equal(fixture.merges.length, 0);
+    { id: 3, name: "dispatch", status: "in_progress", conclusion: null, app: { slug: "github-actions" } },
+    { id: 4, name: "build", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
+  assert.match((await dispatch(fixture.client, reviewing({ merge: { mode: "manual", method: "merge" } })))[0].reason, /no blocking issues; merge when you are satisfied/);
+  work = await dispatch(fixture.client, cfg);
   assert.match(work[0].reason, /Waiting for check build/);
-  assert.equal((await dispatch(fixture.client, config({ maxActive: 1, merge: { auto: false, method: "merge" } })))[0].reason, "Auto-merge is disabled; merge after review.");
   fixture.checkRuns[3] = { ...fixture.checkRuns[3], status: "completed", conclusion: "success" };
-  work = await dispatch(fixture.client, config({ maxActive: 1 }));
-  assert.deepEqual(fixture.merges, [{ number: 101, sha: "head-1", merge_method: "merge" }]);
+  work = await dispatch(fixture.client, cfg);
+  assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD, merge_method: "squash" }]);
   assert.equal(work[0].state, "done");
 });
 
+test("an approver's address-review label continues the session with the review and comments, then the new head is reviewed", async () => {
+  const cfg = reviewing({ merge: { mode: "manual", method: "merge" } });
+  const fixture = githubFixture();
+  await dispatch(fixture.client, cfg);
+  finishedPull(fixture);
+  reviewRun(fixture, 9);
+  reviewComment(fixture, cfg, 9, [{ severity: "blocking", path: "src/a.ts", line: 3, body: "Null input crashes." }]);
+  fixture.prComments[101].push({ user: { type: "User", login: "maintainer" }, created_at: "s1", updated_at: "s1", body: "Please also add a test." });
+  const label = (login) => {
+    fixture.pulls.get(1).labels.push({ name: "crewbie:address-review" });
+    (fixture.events[101] ??= []).push({ event: "labeled", label: { name: "crewbie:address-review" }, actor: { type: "User", login } });
+  };
+  label("someone");
+  let work = await dispatch(fixture.client, cfg);
+  assert.equal(fixture.continuations.length, 0);
+  assert.deepEqual(fixture.pulls.get(1).labels, [], "A refused request is consumed.");
+  assert.match(fixture.prComments[101].at(-1).body, /configured approver/);
+  label("maintainer");
+  work = await dispatch(fixture.client, cfg);
+  assert.equal(fixture.continuations.length, 1);
+  const [continuation] = fixture.continuations;
+  assert.equal(continuation.custom_agent, "crewbie-developer");
+  assert.equal(continuation.head_ref, "copilot/foundation");
+  assert.equal(continuation.create_pull_request, false);
+  assert.match(continuation.prompt, /Null input crashes[\s\S]*Please also add a test/);
+  assert.deepEqual(fixture.pulls.get(1).labels, []);
+  assert.match(fixture.prComments[101].at(-1).body, /attempt 2 of 3[\s\S]*<!-- crewbie-address-review:task-2 -->/);
+  assert.equal([...fixture.launches].filter((ref) => ref.includes("/foundation/1/")).length, 2, "The continuation counts as an attempt.");
+  assert.equal(work[0].state, "running");
+  const requested = fixture.reviewRequests.length;
+  assert.equal((await dispatch(fixture.client, cfg))[0].state, "running", "Until the continuation shows up, the earlier completed task is not the outcome.");
+  fixture.cloudTasks.push({ id: "task-2", state: "in_progress", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+  assert.equal((await dispatch(fixture.client, cfg))[0].state, "running");
+  fixture.cloudTasks[1].state = "completed";
+  fixture.pulls.get(1).head.sha = HEAD2;
+  work = await dispatch(fixture.client, cfg);
+  assert.equal(work[0].state, "review");
+  assert.deepEqual(fixture.reviewRequests.slice(requested), [{ ref: "main", inputs: { pr: "101", head: HEAD2 } }]);
+});
 test("an approver's restart label relaunches a verified non-start as a counted attempt; other requests are refused", async () => {
   const fixture = githubFixture();
   await dispatch(fixture.client, config());
