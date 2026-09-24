@@ -408,3 +408,17 @@ test("dispatch lock waits for a concurrent holder and reports a stuck lock", asy
     await assert.rejects(withDispatchLock(client, config(), async () => "never"), /still holds refs\/tags\/crewbie\/dispatch-lock/);
   } finally { Object.assign(LOCK_WAIT, saved); }
 });
+
+test("a replanned batch launches its new issue despite a superseded closed issue for the same task", async () => {
+  const revisedInput = batch();
+  for (const task of revisedInput.tasks) task.body = `${task.body}\nRevised plan.`;
+  const fixture = githubFixture(revisedInput);
+  const old = parseBatch(batch(), config());
+  const task = old.tasks[0];
+  fixture.issues.push({ number: 99, state: "closed", title: task.title, body: issueBody(old, task), labels: ["crewbie:managed", "crewbie:failed", `crewbie:owner:${task.owner}`] });
+  fixture.launches.add(`refs/tags/crewbie/launches/${old.id}/${task.id}/99/1`);
+  await dispatch(fixture.client, config());
+  const launched = fixture.assignments.map((body) => Number(body.agent_assignment.custom_instructions.match(/issue #(\d+)/)[1]));
+  assert.ok(launched.includes(1), `revised task issue #1 should launch; launched ${launched}`);
+  assert.ok(!launched.includes(99));
+});

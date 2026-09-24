@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.17 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.18 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -597,6 +597,10 @@ paid request. Initial launches, continuations and unknown request outcomes consu
 allowance. Remote `crewbie/launches/<batch>/<task>/<issue>/...` tags retain the
 ledger across local CLI sessions and Actions runs. Stable batch/task identities
 keep the count across revisions. Do not delete or edit these refs to bypass limits.
+When an approved re-plan replaces a task whose earlier issue is closed, Crewbie
+publishes a new issue for it; that issue gets its own initial launch, which still
+counts toward the shared task and batch allowances. An earlier issue that is still
+open must be reconciled (closed) first.
 The budget covers Crewbie requests, not the number of internal backend sessions,
 tokens, monetary spend, manual PR follow-ups, onboarding, planning or nightly work.
 

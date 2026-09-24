@@ -181,9 +181,9 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
 export function batchWork(work: Work[], batch: Batch): Work[] {
   requireApproval(batch);
   if (!batch.approval?.execute) throw new Error("Watching requires execution approval.");
-  const selected = work.filter((item) => item.metadata.batch === batch.id);
-  if (selected.length !== batch.tasks.length) throw new Error(`Published batch is incomplete or duplicated (${selected.length} records for ${batch.tasks.length} tasks); reconcile before dispatch.`);
   const digest = batchDigest(batch);
+  const selected = work.filter((item) => item.metadata.batch === batch.id && item.metadata.batchDigest === digest);
+  if (selected.length !== batch.tasks.length) throw new Error(`Published batch is incomplete or duplicated (${selected.length} records for ${batch.tasks.length} tasks); reconcile before dispatch.`);
   for (const task of batch.tasks) {
     const matches = selected.filter((item) => item.metadata.task.id === task.id);
     const item = matches[0];
@@ -195,22 +195,23 @@ export function batchWork(work: Work[], batch: Batch): Work[] {
   return selected;
 }
 export function eligible(work: Work[], maxActive: number, batchId?: string): Work[] {
+  // Replanned batches reuse batch/task ids; the approved digest keeps each revision's graph separate.
+  const keyOf = (item: Work, id = item.metadata.task.id) => `${item.metadata.batch}/${item.metadata.batchDigest}/${id}`;
   const byKey = new Map<string, Work>();
   for (const item of work) {
-    const key = `${item.metadata.batch}/${item.metadata.task.id}`;
-    if (byKey.has(key)) throw new Error(`Duplicate task ${key}.`);
+    const key = keyOf(item);
+    if (byKey.has(key)) throw new Error(`Duplicate task ${item.metadata.batch}/${item.metadata.task.id}.`);
     byKey.set(key, item);
   }
   const visiting = new Set<string>(), visited = new Set<string>();
   function visit(item: Work): void {
-    const key = `${item.metadata.batch}/${item.metadata.task.id}`;
-    if (visiting.has(key)) throw new Error(`Dependency cycle at ${key}.`);
+    const key = keyOf(item);
+    if (visiting.has(key)) throw new Error(`Dependency cycle at ${item.metadata.batch}/${item.metadata.task.id}.`);
     if (visited.has(key)) return;
     visiting.add(key);
     for (const id of item.metadata.task.dependsOn) {
-      const dependency = byKey.get(`${item.metadata.batch}/${id}`);
+      const dependency = byKey.get(keyOf(item, id));
       if (!dependency) throw new Error(`Missing prerequisite ${id}.`);
-      if (dependency.metadata.batchDigest !== item.metadata.batchDigest) throw new Error("Dependency graph mixes different approved batch revisions.");
       visit(dependency);
       const ready = dependency.state === "done" || (item.metadata.task.kind === "review" && dependency.state === "review" && dependency.sessionComplete === true);
       if (!item.claimed && item.state !== "failed" && item.state !== "done" && !ready) {
@@ -236,7 +237,7 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
   const selected = eligible(work, config.maxActive, scope?.batch?.id);
   for (const item of selected) {
     const allowance = await launchAllowance(client, config, item.metadata, integer(item.issue.number, "issue"));
-    const blocked = allowance.blocked ?? (allowance.taskUsed > 0 ? "Initial launch already reserved; inspect its outcome instead of retrying." : null);
+    const blocked = allowance.blocked ?? (allowance.issueUsed > 0 ? "Initial launch already reserved; inspect its outcome instead of retrying." : null);
     if (blocked) { item.state = "blocked"; item.reason = blocked; }
   }
   const launchable = selected.filter((item) => item.state === "ready");
@@ -302,7 +303,7 @@ export async function preflight(client: GitHubApi, config: Config, batchId?: str
     const allowance = await launchAllowance(client, config, item.metadata, issue);
     let reason = allowance.blocked ?? item.reason;
     let ready = candidates.includes(item) && !allowance.blocked;
-    if (ready && allowance.taskUsed > 0) { ready = false; reason = "Initial launch already reserved; inspect its outcome instead of retrying."; }
+    if (ready && allowance.issueUsed > 0) { ready = false; reason = "Initial launch already reserved; inspect its outcome instead of retrying."; }
     let profileRevision: string | null = null;
     if (ready) {
       await checkLaunchModels(models, [item.metadata.task], config);

@@ -122,6 +122,16 @@ test("publication retries reuse issues and approvals; bot labels get an explicit
   await publish(client, config(), approved, undefined, false);
   assert.equal(requests.filter((request) => request.path.endsWith("/dispatches")).length, 2, "Local dispatch retains approvals without starting a second Actions dispatcher.");
   assert.equal([...comments.values()].flat().length, 3);
+
+  const revisedInput = batch();
+  revisedInput.tasks[0].body = `${revisedInput.tasks[0].body}\nRevised by a later approved plan.`;
+  const revised = approvedBatch(parseBatch(revisedInput, config()), true);
+  issues[0].state = "open";
+  await assert.rejects(publish(client, config(), revised, undefined, false), /differs from the approved batch/, "open earlier revisions still require reconciliation");
+  for (const issue of issues) issue.state = "closed";
+  const mappings = await publish(client, config(), revised, undefined, false);
+  assert.equal(issues.length, 6, "closed issues from a superseded revision are not reused or overwritten");
+  assert.deepEqual(mappings.map((item) => item.issue), [4, 5, 6]);
 });
 
 test("GitHub writer fails closed and paginates without dropping records", async () => {

@@ -53,7 +53,7 @@ export async function setLaunchPause(client: GitHubApi, config: Config, paused: 
   });
 }
 export interface LaunchAllowance {
-  batch: string; task: string; issue: number; used: number; taskUsed: number;
+  batch: string; task: string; issue: number; used: number; taskUsed: number; issueUsed: number;
   maxLaunchesPerBatch: number; maxAttemptsPerTask: number; blocked: string | null;
 }
 export async function launchAllowance(client: GitHubApi, config: Config, metadata: Metadata, issue: number): Promise<LaunchAllowance> {
@@ -81,7 +81,8 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
   if (new Set(entries.map((entry) => entry.ref)).size !== entries.length) throw new Error("Duplicate launch-ledger entries.");
   const limits = config.execution ?? DEFAULT_EXECUTION_LIMITS;
   const result: LaunchAllowance = { batch, task, issue, used: entries.reduce((n, entry) => n + entry.attempts, 0),
-    taskUsed: entries.filter((entry) => entry.task === task).reduce((n, entry) => n + entry.attempts, 0), ...limits, blocked: null };
+    taskUsed: entries.filter((entry) => entry.task === task).reduce((n, entry) => n + entry.attempts, 0),
+    issueUsed: entries.filter((entry) => entry.task === task && entry.issue === issue).reduce((n, entry) => n + entry.attempts, 0), ...limits, blocked: null };
   if (await launchesPaused(client, config)) result.blocked = "Future Crewbie launches are paused. Running sessions are unchanged.";
   else if (result.used >= limits.maxLaunchesPerBatch) result.blocked = `Batch launch allowance exhausted (${result.used}/${limits.maxLaunchesPerBatch}).`;
   else if (result.taskUsed >= limits.maxAttemptsPerTask) result.blocked = `Task attempt allowance exhausted (${result.taskUsed}/${limits.maxAttemptsPerTask}); initial and uncertain requests count.`;
@@ -132,7 +133,7 @@ export async function baselineLaunches(client: GitHubApi, config: Config, issue:
 export async function reserveLaunch(client: GitHubApi, config: Config, metadata: Metadata, issue: number, baseSha: string, initial = false): Promise<LaunchAllowance> {
   const allowance = await launchAllowance(client, config, metadata, issue);
   if (allowance.blocked) throw new Error(allowance.blocked);
-  if (initial && allowance.taskUsed > 0) throw new Error("Initial launch already reserved; inspect its outcome instead of retrying.");
+  if (initial && allowance.issueUsed > 0) throw new Error("Initial launch already reserved; inspect its outcome instead of retrying.");
   await client.request("POST", `/repos/${config.repository}/git/refs`, {
     ref: `refs/tags/crewbie/launches/${allowance.batch}/${allowance.task}/${issue}/${allowance.taskUsed + 1}`, sha: baseSha,
   });

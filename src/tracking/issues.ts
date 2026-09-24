@@ -46,7 +46,8 @@ export async function publish(client: GitHubApi, config: Config, batch: Batch, a
   for (const task of batch.tasks) {
     const candidates = existing.filter((issue) => {
       const data = taskMetadata(String(issue.body ?? ""));
-      return data?.batch === batch.id && data.task.id === task.id;
+      // A closed issue from an earlier approved revision of this batch is superseded, not a conflict.
+      return data?.batch === batch.id && data.task.id === task.id && !(issue.state === "closed" && data.batchDigest !== batchDigest(batch));
     });
     if (candidates.length > 1) throw new Error(`Multiple issues represent ${batch.id}/${task.id}. Reconcile before publishing.`);
     const body = issueBody(batch, task);
