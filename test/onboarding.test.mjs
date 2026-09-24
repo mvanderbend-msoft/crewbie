@@ -690,73 +690,6 @@ test("adoption preserves plain Markdown and blocks oversized active charters rat
       roles: [{ ...response(report).roles[0], sourceAgent: source }],
       agentDecisions: [{ path: source, action: "adopt", reason: "Retain catalogue expertise." }],
     });
-
-    test("selection and confirmation menus apply All or Team only with final consent", async (t) => {
-      for (const choice of ["all", "team"]) {
-        const root = await fixture(t, { "AGENTS.md": "Preserve catalogue IDs.", "src/catalogue.ts": "export {};" });
-        const assessment = await assess(root), confirmations = [];
-        await initCommand(root, { model: "chosen-model", "skip-labels": true }, {
-          analyze: async () => JSON.stringify(response(assessment, {
-            instructions: [{ path: "AGENTS.md", content: "Preserve catalogue IDs.\nKeep retry backpressure.", reason: "Clarify the failure boundary." }],
-          })),
-          select: async () => choice,
-          ask: async () => { throw new Error("No typed keywords needed."); },
-          confirm: async (message, defaultValue) => {
-            assert.equal(defaultValue, false);
-            confirmations.push(message);
-            if (message.startsWith("Enable")) return false;
-            await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
-            return true;
-          },
-          report() {}, client() { throw new Error("No GitHub writes"); },
-        });
-        assert.equal(confirmations.length, 2);
-        assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), choice === "all"
-          ? "Preserve catalogue IDs.\nKeep retry backpressure." : "Preserve catalogue IDs.");
-        assert.equal(JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8")).instructions.length, 1);
-      }
-    });
-
-    test("menu cancellation leaves the saved proposal but never installs", async (t) => {
-      const root = await fixture(t, { "src/catalogue.ts": "export {};" });
-      const assessment = await assess(root);
-      await assert.rejects(initCommand(root, { model: "chosen-model" }, {
-        analyze: async () => JSON.stringify(response(assessment)),
-        ask: async () => { throw new Error("No text input expected"); },
-        select: async () => { const error = new Error("Cancelled"); error.name = "ExitPromptError"; throw error; },
-        report() {}, client() { throw new Error("No GitHub writes"); },
-      }), /Setup cancelled.*saved proposal/);
-      assert.equal(JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8")).status, "ready");
-      await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
-    });
-
-    test("strict review links every scoped move to its source and shows blocked recommendations", async (t) => {
-      const root = await fixture(t, { "AGENTS.md": "Frontend: preserve focus.", "frontend/view.ts": "export {};" });
-      const assessment = await assess(root), review = response(assessment, {
-        instructions: [{ path: "frontend/AGENTS.md", content: "Preserve focus.", reason: "Scope frontend guidance." }],
-      });
-      const finding = review.findings.find((item) => item.path === "AGENTS.md");
-      finding.action = "edit";
-      finding.editPaths = ["frontend/AGENTS.md"];
-      assert.throws(() => parseSetupReview(JSON.stringify(review), assessment, "", "model"), /source replacement/);
-      finding.action = "defer";
-      finding.editPaths = [];
-      finding.deferReason = "The owner must decide whether focus policy also applies to the admin frontend.";
-      review.instructions = [];
-      const messages = [];
-      await initCommand(root, { model: "model" }, {
-        analyze: async (prompt) => {
-          assert.match(prompt, /Review EVERY inspected guidance file independently/);
-          assert.match(prompt, /not only the first file/);
-          assert.match(prompt, /Put adoption mechanics in agentDecisions.reason/);
-          return JSON.stringify(review);
-        },
-        ask: async () => "save", report: (text) => messages.push(text),
-        client() { throw new Error("No GitHub writes"); },
-      });
-      assert.ok(messages.some((text) => text.includes("DEFERRED") && text.includes(finding.deferReason)));
-      assert.match(await readFile(join(root, "crewbie-setup.md"), "utf8"), /Deferred because/);
-    });
     if (body.length > 1000) {
       assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "model"), /shorten.*original/i);
       assert.equal(await readFile(join(root, source), "utf8"), body);
@@ -767,4 +700,71 @@ test("adoption preserves plain Markdown and blocks oversized active charters rat
       assert.ok((await readFile(join(root, ".github/agents/crewbie-catalogue.agent.md"), "utf8")).includes(body));
     }
   }
+});
+
+test("selection and confirmation menus apply All or Team only with final consent", async (t) => {
+  for (const choice of ["all", "team"]) {
+    const root = await fixture(t, { "AGENTS.md": "Preserve catalogue IDs.", "src/catalogue.ts": "export {};" });
+    const assessment = await assess(root), confirmations = [];
+    await initCommand(root, { model: "chosen-model", "skip-labels": true }, {
+      analyze: async () => JSON.stringify(response(assessment, {
+        instructions: [{ path: "AGENTS.md", content: "Preserve catalogue IDs.\nKeep retry backpressure.", reason: "Clarify the failure boundary." }],
+      })),
+      select: async () => choice,
+      ask: async () => { throw new Error("No typed keywords needed."); },
+      confirm: async (message, defaultValue) => {
+        assert.equal(defaultValue, false);
+        confirmations.push(message);
+        if (message.startsWith("Enable")) return false;
+        await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
+        return true;
+      },
+      report() {}, client() { throw new Error("No GitHub writes"); },
+    });
+    assert.equal(confirmations.length, 2);
+    assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), choice === "all"
+      ? "Preserve catalogue IDs.\nKeep retry backpressure." : "Preserve catalogue IDs.");
+    assert.equal(JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8")).instructions.length, 1);
+  }
+});
+
+test("menu cancellation leaves the saved proposal but never installs", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export {};" });
+  const assessment = await assess(root);
+  await assert.rejects(initCommand(root, { model: "chosen-model" }, {
+    analyze: async () => JSON.stringify(response(assessment)),
+    ask: async () => { throw new Error("No text input expected"); },
+    select: async () => { const error = new Error("Cancelled"); error.name = "ExitPromptError"; throw error; },
+    report() {}, client() { throw new Error("No GitHub writes"); },
+  }), /Setup cancelled.*saved proposal/);
+  assert.equal(JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8")).status, "ready");
+  await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
+});
+
+test("strict review links every scoped move to its source and shows blocked recommendations", async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Frontend: preserve focus.", "frontend/view.ts": "export {};" });
+  const assessment = await assess(root), review = response(assessment, {
+    instructions: [{ path: "frontend/AGENTS.md", content: "Preserve focus.", reason: "Scope frontend guidance." }],
+  });
+  const finding = review.findings.find((item) => item.path === "AGENTS.md");
+  finding.action = "edit";
+  finding.editPaths = ["frontend/AGENTS.md"];
+  assert.throws(() => parseSetupReview(JSON.stringify(review), assessment, "", "model"), /source replacement/);
+  finding.action = "defer";
+  finding.editPaths = [];
+  finding.deferReason = "The owner must decide whether focus policy also applies to the admin frontend.";
+  review.instructions = [];
+  const messages = [];
+  await initCommand(root, { model: "model" }, {
+    analyze: async (prompt) => {
+      assert.match(prompt, /Review EVERY inspected guidance file independently/);
+      assert.match(prompt, /not only the first file/);
+      assert.match(prompt, /Put adoption mechanics in agentDecisions.reason/);
+      return JSON.stringify(review);
+    },
+    ask: async () => "save", report: (text) => messages.push(text),
+    client() { throw new Error("No GitHub writes"); },
+  });
+  assert.ok(messages.some((text) => text.includes("DEFERRED") && text.includes(finding.deferReason)));
+  assert.match(await readFile(join(root, "crewbie-setup.md"), "utf8"), /Deferred because/);
 });
