@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.11/crewbie-cli-0.1.0-alpha.11.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.12/crewbie-cli-0.1.0-alpha.12.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.11.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.12.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -129,9 +129,11 @@ unrelated combined role. After approval, originals move into
 `.crewbie/agent-archive/` as backup provenance. Their **complete original instructions
 remain inside the active Crewbie charter**, alongside Crewbie context and handoff
 rules; tool restrictions, descriptions and professional persona are preserved.
-The selected model and adopted handoff targets are synchronized. The configured
-charter limit stays unchanged: if the full charter cannot fit, init asks you to
-shorten the original before adoption rather than truncating it or raising the limit.
+The selected model and adopted handoff targets are synchronized. Adopted
+instructions are never truncated. Crewbie applies no word limit to charters
+because no evidence supports one. It stops only at GitHub's documented
+30,000-character agent prompt limit; if the full charter exceeds it, init asks
+you to shorten the original.
 Every inspected candidate receives an
 adopt/retain decision with a reason. Static detection is evidence, not the roster;
 `maxActive` limits simultaneous work, not the number of specialists.
@@ -467,9 +469,9 @@ its own permissions or edit application code.
 | Surface | Default budget |
 |---|---|
 | Batch scope/source reference / constitution | 600 words each |
-| Specialist charter | 400 words |
+| Specialist charter | No word limit; GitHub's 30,000-character agent prompt maximum |
 | Role hot memory | 600 words |
-| Role index / active shared decisions | 400 words each |
+| Role index / active shared decisions | No word limit |
 | PR description | Normally 150-250 words |
 | Concurrent implementation sessions | 2 per repository |
 | Nightly input / improvement PRs | 20 new records / 1 active PR |

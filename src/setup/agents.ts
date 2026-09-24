@@ -1,6 +1,6 @@
 import { parseDocument, isMap, isSeq } from "yaml";
-import { agentArchivePath, limitsFor, type Config, type Role } from "../config.js";
-import { optionalText, safePath, words } from "../core.js";
+import { agentArchivePath, type Config, type Role } from "../config.js";
+import { agentPrompt, optionalText, safePath } from "../core.js";
 import { profile } from "./templates.js";
 
 export async function roleProfile(root: string, role: Role, config: Config): Promise<string> {
@@ -34,7 +34,6 @@ export function adoptedProfile(role: Role, config: Config, original: string): st
   }
   const body = header ? text.slice(header[0].length) : text;
   const result = `---\n${document.toString()}---\n${body}\n\n${generated.replace(/^---\n[\s\S]*?\n---\n# [^\n]*\n/, "## Crewbie integration\n")}`;
-  const limit = limitsFor(config).charter;
-  if (words(result) > limit) throw new Error(`Adopted ${role.id} charter needs ${words(result)} words; the limit remains ${limit}. Please shorten the original ${role.sourceAgent} and rerun init, leaving room for Crewbie integration. No original instructions were truncated or archived.`);
+  agentPrompt(result, `Adopted ${role.id} charter`, `Shorten the original ${role.sourceAgent} and rerun init, leaving room for Crewbie integration. No original instructions were truncated or archived.`);
   return result;
 }

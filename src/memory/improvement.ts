@@ -1,4 +1,4 @@
-import { bounded, integer, json, matchesTextHash, optionalText, record, safePath, string } from "../core.js";
+import { agentPrompt, bounded, integer, json, matchesTextHash, optionalText, record, safePath, string } from "../core.js";
 import { limitsFor, type Config } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { evidenceId, type RunRecord } from "../reporting/records.js";
@@ -41,10 +41,9 @@ export async function validateProposal(root: string, config: Config, proposal: P
     if (!change.evidence.every((id) => ids.has(id))) throw new Error("Proposal cites unknown or already-consumed evidence.");
     const before = await optionalText(await safePath(root, change.path));
     if (before === null ? change.beforeHash !== null : !matchesTextHash(before, change.beforeHash)) throw new Error(`${change.path} changed since analysis.`);
-    const limit = change.path.endsWith("/hot.md") ? limits.hot : change.path.endsWith("/index.md") ? limits.index
-      : change.path.endsWith("decisions.md") ? limits.decisions : change.path.endsWith(".agent.md") ? limits.charter
-        : change.path === config.constitution || change.path === ".crewbie/instructions.md" ? limits.constitution : limits.topic;
-    bounded(change.content, limit, change.path);
+    if (change.path.endsWith(".agent.md")) agentPrompt(change.content, change.path);
+    else if (!change.path.endsWith("/index.md") && !change.path.endsWith("decisions.md")) bounded(change.content, change.path.endsWith("/hot.md") ? limits.hot
+      : change.path === config.constitution || change.path === ".crewbie/instructions.md" ? limits.constitution : limits.topic, change.path);
     bounded(change.reason, 100, "Change reason");
     if (/-----BEGIN .*PRIVATE KEY-----|(?:gh[pousr]_[A-Za-z0-9]{20,})|(?:github_pat_[A-Za-z0-9_]{20,})/.test(change.content)) {
       throw new Error("Proposed guidance appears to contain a secret; nothing will be published.");

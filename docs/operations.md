@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.11 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.12 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -191,9 +191,10 @@ handoff rules. The archive is not a substitute for the active instructions.
 Known adopted-agent handoffs are
 retargeted. The selected model governs the active profile. Unsupported tool
 metadata requires manual review rather than silently widening permissions.
-The existing charter word limit covers the entire active file. If the preserved
-body plus Crewbie additions exceed it, init stops before adoption and asks the
-user to shorten the original; it neither truncates instructions nor raises limits.
+Charters have no word budget. The whole active prompt (preserved body plus Crewbie
+additions) must fit GitHub's documented 30,000-character custom agent maximum. If
+it does not, init stops before adoption and asks the user to shorten the original;
+it never truncates instructions. Available from alpha.12; earlier releases stopped at 400 words.
 
 Archival requires the exact inspected source hash, rejects conflicting archives
 or edited originals, and is idempotent. Archives are written before originals
@@ -546,8 +547,8 @@ At most twelve signal details **per instruction file** are included, so a noisy
 root file cannot exhaust the coverage for other files. `signalsOmitted` reports
 remaining detected warnings rather than presenting the sample as complete.
 These are inspection resource limits, **not quality thresholds**. No project
-script or linked URL is executed. The existing configurable charter/spec word
-budgets remain readability constraints, not research-derived quality scores.
+script or linked URL is executed. The remaining configurable word budgets are
+readability constraints, not research-derived quality scores.
 
 ## Launch preflight, limits and stop controls
 
@@ -815,7 +816,10 @@ creating another; accepted/rejected evidence remains in PR history and the curso
 
 Cold/archive topics are loaded explicitly through the index, not all at once.
 The `limits` configuration can record deliberate word-budget exceptions:
-`spec`, `charter`, `hot`, `index`, `decisions`, `constitution`, `topic`, and `pr`.
+`spec`, `hot`, `constitution`, `topic`, and `pr`.
+Charters are bounded only by GitHub's 30,000-character agent prompt maximum; role
+indexes and shared decisions have no word limit. Legacy `charter`, `index` and
+`decisions` entries are ignored.
 There is no silent truncation. Oversized external PR feedback is explicitly
 omitted with a source link, not partially presented as a complete summary.
 

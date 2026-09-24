@@ -1,4 +1,4 @@
-import { bounded, json, record, slug, string, strings } from "../core.js";
+import { AGENT_PROMPT_CHARACTERS, agentPrompt, bounded, json, record, slug, string, strings } from "../core.js";
 import { agentArchivePath, isExistingAgentPath, isRoleContextPath, limitsFor, parseConfig } from "../config.js";
 import type { Assessment } from "./assessment.js";
 import { redact } from "./inventory.js";
@@ -70,7 +70,7 @@ Keep root AGENTS.md and .github/copilot-instructions.md focused on cross-cutting
 For every instruction file, check discoverable repository facts, generic advice, duplication, stale commands/links, contradictions, rule applicability, conditional pointers and non-obvious constraints. Account for every supplied static signal, explaining false positives instead of blindly rewriting policy. The static heuristics are a starting point, not the complete review.
 Review custom-agent responsibilities, permissions, handoffs, duplicated boilerplate, model choices and relevance. Preserve safety restrictions, professional persona and useful domain rules. For each finding recommending a concrete edit, supply replacement text or explicitly explain why it is deferred; human approval must apply real file edits, not only generate a team.
 For adopted agents, express added checks on their roles; archive their original charter unchanged rather than also rewriting that source file.
-Keep each complete active charter under ${limitsFor(assessment.config).charter} words, including the original body and Crewbie additions for adopted agents. If preservation cannot fit, ask the user to shorten the original; never discard original details or raise the limit. Keep proposed guidance/constitution under ${limitsFor(assessment.config).constitution} words.
+Keep each active charter focused on relevant, non-obvious guidance. Preserve adopted agents' original bodies completely; never discard original details. GitHub limits a custom agent prompt to ${AGENT_PROMPT_CHARACTERS} characters, including Crewbie additions. Keep proposed guidance/constitution under ${limitsFor(assessment.config).constitution} words.
 Reuse the constitution if present. Optionally propose a short constitution if absent; the human can decline it.
 Return ONLY JSON:
 {"summary":"concise human-readable assessment and rationale","findings":[{"area":"instructions|mcp|agents|constitution|project","path":null,"assessment":"evidence-linked assessment","recommendation":"retain, reuse, concrete edit or explicit deferral with reason","action":"retain","editPaths":[]}],"questions":[],"roles":[{"id":"domain-specialist","sourceAgent":null,"purpose":"project-specific ownership","model":"catalog model ID when supplied","complexity":"standard","modelReason":"task-specific cost/capability rationale","checks":["observable check"],"nonNegotiables":["invariant"],"contextPaths":[]}],"agentDecisions":[],"instructions":[{"path":"AGENTS.md","content":"complete proposed text","reason":"why"}],"constitutionText":null}
@@ -93,7 +93,6 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
   const data = record(value, "setup analysis");
   if (redact(json(data)) !== json(data)) throw new Error("Setup analysis appears to contain a secret; nothing was saved or applied.");
   const summary = string(data.summary, "assessment summary");
-  bounded(summary, 400, "Assessment summary");
   if (!Array.isArray(data.findings)) throw new Error("Setup findings must be a list.");
   const findings = data.findings.map((raw) => {
     const finding = record(raw, "setup finding");
@@ -192,7 +191,7 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
       });
     const original = role.sourceAgent && (assessment.inventory.files.find((file) => file.path === role.sourceAgent)
       ?? assessment.inventory.files.find((file) => file.path === agentArchivePath(role.sourceAgent!)));
-    bounded(original ? adoptedProfile(role, config, original.content) : profile(role, config), limitsFor(config).charter, `${role.id} charter`);
+    agentPrompt(original ? adoptedProfile(role, config, original.content) : profile(role, config), `${role.id} charter`);
   }
   result.config = config;
   if (!Array.isArray(data.instructions)) throw new Error("Proposed instructions must be a list.");

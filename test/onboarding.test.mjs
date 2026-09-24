@@ -682,15 +682,15 @@ test("interactive setup offers Team All Save through the selector without typed 
   await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
 });
 
-test("adoption preserves plain Markdown and blocks oversized active charters rather than shortening them", async (t) => {
-  for (const body of ["# Domain persona\n\nKeep supplier and warehouse responsibilities separate.\n", "Domain constraint. ".repeat(400)]) {
+test("adoption preserves long originals and stops only at GitHub's documented agent prompt limit", async (t) => {
+  for (const body of ["# Domain persona\n\nKeep supplier and warehouse responsibilities separate.\n", "Domain constraint. ".repeat(400), "Domain constraint. ".repeat(1700)]) {
     const source = ".github/agents/catalogue.agent.md";
     const root = await fixture(t, { [source]: body }), report = await assess(root);
     const review = response(report, {
       roles: [{ ...response(report).roles[0], sourceAgent: source }],
       agentDecisions: [{ path: source, action: "adopt", reason: "Retain catalogue expertise." }],
     });
-    if (body.length > 1000) {
+    if (body.length > 30_000) {
       assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "model"), /shorten.*original/i);
       assert.equal(await readFile(join(root, source), "utf8"), body);
       await assert.rejects(readFile(join(root, ".crewbie/managed.json")), /ENOENT/);

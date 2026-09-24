@@ -1,5 +1,5 @@
 import { readdir, unlink } from "node:fs/promises";
-import { bounded, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
+import { agentPrompt, bounded, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
 import { agentArchivePath, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
 import { roleProfile } from "./agents.js";
@@ -50,7 +50,7 @@ export async function teamInstallation(root: string, current: Config, proposed: 
     if (!previous || json(previous) !== json(role)) {
       if (role.sourceAgent !== previous?.sourceAgent) throw new Error("Adopt original agents through reviewed init, not a planning PR.");
       const charter = await roleProfile(root, role, proposed);
-      bounded(charter, limitsFor(proposed).charter, `${role.id} charter`);
+      agentPrompt(charter, `${role.id} charter`);
       files[path] = charter;
     } else if (await optionalText(await safePath(root, path)) === null) throw new Error(`Restore the existing specialist charter before planning: ${path}`);
     for (const tier of ["hot", "index"]) {
@@ -140,7 +140,7 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
   ];
   for (const role of allRoles) {
     const charter = await roleProfile(root, role, config);
-    bounded(charter, limits.charter, `${role.id} charter`);
+    agentPrompt(charter, `${role.id} charter`);
     files[`.github/agents/crewbie-${role.id}.agent.md`] = charter;
     for (const tier of ["hot", "index"]) {
       const path = `.crewbie/team/${role.id}/${tier}.md`;

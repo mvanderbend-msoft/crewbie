@@ -2,7 +2,7 @@ import { readJson, record, string, strings, slug, integer, safePath } from "./co
 
 export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
-export const DEFAULT_LIMITS = { spec: 600, charter: 400, hot: 600, index: 400, decisions: 400, constitution: 600, topic: 1500, pr: 250 };
+export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1500, pr: 250 };
 export type WordLimits = typeof DEFAULT_LIMITS;
 export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };

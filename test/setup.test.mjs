@@ -6,7 +6,7 @@ import YAML from "yaml";
 import { assess } from "../dist/setup/assessment.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { workflows, profile, SHARED_INSTRUCTIONS, SKILL } from "../dist/setup/templates.js";
-import { bounded, hash, safePath } from "../dist/core.js";
+import { agentPrompt, bounded, hash, safePath } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
 import { fixture, config } from "./helpers.mjs";
 
@@ -59,7 +59,7 @@ test("assessment proposes a small specialist team and installs dormant learning 
 test("specialists have distinct duties and an actionable scoped memory handoff", () => {
   for (const role of ["developer", "tester", "reviewer", "coordinator", "improver"]) {
     const text = profile({ id: role, purpose: `${role} purpose.`, model: "" }, config());
-    bounded(text, 400, role);
+    agentPrompt(text, role);
     assert.match(text, /\.crewbie\/instructions\.md/);
     assert.match(text, new RegExp(`Identify yourself as .crewbie-${role}`));
   }
@@ -74,8 +74,8 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
 test("domain charters contain distinct checks, invariants and reviewed repository guidance", () => {
   const frontend = profile({ id: "frontend", purpose: "User interface.", model: "approved-model", checks: ["npm run build"], nonNegotiables: ["Preserve unsaved product edits."] }, config());
   const backend = profile({ id: "backend", purpose: "Services.", model: "approved-model" }, config());
-  bounded(frontend, 400, "frontend");
-  bounded(backend, 400, "backend");
+  agentPrompt(frontend, "frontend");
+  agentPrompt(backend, "backend");
   assert.doesNotMatch(frontend, /observers.*automatic request loop/);
   assert.match(frontend, /npm run build/);
   assert.match(frontend, /Preserve unsaved product edits/);
@@ -199,7 +199,7 @@ test("GitHub releases publish npm-installable artifacts while registry publishin
 
 test("every generated role has concise writing and explicit memory pointers", () => {
   const text = profile(config().roles[0], config());
-  bounded(text, 400, "charter");
+  agentPrompt(text, "charter");
   assert.match(text, /hot\.md/);
   assert.match(text, /index\.md/);
   for (const heading of ["What changed", "Why", "Checks"]) assert.ok(text.includes(`\`## ${heading}\``));

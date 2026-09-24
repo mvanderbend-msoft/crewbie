@@ -21,11 +21,11 @@ export async function memoryContext(root: string, config: Config, role: string, 
   if (!["coordinator", "improver", ...config.roles.map((item) => item.id)].includes(role)) {
     throw new Error("Choose a configured role.");
   }
-  const paths: [string, number][] = [
+  const paths: [string, number | null][] = [
     ...(config.constitution ? [[config.constitution, limits.constitution] as [string, number]] : []),
-    [".crewbie/decisions.md", limits.decisions],
+    [".crewbie/decisions.md", null],
     [`.crewbie/team/${role}/hot.md`, limits.hot],
-    [`.crewbie/team/${role}/index.md`, limits.index],
+    [`.crewbie/team/${role}/index.md`, null],
   ];
   const shared = await optionalText(await safePath(root, ".crewbie/instructions.md"));
   if (shared !== null) paths.unshift([".crewbie/instructions.md", limits.constitution]);
@@ -42,7 +42,7 @@ export async function memoryContext(root: string, config: Config, role: string, 
   for (const [path, limit] of paths) {
     const content = await optionalText(await safePath(root, path));
     if (content === null) throw new Error(`Required context is missing: ${path}`);
-    bounded(content, limit, path);
+    if (limit !== null) bounded(content, limit, path);
     result.push({ path, content, sha256: textHash(content) });
   }
   return result;

@@ -55,6 +55,18 @@ export function words(value: string): number {
 export function bounded(value: string, limit: number, name: string): void {
   if (words(value) > limit) throw new Error(`${name} exceeds ${limit} words. Curate or split it; nothing was truncated.`);
 }
+// GitHub's documented maximum for a custom agent's Markdown prompt below the frontmatter:
+// https://docs.github.com/en/copilot/reference/custom-agents-configuration
+export const AGENT_PROMPT_CHARACTERS = 30_000;
+export function agentPromptLength(profile: string): number {
+  const text = profile.replace(/^\uFEFF/, "");
+  const header = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text);
+  return (header ? text.slice(header[0].length) : text).length;
+}
+export function agentPrompt(profile: string, name: string, remedy = "Shorten it; nothing was truncated."): void {
+  const length = agentPromptLength(profile);
+  if (length > AGENT_PROMPT_CHARACTERS) throw new Error(`${name} prompt has ${length} characters; GitHub custom agents allow at most ${AGENT_PROMPT_CHARACTERS}. ${remedy}`);
+}
 export function errorCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
 }

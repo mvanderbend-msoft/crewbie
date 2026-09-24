@@ -61,7 +61,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
   for (const role of config.roles) {
     lines.push(`### ${role.id}`, "");
     if (role.sourceAgent) lines.push(`Original: \`${role.sourceAgent}\` -> \`.github/agents/crewbie-${role.id}.agent.md\`.`,
-      `Archive: \`${agentArchivePath(role.sourceAgent)}\` (backup provenance). The active charter contains the complete original instructions, with tool restrictions and persona preserved. Oversized charters must be shortened by the user; limits are not raised automatically.`, "");
+      `Archive: \`${agentArchivePath(role.sourceAgent)}\` (backup provenance). The active charter contains the complete original instructions, with tool restrictions and persona preserved.`, "");
     if (role.checks?.length) lines.push("**Checks**", ...role.checks.map((check) => `- ${check}`), "");
     if (role.modelReason) lines.push(`**Model proposal (${role.complexity ?? "unclassified"}):** ${role.modelReason}`, "");
     if (role.nonNegotiables?.length) lines.push("**Boundaries**", ...role.nonNegotiables.map((rule) => `- ${rule}`), "");
