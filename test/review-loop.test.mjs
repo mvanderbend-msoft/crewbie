@@ -51,6 +51,7 @@ function fixture() {
         if (match[3] === "files") return [{ filename: number === 10 ? (f.outOfScope ? ".github/workflows/unsafe.yml" : "frontend/page.ts") : number === 30 ? "frontend/e2e/workspace.spec.ts" : `.crewbie/reviews/${saved.digest.slice(0, 20)}.json` }];
       },
       async request(method, path, body) {
+        if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (f.modelChecks ??= []).push(body.model); throw new GitHubError(f.rejectedModels?.includes(body.model) ? 400 : 412, null); }
         if (method !== "GET") writes.push({ method, path, body: structuredClone(body) });
         if (path.endsWith("/git/ref/tags/crewbie/paused")) {
           if (!f.paused) throw new GitHubError(404, null);

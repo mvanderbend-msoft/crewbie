@@ -272,7 +272,7 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
     if (blocked) { item.state = "blocked"; item.reason = blocked; }
   }
   const launchable = selected.filter((item) => item.state === "ready");
-  if (launchable.length) await checkLaunchModels(await discoverModels(), launchable.map((item) => item.metadata.task), config);
+  if (launchable.length) await checkLaunchModels(await discoverModels(), launchable.map((item) => item.metadata.task), config, client);
   for (const item of scoped) {
     await setStatus(client, config.repository, item.issue, item.state);
     if (item.state === "review" && item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {
@@ -355,7 +355,7 @@ async function addressReviews(client: GitHubApi, config: Config, work: Work[], s
     if (!feedback) { await consume("there is no Crewbie review of the current head and no new approver comment to address."); continue; }
     const allowance = await launchAllowance(client, config, item.metadata, issue);
     if (allowance.blocked) { await consume(allowance.blocked); continue; }
-    await checkLaunchModels(await discoverModels(), [item.metadata.task], config);
+    await checkLaunchModels(await discoverModels(), [item.metadata.task], config, client);
     const fresh = await freshLaunchable(client, config, item, sha, ado);
     const snapshot = await cloudTasks(client, config.repository);
     const previous = snapshot.tasks.filter((task) => Array.isArray(task.artifacts) && task.artifacts.some((raw) => {
@@ -457,7 +457,7 @@ async function restarts(client: GitHubApi, config: Config, work: Work[], branch:
       await consume(`Crewbie did not restart this task: ${allowance.blocked}`);
       continue;
     }
-    await checkLaunchModels(await discoverModels(), [item.metadata.task], config);
+    await checkLaunchModels(await discoverModels(), [item.metadata.task], config, client);
     const fresh = await freshLaunchable(client, config, item, sha, ado);
     // Copilot starts on a new assignment event; an earlier assignment from the ended attempt would suppress it.
     // The API shows the bot as "Copilot" but only removes it by its account login.

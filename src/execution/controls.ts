@@ -172,10 +172,35 @@ export async function reserveLaunch(client: GitHubApi, config: Config, metadata:
   });
   return allowance;
 }
-export async function checkLaunchModels(models: ModelChoice[], tasks: { owner: string; model: string }[], config: Config): Promise<void> {
+const PROBE_BRANCH = "crewbie/model-check-never-exists";
+/**
+ * Whether the Copilot cloud agent accepts a model. The CLI catalog lists models the cloud agent may reject; issue
+ * assignment then fails asynchronously with a misleading "ruleset violation" comment. The tasks API validates the
+ * model before the base branch, so a nonexistent branch answers without starting a session (it leaves a failed task).
+ */
+export async function cloudAgentAccepts(client: GitHubApi, repository: string, model: string): Promise<boolean> {
+  try {
+    await client.request("POST", `/agents/repos/${repository}/tasks`, {
+      model, prompt: "Crewbie model availability check; never runs.", base_ref: PROBE_BRANCH, create_pull_request: false,
+    });
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 400) return false;
+    if (error instanceof GitHubError && error.status === 412) return true;
+    throw error;
+  }
+  throw new Error(`The cloud-agent model check for ${model} unexpectedly created a task; inspect the Agents tab.`);
+}
+export async function checkLaunchModels(models: ModelChoice[], tasks: { owner: string; model: string }[], config: Config, client?: GitHubApi): Promise<void> {
   if (!models.length) throw new Error("Launch preflight returned no enabled account models; nothing was launched.");
   for (const task of tasks) {
     if (!config.roles.some((role) => role.id === task.owner && role.model === task.model)) throw new Error("Launch specialist/model differs from approved policy.");
     if (!models.some((model) => model.id === task.model)) throw new Error(`Launch model ${task.model} is absent from the live account catalog. Review model selection; no fallback or paid retry was attempted.`);
+  }
+  // Read-only previews omit the client: the check leaves a failed task.
+  for (const model of client ? new Set(tasks.map((task) => task.model)) : []) {
+    if (!await cloudAgentAccepts(client!, config.repository, model)) {
+      const owners = [...new Set(tasks.filter((task) => task.model === model).map((task) => task.owner))].join(", ");
+      throw new Error(`The Copilot cloud agent does not accept model ${model} for this account (specialist ${owners}), although the CLI lists it. Choose another model for that role in .crewbie/config.json; approved tasks using ${model} need replanning or reapproval. Nothing was launched.`);
+    }
   }
 }

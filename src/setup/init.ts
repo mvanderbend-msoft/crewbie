@@ -1,6 +1,7 @@
 import { json, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
 import { modelProfile, parseConfig } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
+import { cloudAgentAccepts } from "../execution/controls.js";
 import { requireApprover } from "../tracking/github.js";
 import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
@@ -159,10 +160,31 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
     report(`\n1. Assess\n  Model: ${model}\n  Reviewing instructions, agents, constitution and MCP metadata only; application code and project files are not read.\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
-    const proposal = await proposeSetup(assessment, description, model, {
+    const propose = () => proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
       models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
     });
+    let proposal = await propose();
+    // The CLI catalog includes models the cloud agent rejects; check only the chosen ones, since each check leaves a failed task.
+    const checked = new Map<string, boolean>();
+    while (proposal.status === "ready" && proposal.config.repository) {
+      const installed = new Map(assessment.installedRoles.map((role) => [role.id, role.model]));
+      const unchecked = [...new Set(proposal.config.roles.map((role) => role.model))].filter((id) => !checked.has(id));
+      if (unchecked.length) {
+        let client: GitHubApi;
+        try { client = io.client(); } catch { report("  Cloud-agent model support not checked (no GitHub credential); dispatch checks it before launch."); break; }
+        for (const id of unchecked) checked.set(id, await cloudAgentAccepts(client, proposal.config.repository, id));
+      }
+      const kept = proposal.config.roles.filter((role) => installed.get(role.id) === role.model && checked.get(role.model) === false);
+      for (const role of kept) report(`  Warning: the Copilot cloud agent rejects installed model ${role.model} for ${role.id}; its launches stay blocked until you choose another model for it.`);
+      const rejected = [...new Set(proposal.config.roles.filter((role) => installed.get(role.id) !== role.model && checked.get(role.model) === false).map((role) => role.model))];
+      if (!rejected.length) break;
+      if (!dynamic) throw new Error(`The Copilot cloud agent rejects specialist model ${rejected.join(", ")} for this account, although the CLI lists it. Choose another --specialist-model; no team was installed.`);
+      catalog = (catalog ?? []).filter((choice) => !rejected.includes(choice.id));
+      if (!catalog.length) throw new Error("The Copilot cloud agent accepts none of the catalog models for this account; no team was installed.");
+      report(`  The Copilot cloud agent rejects ${rejected.join(", ")} for this account, although the CLI lists it. Reassessing without it.`);
+      proposal = await propose();
+    }
     const output = options.out ?? "crewbie-setup.json";
     const markdown = setupReportPath(output);
     await writeAtomic(root, output, json(proposal));

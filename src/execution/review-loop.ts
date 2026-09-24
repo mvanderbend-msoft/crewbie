@@ -258,7 +258,7 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
       const allowance = await launchAllowance(client, config, context, number);
       if (allowance.blocked) throw new Error(allowance.blocked);
       models ??= await discoverModels();
-      await checkLaunchModels(models, [context.task], config);
+      await checkLaunchModels(models, [context.task], config, client);
       const current = await issueContext(client, config, number, issueDigest(String(context.issue.title), String(context.issue.body)), ado);
       if (current.task.owner !== owner || current.task.model !== model) throw new Error("Launch context changed; reapproval required.");
       const branchInfo = record(await client.request("GET", `/repos/${config.repository}/branches/${encodeURIComponent(base)}`), "launch base");

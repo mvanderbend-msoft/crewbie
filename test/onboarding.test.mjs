@@ -379,6 +379,7 @@ function githubLabels() {
   return { labels, calls, client: {
     async list() { return labels; },
     async request(method, path, body) {
+      if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") throw new GitHubError(412, null);
       calls.push({ method, path, body });
       if (method === "GET" && path === "/user") return { login: "maintainer", type: "User" };
       if (method === "POST" && path.endsWith("/labels")) { labels.push(body); return body; }
@@ -668,6 +669,31 @@ test("cost-aware init proposes catalog models by role complexity and preserves i
   assert.match(await readFile(join(root, "crewbie-setup.md"), "utf8"), /Model proposal \(complex\)/);
   proposed.roles[1].model = "invented";
   assert.throws(() => parseSetupReview(JSON.stringify(proposed), report, "", "assessment-model", models), /not in the inspected account catalog/);
+});
+
+test("init reassesses without chosen models the cloud agent rejects and warns about installed ones", async (t) => {
+  const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config()), "src/catalogue.ts": "export const pageSize = 20;" });
+  const report = await assess(root);
+  const models = [{ id: "efficient", name: "Efficient" }, { id: "cli-only", name: "CLI only" }];
+  const role = (model) => ({ id: "catalogue", purpose: "Own bounded catalogue changes.", model, complexity: "routine", modelReason: "Narrow component changes fit this model.", checks: ["Preserve stable ordering."], nonNegotiables: ["Preserve IDs."] });
+  const installed = { ...report.installedRoles[0], checks: ["Check existing behavior."], nonNegotiables: ["Preserve approved scope."] };
+  const checks = [], reports = [], prompts = [];
+  const client = { async request(method, path, body) {
+    assert.equal(body.base_ref, "crewbie/model-check-never-exists");
+    checks.push(body.model);
+    throw new GitHubError(["cli-only", "approved-model"].includes(body.model) ? 400 : 412, null);
+  } };
+  await initCommand(root, { model: "assessment-model", "model-policy": "cost-aware" }, {
+    listModels: async () => models, client: () => client, report: (text) => reports.push(text),
+    analyze: async (prompt) => { prompts.push(prompt); return JSON.stringify(response(report, { roles: [installed, role(prompts.length === 1 ? "cli-only" : "efficient")] })); },
+  });
+  assert.equal(prompts.length, 2);
+  assert.doesNotMatch(prompts[1], /cli-only/);
+  assert.deepEqual(checks.sort(), ["approved-model", "cli-only", "efficient"], "Each chosen model is checked once.");
+  const result = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.deepEqual(result.config.roles.map((item) => item.model), ["approved-model", "efficient"]);
+  assert.match(reports.join("\n"), /rejects cli-only .*Reassessing without it/);
+  assert.match(reports.join("\n"), /rejects installed model approved-model/);
 });
 
 test("approved scoped guidance splits replace existing text while team-only keeps it intact", async (t) => {

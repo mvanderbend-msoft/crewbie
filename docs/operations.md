@@ -276,6 +276,15 @@ rationale. Installed choices are preserved. `--model-policy fixed` or
 `--specialist-model MODEL` skips specialist discovery and uses an explicit override;
 the account still needs entitlement. Legacy multipliers are not token prices.
 
+The CLI catalogue can list models the Copilot cloud agent rejects. Issue assignment
+then fails with a misleading "repository ruleset violation" comment. After the
+assessment, init checks each chosen model with the cloud-agent tasks API. A new
+role whose model is rejected triggers one reassessment without that model. An
+installed role gets a warning. Before any launch, dispatch checks each model the
+same way and stops without a claim or attempt if it is rejected. The check uses a
+branch that never exists, so no session starts. GitHub still lists a failed task
+in the Agents tab for each check. Preflight skips it to stay read-only.
+
 The LLM runs through the SDK's bundled runtime over shell-free stdio, tool-free
 in a temporary working directory and isolated `COPILOT_HOME`, using environment
 credentials or authenticated GitHub CLI. Runtime configuration discovery, skills,

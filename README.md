@@ -407,8 +407,9 @@ crewbie cancel --issue 42 --run-id 123456789 --apply
 
 Preflight is read-only: it shows approvals, dependencies, selected specialist/model,
 profile revision and remaining launch allowances. Execution repeats its guards
-under a repository-wide lock. Models are checked against the live account catalog;
-that does not prove the cloud runtime will accept or use them. No silent fallback.
+under a repository-wide lock. Models are checked against the live account catalog.
+Before a launch, the cloud agent must also accept them (see operations). That does
+not prove the runtime will use them. No silent fallback.
 
 Defaults are **20 Crewbie launch attempts per batch and 3 per task**, including the
 initial attempt, reviews/corrections and uncertain requests. Configure
