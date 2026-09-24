@@ -277,3 +277,36 @@ test("multiple native tasks need an immutable trusted receipt covering the exact
   entry.updated_at = "same"; matches[0].state = "in_progress";
   assert.equal(await selectNativeTask(f.client, f.cfg, 1, matches), undefined);
 });
+
+test("attribution reposts the specialist's own PR description once after Copilot's summary replaced it", async () => {
+  const { specialistNote } = await import("../dist/execution/attribution.js");
+  const own = "Specialist: crewbie-frontend\n\n## What changed\nGrudgingly added favorites.\n\n<!-- START COPILOT CODING AGENT SUFFIX -->\n- Fixes #1";
+  const edits = [
+    { editor: "copilot-swe-agent", body: "Neutral final summary." },
+    { editor: "copilot-swe-agent", body: own },
+    { editor: "maintainer", body: "Specialist: crewbie-frontend\nhuman text" },
+  ];
+  assert.equal(specialistNote(edits, "crewbie-frontend"), "Specialist: crewbie-frontend\n\n## What changed\nGrudgingly added favorites.");
+  assert.equal(specialistNote([edits[2]], "crewbie-frontend"), null, "human edits are never reposted as the specialist's voice");
+  assert.equal(specialistNote([{ editor: "copilot-swe-agent", body: "<!-- crewbie-attribution -->\n**Specialist:** `crewbie-frontend`" }], "crewbie-frontend"), null);
+
+  const comments = [];
+  const pr = { number: 10, body: "Neutral final summary.", head: { sha: "h" }, state: "open" };
+  const client = {
+    async list(path) { if (path.endsWith("/issues/10/comments")) return comments; throw new Error(`Unexpected list ${path}`); },
+    async request(method, path, body) {
+      if (path === "/graphql") return { data: { repository: { pullRequest: { userContentEdits: { nodes: edits.map((edit) => ({ editor: { login: edit.editor }, diff: edit.body })) } } } } };
+      if (method === "GET" && path.endsWith("/pulls/10")) return structuredClone(pr);
+      if (method === "PATCH" && path.endsWith("/pulls/10")) { pr.body = body.body; return { body: body.body }; }
+      if (method === "POST" && path.endsWith("/issues/10/comments")) { comments.push(body); return {}; }
+      throw new Error(`Unexpected ${method} ${path}`);
+    },
+  };
+  const cfg = { repository: "example/project" };
+  const task = { id: "task-9", custom_agent: { id: "crewbie-frontend" } };
+  await attributePull(client, cfg, structuredClone(pr), task, "frontend", "approved-model");
+  await attributePull(client, cfg, structuredClone(pr), task, "frontend", "approved-model");
+  assert.equal(comments.length, 1);
+  assert.match(comments[0].body, /crewbie-specialist-note:task-9/);
+  assert.match(comments[0].body, /> Grudgingly added favorites\./);
+});

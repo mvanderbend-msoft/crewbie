@@ -81,6 +81,6 @@ test("repository update refreshes an unedited old shared policy but preserves an
   await writeFile(join(root, ".crewbie/managed.json"), JSON.stringify(owned));
   await writeFile(join(root, ".crewbie/config.json"), JSON.stringify(config({ planning: { enabled: true, model: "planner", executeOnMerge: false } })));
   await updateRepository(root, { apply: true, offline: true });
-  assert.match(await readFile(join(root, path), "utf8"), /downstream implementation knowledge/);
+  assert.match(await readFile(join(root, path), "utf8"), /Hot memory holds gotchas only/);
   assert.equal(JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8")).planning.executeOnMerge, false);
 });

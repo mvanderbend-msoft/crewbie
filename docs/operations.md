@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.18 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.19 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -717,6 +717,14 @@ not assumed to trigger another workflow, so publication also dispatches it.
 Issue/PR attribution uses GitHub's authoritative closing references, not ordinary
 timeline mentions. A review PR can discuss another task without becoming that
 task's implementation PR or releasing its dependencies.
+
+GitHub's cloud agent runs the Crewbie specialist as a subagent, and its final
+summary replaces the specialist's own PR description. After attribution,
+reconciliation recovers the specialist's last description from the PR edit
+history (Copilot edits containing `Specialist: crewbie-<role>`) and posts it once
+as a PR comment. This keeps the specialist's voice and handoff visible. If no such
+edit exists, nothing is posted. Adopted personas apply to everything a specialist
+writes for humans; memory files stay neutral.
 
 With `publish --dispatch-local`, orchestration is one-shot: re-run publication
 with the same approved batch to release newly ready work. Existing claims prevent

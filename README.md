@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.18/crewbie-cli-0.1.0-alpha.18.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.19/crewbie-cli-0.1.0-alpha.19.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.18.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.19.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -345,21 +345,19 @@ another session and can consume AI credits. Review its changes before merging.
 
 For example, on a frontend implementation PR:
 
-> @copilot Please add concise handoff knowledge to
-> `.crewbie/team/frontend-engineer/hot.md` for the dependent frontend tasks:
-> the FavoritesProvider/useFavorites API, storage key and persistence behavior,
-> catalog reconciliation rules, and the known CartContext limitation. Verify
-> these against the implementation and link the relevant code. Preserve existing
-> knowledge and memory budgets; use an indexed topic if needed. Do not make
+> @copilot Please trim `.crewbie/team/frontend-engineer/hot.md` to the
+> non-obvious gotchas from this work, one or two lines each with a link (for
+> example, why persistence runs in an effect rather than the state updater).
+> Move API and contract details to the PR Handoff section. Do not make
 > application changes for this request.
 
-**Handoffs and lessons are different.** Specialists must record new contracts,
-decisions and limitations needed by dependent tasks, even without a general
-lesson. They should link discoverable implementation details rather than copy
-them. A no-update handoff must explain why no new downstream context exists or
-cite the existing memory section that covers it. Out-of-scope updates become
-explicit proposals; humans review and merge memory changes. This is curated
-knowledge, not a repetitive task log.
+**Handoffs and memory are different.** Downstream contracts and integration notes
+go in the PR's Handoff section; dependent tasks read the merged code and PR. Hot
+memory holds only gotchas: non-obvious traps, surprising constraints and failed
+approaches, one or two lines each with a link. No implementation summaries, scope
+notes or verification logs. If nothing was surprising, memory stays unchanged and
+the PR's Learning section says why. Out-of-scope updates become explicit
+proposals; humans review and merge memory changes.
 
 ### Or plan locally
 
