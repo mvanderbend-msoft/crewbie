@@ -37,7 +37,7 @@ export async function repoText(client: GitHubApi, repo: string, path: string, re
 }
 export async function verifyPlanningRun(client: GitHubApi, config: Config, runId: number, baseSha: string, completed = false): Promise<string> {
   const run = record(await client.request("GET", `/repos/${config.repository}/actions/runs/${integer(runId, "planning run")}`), "planning workflow run");
-  if (run.event !== "issues" || run.path !== ".github/workflows/crewbie-plan.yml" || run.head_sha !== baseSha
+  if (!["issues", "workflow_dispatch"].includes(String(run.event)) || run.path !== ".github/workflows/crewbie-plan.yml" || run.head_sha !== baseSha
     || record(run.head_repository, "run repository").full_name !== config.repository || !isApprover(run.actor, config.approvers)
     || (run.triggering_actor !== undefined && !isApprover(run.triggering_actor, config.approvers))
     || (completed && (run.status !== "completed" || run.conclusion !== "success"))) {
@@ -56,10 +56,15 @@ function executionManifest(value: unknown): PlanExecution {
     configHash: digest(data.configHash), batchDigest: digest(data.batchDigest), files,
   };
 }
-function allowedFile(path: string, directory: string, config: Config): boolean {
+export function allowedPlanningFile(path: string, directory: string, config: Config): boolean {
   if ([`${directory}/setup.json`, `${directory}/batch.json`, `${directory}/plan.md`, ".crewbie/config.json", ".crewbie/managed.json"].includes(path)) return true;
   return config.roles.some((role) => path === `.github/agents/crewbie-${role.id}.agent.md`
     || ["hot", "index"].some((tier) => path === `.crewbie/team/${role.id}/${tier}.md`));
+}
+export function planningLocation(ref: string): { sourceIssue: number; keyPrefix: string; directory: string } {
+  const match = /^crewbie\/plans\/((?:[a-z0-9]+(?:-[a-z0-9]+)*-)?issue-(\d+))-([a-f0-9]{16})$/.exec(ref);
+  if (!match) throw new Error("Expected a generated planning branch.");
+  return { sourceIssue: integer(Number(match[2]), "source issue"), keyPrefix: match[3]!, directory: `.crewbie/plans/${match[1]}` };
 }
 
 export async function approvedMergedPlan(client: GitHubApi, config: Config, number: number): Promise<{ batch: Batch; headSha: string; approver: string; merger: string }> {
@@ -68,12 +73,12 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   const prefix = `/repos/${config.repository}`;
   const pr = record(await client.request("GET", `${prefix}/pulls/${integer(number, "planning PR")}`), "planning PR");
   const head = record(pr.head, "planning head"), base = record(pr.base, "planning base");
-  const match = /^crewbie\/plans\/issue-(\d+)-([a-f0-9]{16})$/.exec(string(head.ref, "planning branch"));
-  if (!match || pr.merged !== true || pr.state !== "closed" || pr.draft !== false
+  const location = planningLocation(string(head.ref, "planning branch"));
+  if (pr.merged !== true || pr.state !== "closed" || pr.draft !== false
     || record(head.repo, "head repository").full_name !== config.repository
     || record(base.repo, "base repository").full_name !== config.repository) throw new Error("Only a merged, same-repository planning PR can authorize execution.");
   const headSha = sha(head.sha), mergeSha = sha(pr.merge_commit_sha);
-  const directory = `.crewbie/plans/issue-${integer(Number(match[1]), "source issue")}`;
+  const directory = location.directory;
   const manifestPath = `${directory}/execution.json`;
   let manifestFile: { content: string; sha: string };
   try { manifestFile = await repoText(client, config.repository, manifestPath, headSha); }
@@ -82,7 +87,7 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
     throw error;
   }
   const manifest = executionManifest(JSON.parse(manifestFile.content) as unknown);
-  if (manifest.sourceIssue !== Number(match[1]) || !manifest.key.startsWith(match[2]!)
+  if (manifest.sourceIssue !== location.sourceIssue || !manifest.key.startsWith(location.keyPrefix)
     || !String(pr.body ?? "").includes(`<!-- crewbie-plan:${manifest.key} -->`)) throw new Error("Planning PR provenance does not match its execution manifest.");
   const original = parseConfig(JSON.parse((await repoText(client, config.repository, ".crewbie/config.json", manifest.baseSha)).content) as unknown);
   if (original.repository !== config.repository || !original.planning?.enabled || !original.planning.executeOnMerge
@@ -124,7 +129,7 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   }
   const contents = new Map<string, string>();
   for (const path of expected) {
-    if (path !== manifestPath && !allowedFile(path, directory, config)) throw new Error(`Planning manifest contains an unapproved file: ${path}`);
+    if (path !== manifestPath && !allowedPlanningFile(path, directory, config)) throw new Error(`Planning manifest contains an unapproved file: ${path}`);
     const approved = path === manifestPath ? manifestFile : await repoText(client, config.repository, path, headSha);
     const file = changed.get(path);
     if (file) {

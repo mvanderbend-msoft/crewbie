@@ -29,6 +29,14 @@ test("CLI supports assessment -> reviewed installation -> specification approval
   assert.match(run(root, "status", "--memory", "developer"), /constitution\.md/);
   assert.match(run(root, "init", "--proposal", "setup.json", "--update"), /Installation preview: 0 files/);
   assert.deepEqual(JSON.parse(run(root, "init", "--proposal", "setup.json", "--update", "--json")).files, []);
+  const active = JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8"));
+  active.planning = { enabled: true, model: "approved-model", executeOnMerge: true };
+  await writeFile(join(root, ".crewbie/config.json"), JSON.stringify(active));
+  const update = JSON.parse(run(root, "update", "--offline", "--json"));
+  assert.ok(update.files.some((file) => file.path.endsWith("crewbie-execute-plan.yml")));
+  assert.match(run(root, "update", "--offline", "--apply"), /existing policy, models and memory preserved/);
+  assert.match(await readFile(join(root, ".github/workflows/crewbie-execute-plan.yml"), "utf8"), /pull_request_target:/);
+  assert.deepEqual(JSON.parse(run(root, "update", "--offline", "--json")).files, []);
 });
 
 test("CLI rejects implicit approval and unsupported input formats", async (t) => {
@@ -36,6 +44,19 @@ test("CLI rejects implicit approval and unsupported input formats", async (t) =>
   const result = spawnSync(process.execPath, [cli, "--path", root, "status", "--source", "x.pdf"], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Convert Word\/PDF outside/);
+});
+
+test("CLI exposes guarded controls, validates required identifiers and previews pause without remote writes", async (t) => {
+  const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config()) });
+  const pause = spawnSync(process.execPath, [cli, "--path", root, "pause"], { encoding: "utf8", env: { ...process.env, GH_TOKEN: "fixture-only" } });
+  assert.equal(pause.status, 0);
+  assert.match(pause.stdout, /Preview: pause future/);
+  for (const [command, expected] of [["cancel", /--run-id/], ["budget", /--historical-attempts/]]) {
+    const result = spawnSync(process.execPath, [cli, "--path", root, command], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, expected);
+  }
+  assert.match(run(root, "--help"), /preflight.*batch-id/);
 });
 
 test("CLI reassesses an installed team without resetting policy or installing changes", async (t) => {

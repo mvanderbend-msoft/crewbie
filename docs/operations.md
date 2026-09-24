@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.9 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.10 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -234,7 +234,11 @@ Interactive init discovers the account's enabled model catalogue through the
 official Copilot SDK and presents numbered choices with IDs and available billing
 multipliers. Invalid selections reprompt; `q` cancels. Discovery failure stops
 with an error rather than inventing model choices. An explicit `--model MODEL`
-bypasses discovery, but still requires model entitlement when assessment runs.
+skips the assessment picker. New roles default to cost-aware choices from the
+account catalog, with reported token prices/capabilities and a reviewed complexity
+rationale. Installed choices are preserved. `--model-policy fixed` or
+`--specialist-model MODEL` skips specialist discovery and uses an explicit override;
+the account still needs entitlement. Legacy multipliers are not token prices.
 
 The LLM runs through the SDK's bundled runtime over shell-free stdio, tool-free
 in a temporary working directory and isolated `COPILOT_HOME`, using environment
@@ -316,7 +320,15 @@ your account supports; the example is not an entitlement guarantee. Apply the
 reviewed proposal and commit the generated configuration, profiles, memory and
 `crewbie-plan.yml` workflow to the default branch.
 
-Override `CREWBIE_PACKAGE` only for a custom package source; set an approved exact
+`crewbie update` previews repository integration changes without AI reassessment;
+`crewbie update --apply` applies them and refreshes an existing `CREWBIE_PACKAGE`
+override to the installed CLI release. Upgrade the CLI separately with npm.
+Commit the generated file changes. Edited managed files block application; resolve
+the listed conflicts rather than changing ownership hashes blindly. `--offline`
+leaves remote variables unchecked. Existing execution opt-outs and models remain
+unchanged.
+
+Set an approved exact
 `CREWBIE_COPILOT_VERSION` (the earlier hosted CLI runs used `1.0.87`), and allow
 Actions to create pull requests. Copilot billing/organization policy still
 applies. No saved user token is required for planning:
@@ -342,12 +354,14 @@ session. Model selection is requested explicitly; runtime model/billing
 measurements are not inferred.
 
 The publisher rechecks the source, label approval, policy and default-branch
-revision. It creates a draft PR with `.crewbie/plans/issue-N/` files: a concise
+revision. It creates a non-draft PR with `.crewbie/plans/<feature>-issue-N/` files: a concise
 human-facing plan, a setup proposal and an unapproved task batch when requirements
 are sufficient. Merge-enabled plans also include the actual reviewed team files
 and an execution manifest, as described below. Each task names an owner, model and dependencies.
 Custom specialists need domain checks and non-negotiables. Missing requirements
-produce questions rather than fabricated acceptance criteria.
+produce questions rather than fabricated acceptance criteria; those PRs remain drafts.
+Non-draft means ready for review, not permission to bypass branch protection.
+Already-generated legacy `issue-N` directories remain executable.
 Crewbie does not create PRDs/specs. The legacy batch `spec` field remains for
 compatibility and holds a deterministic source reference in hosted plans;
 model-authored specification text is discarded. The constitution remains in use.
@@ -356,15 +370,24 @@ With merge execution disabled, review the proposal on its branch. Preview and ap
 then review/merge the resulting configuration and profiles onto the default
 branch. Resolve questions and inspect `batch.json` before `approve --batch ...
 --yes --execute` and `publish --batch ... --apply --dispatch-local --watch`.
-In this manual mode, merging the draft planning PR alone neither installs its
+In this manual mode, merging the planning PR alone neither installs its
 nested setup proposal nor approves execution. The coordinator never approves
 its own task graph.
 
 The same source/base/configuration snapshot is deduplicated, including a closed
 planning PR. Existing branches without a matching PR indicate interrupted
 publication and stop visibly; inspect them rather than deleting state or blindly
-retrying. Changed source or base context requires a fresh reviewed label event.
-Planning never force-pushes a human-edited branch or merges PRs.
+retrying. For an open plan, use `crewbie revise-plan --pr N --feedback-file feedback.txt`
+to preview a same-PR revision and repeat with `--apply` to request one paid run.
+The workflow accepts an explicit human request, reuses prior setup/plan/batch
+context, skips the full assessment and regenerates the execution manifest.
+Only configured approvers may request it. It checks source, policy, base ancestry
+and the exact prior head, and advances the branch without force. Previous approvals
+are stale after revision. Update a behind planning branch before requesting work;
+close/relabel is not needed for ordinary plan feedback. Re-running an already
+published revision skips further analysis. If publication is interrupted, inspect
+the existing branch and metadata before another paid request.
+Planning never merges PRs.
 
 Inputs are bounded to a 50 KB issue body and 100 KB total prompt/output. Plans
 have at most eight tasks, five questions and four additional roles per proposal.
@@ -375,8 +398,11 @@ Generated task issues are explicitly excluded, preventing recursive planning.
 
 ### Approve and merge to execute
 
-For a GitHub-only per-feature handoff, also set `config.planning.executeOnMerge`
-to `true` in the reviewed setup. Install the updated workflows once and commit
+For a GitHub-only per-feature handoff, `config.planning.executeOnMerge` defaults to
+`true` when a new assessment is installed with hosted planning enabled. An explicit
+`false` remains an opt-out. Existing installations (including legacy missing flags)
+are not silently opted in. To enable one, explicitly set it true in the installed
+configuration and preview/apply `crewbie update`. Install the updated workflows and commit
 them to the default branch. Configure `CREWBIE_USER_TOKEN` in repository Actions
 secrets using a supported user-authorized credential belonging to a configured
 approver. It needs the documented native-assignment access, issue publication,
@@ -461,18 +487,24 @@ ADO creation outcomes before retrying because server-side indexing can lag.
 
 The read-only assessment cites
 [Gloaguen et al., *Evaluating AGENTS.md*](https://arxiv.org/abs/2602.11988).
-In the studied Python repositories and agent/model configurations, generated
-context did not reliably improve success and increased inference cost (section
-4.2). Appendix B reports no clear dependency of success/cost on context-file
-length; it also finds generated context useful when other documentation is
-removed. These are study-specific observations, not a universal instruction ban.
+In the evaluated settings, context files did not generally improve task success
+and increased inference cost; repository overviews were not helpful. The authors
+still identify value in non-standard coding practices. These are study-specific
+observations, not a universal instruction ban or proof that a particular number
+of words is harmful.
 
 Crewbie's documentation/profile overlap, generic-advice, unverified-link,
-npm-script and unconditional full-suite signals are **engineering heuristics**,
+npm-script, broad-root-scope and unconditional full-suite signals are **engineering heuristics**,
 not validated causal rules from the paper. They identify concrete material for
 human review. Necessary standalone context and explicit merge/compliance gates
 should be retained. Contradictions, domain relevance and actual benefit still
 need semantic review and representative before/after task evidence.
+The 600-word root-guidance review threshold is advisory, not a gate. Scoped
+Copilot instructions need valid YAML `applyTo` globs. When relocating domain
+guidance, review the source reduction and destination together; preserve policy
+coverage and host-specific instruction support. Findings marked as concrete edits
+must reference actual replacement text; recommendations needing decisions remain
+deferred. See the [README sources](../README.md#sources-behind-guidance-assessment).
 
 The scanner reads visible non-ignored instruction files, README/CONTRIBUTING
 documents and package manifests. It checks at most 32 instruction files, 12
@@ -483,6 +515,83 @@ detected warnings rather than silently presenting the sample as complete.
 These are inspection resource limits, **not quality thresholds**. No project
 script or linked URL is executed. The existing configurable charter/spec word
 budgets remain readability constraints, not research-derived quality scores.
+
+## Launch preflight, limits and stop controls
+
+`crewbie preflight [--batch-id ID] [--json]` performs read-only inspection of the
+managed tasks, current approval, dependencies, repository capacity, sources,
+specialist files and live account models. It exposes requested models and profile
+revisions, not proof of effective cloud-runtime selection. Missing catalog
+entitlement stops launch; no model fallback or automatic paid retry is permitted.
+Both issue assignment and review/correction launches repeat the guards.
+
+`modelProfile` is `balanced` by default; `init --model-profile economy|balanced|quality`
+sets the reviewed selection policy. Capability comes before price in every profile,
+including non-code work. Existing models and explicit overrides remain unchanged.
+An LLM's suitability rationale is a proposal, not a benchmark certification.
+
+```json
+{
+  "modelProfile": "balanced",
+  "execution": {
+    "maxLaunchesPerBatch": 20,
+    "maxAttemptsPerTask": 3
+  }
+}
+```
+
+These configuration fields are optional for legacy configurations so parsing does
+not change approved plan hashes. Absent limits use 20/3. Changing the profile alone
+does not reassign models. Each Crewbie-initiated implementation/review launch
+reserves one attempt under the existing repository dispatch lock **before** the
+paid request. Initial launches, continuations and unknown request outcomes consume
+allowance. Remote `crewbie/launches/<batch>/<task>/<issue>/...` tags retain the
+ledger across local CLI sessions and Actions runs. Stable batch/task identities
+keep the count across revisions. Do not delete or edit these refs to bypass limits.
+The budget covers Crewbie requests, not the number of internal backend sessions,
+tokens, monetary spend, manual PR follow-ups, onboarding, planning or nightly work.
+
+**Upgrading an in-flight batch:** pre-alpha.10 launch claims have no trustworthy
+complete attempt ledger. Further automatic launches in that batch stop visibly,
+but existing sessions and completed work are not changed. Review each reported
+issue's history (initial, correction, retry and uncertain requests), then record
+the count without rebuilding the setup or republishing the tasks:
+
+```powershell
+crewbie budget --issue 42 --historical-attempts 2
+crewbie budget --issue 42 --historical-attempts 2 --apply
+crewbie preflight
+```
+
+The count is an explicit **human attestation**, not observed billing. It adds a
+one-time immutable baseline consuming allowance; it cannot overwrite existing
+history or refund attempts. Repeat for each unaccounted legacy claim that
+preflight identifies. If you cannot establish its history, keep that batch
+blocked rather than inventing a count. This does not repeat paid analysis.
+
+`crewbie pause` previews a repository-wide gate; `--apply` requires a configured
+human approver and uses the same lock as dispatch/review. If dispatch holds the
+lock, pause fails visibly: do not assume the repository is paused; retry once the
+current operation ends. Once confirmed, no new controlled implementation/review
+launches pass the gate. Already-running sessions continue. Planning and nightly
+analysis have their own opt-in controls and are not paused by this command.
+`crewbie resume --apply` removes only the gate, preserving claims and counters;
+it does not itself dispatch.
+
+`crewbie cancel --issue N --run-id ID` previews cancellation after verifying an
+unambiguous closing Copilot PR and matching repository, branch, PR identity and
+`dynamic` Actions run. `--apply` requires a human approver, rechecks the run and
+requests the documented Actions cancellation operation. The result distinguishes
+an accepted request from a confirmed cancelled run. Native termination and
+capacity are not assumed from the request; saved commits and claims remain.
+An inaccessible/unsupported cancellation is an explicit error with instructions
+to use GitHub's **Stop session** control. There is no force-cancel or replacement
+fallback.
+
+Sources: [GitHub session management](https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/manage-and-track-agents#stop-a-session)
+and [Actions cancellation](https://docs.github.com/en/rest/actions/workflow-runs#cancel-a-workflow-run).
+The documented [Agent Tasks API](https://docs.github.com/en/rest/agent-tasks/agent-tasks)
+does not itself expose a task-cancellation endpoint; Crewbie does not invent one.
 
 ## Scheduling and recovery
 
@@ -628,13 +737,25 @@ write credential. A separate deterministic step checks paths, hashes, evidence,
 word limits and obvious secret patterns before publishing; human review remains
 essential.
 
-Specialists close each task by assessing learning. Approved memory paths can be
-changed on the work branch for human review; existing accepted policy is preserved.
+Specialists close each task by assessing **handoff knowledge and reusable lessons
+separately**. New contracts, integration constraints, decisions and limitations
+needed by dependent tasks belong in relevant hot/index or linked topic memory,
+even without a general lesson. Link discoverable implementation details instead
+of copying them. A no-update handoff needs a reason or a pointer to the exact
+existing memory section; "no new durable lesson" alone is insufficient.
+Approved memory paths can be changed on the work branch for human review;
+existing accepted policy is preserved.
 New shared decisions remain explicitly proposed until approved. Out-of-scope
 lessons go in one PR comment starting with `<!-- crewbie-memory-proposal -->`,
 with target path, lesson, reason and evidence. The collector includes bounded
 proposals from the Copilot bot or configured approvers in nightly input. It does
-not promote comments to policy or force memory changes for routine work.
+not promote comments to policy or force repetitive activity logs for routine work.
+
+On an implementation PR, mention `@copilot` with specific changes or a targeted
+handoff request. GitHub continues using the same custom agent on its PR; another
+session can consume AI credits. Review and merge the new changes. On a planning
+PR, use the bounded `revise-plan` flow instead so provenance and manifest hashes
+are regenerated.
 
 Own hot/index history and shared decisions are included. Human-closed improvement
 PRs become feedback; the agent's own open-PR bookkeeping is not fresh evidence.

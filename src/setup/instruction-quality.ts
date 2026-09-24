@@ -1,10 +1,11 @@
 import { stat } from "node:fs/promises";
 import { posix } from "node:path";
+import YAML from "yaml";
 import { errorCode, optionalText, safePath } from "../core.js";
 
 export const INSTRUCTION_STUDY = "https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd";
 export interface InstructionSignal {
-  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "unconditional-full-suite";
+  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "unconditional-full-suite" | "missing-path-scope" | "broad-root-guidance";
   level: "warning" | "advisory";
   path: string;
   line: number;
@@ -22,6 +23,16 @@ export interface InstructionQuality {
 }
 export function instructionFile(path: string): boolean {
   return path === ".crewbie/instructions.md" || /(^|\/)(AGENTS\.md|CLAUDE\.md|GEMINI\.md|copilot-instructions\.md)$|\.instructions\.md$|(^|\/)\.github\/agents\/[^/]+\.agent\.md$|(^|\/)\.claude\/agents\/[^/]+\.md$/.test(path);
+}
+export function validateInstructionScope(path: string, content: string): void {
+  if (!path.startsWith(".github/instructions/") || !path.endsWith(".instructions.md")) return;
+  const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+  if (!header) throw new Error(`${path} needs YAML frontmatter with an explicit applyTo scope.`);
+  const data: unknown = YAML.parse(header[1]!);
+  if (typeof data !== "object" || data === null || !("applyTo" in data) || typeof data.applyTo !== "string"
+    || !data.applyTo.trim() || data.applyTo.split(",").some((glob) => !glob.trim() || /(?:^|\/)\.\.(?:\/|$)|\\|^[\/~]|:/.test(glob.trim()))) {
+    throw new Error(`${path} needs repository-relative applyTo globs.`);
+  }
 }
 const normalize = (text: string) => text.replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 const generic = /^(?:write clean(?:,? readable)?(?: and maintainable)? code|follow (?:coding )?best practices|be (?:thorough|helpful|concise)|ensure (?:high )?code quality|run (?:the )?tests|write (?:good |unit )?tests)[.!]?$/i;
@@ -98,6 +109,19 @@ export async function assessInstructions(root: string, paths: readonly string[])
   for (const path of result.inspected) {
     const text = content.get(path)!;
     const lines = text.split(/\r?\n/);
+    if (path.startsWith(".github/instructions/") && path.endsWith(".instructions.md")) {
+      try { validateInstructionScope(path, text); }
+      catch (error) {
+        add({ code: "missing-path-scope", level: "warning", path, line: 1,
+          detail: error instanceof Error ? error.message : "Invalid path-scoped instruction header.",
+          recommendation: "Specify valid applyTo globs for the intended domain before moving repository-wide rules here." });
+      }
+    }
+    if (["AGENTS.md", ".github/copilot-instructions.md"].includes(path) && text.trim().split(/\s+/).length > 600) {
+      add({ code: "broad-root-guidance", level: "advisory", path, line: 1,
+        detail: "Always-loaded guidance exceeds Crewbie's 600-word review threshold, not a paper-established harmful limit.",
+        recommendation: "Review relevance and domain scope. Keep necessary shared policy; move justified domain rules behind scoped instructions or nested AGENTS.md, with source reductions and destination edits reviewed together." });
+    }
     const semantic = lines.map((line, index) => ({ text: line.replace(/^\s*[-*]\s*/, "").trim(), line: index + 1 }))
       .filter((line) => line.text && !line.text.startsWith("#") && !line.text.startsWith("<!--"));
     if (semantic.length && semantic.every((line) => generic.test(line.text))) {

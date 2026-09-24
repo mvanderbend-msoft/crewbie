@@ -7,10 +7,10 @@ import { createHash } from "node:crypto";
 import YAML from "yaml";
 import { parseConfig, PLANNING_LABEL } from "../dist/config.js";
 import { GitHubError, hash } from "../dist/core.js";
-import { preparePlanning, publishPlanning, parsePlan } from "../dist/specification/planning.js";
+import { preparePlanning, publishPlanning, parsePlan, requestPlanningRevision } from "../dist/specification/planning.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { workflows } from "../dist/setup/templates.js";
-import { approvedMergedPlan, releaseMergedPlan } from "../dist/execution/planning-approval.js";
+import { approvedMergedPlan, releaseMergedPlan, planningLocation } from "../dist/execution/planning-approval.js";
 import { fixture, config, task } from "./helpers.mjs";
 
 async function planningFixture(t, automatic = false) {
@@ -33,7 +33,7 @@ async function planningFixture(t, automatic = false) {
   const client = {
     async list(path) {
       if (path === `${prefix}/issues/12/events`) return state.events;
-      if (path.startsWith(`${prefix}/pulls?state=all&head=example:crewbie/plans/issue-12-`)) return state.pulls;
+      if (path.startsWith(`${prefix}/pulls?state=all&head=example:crewbie/plans/`)) return state.pulls;
       if (path === `${prefix}/pulls/13/reviews`) return state.reviews;
       if (path === `${prefix}/pulls/13/files`) return state.diff;
       if (path === `${prefix}/labels`) return state.labels;
@@ -46,10 +46,10 @@ async function planningFixture(t, automatic = false) {
       if (method !== "GET") state.writes.push({ method, path, body });
       if (method === "GET" && path === "/user") return sender;
       if (method === "GET" && path === `${prefix}/issues/12`) return state.source;
-      if (method === "GET" && path === `${prefix}/actions/runs/42`) return state.run;
+      if (method === "GET" && /^\/repos\/example\/project\/actions\/runs\/(?:42|43)$/.test(path)) return state.run;
       if (method === "GET" && path === `${prefix}/pulls/13`) return state.pulls[0];
       if (method === "GET" && path === `${prefix}/branches/main`) return { commit: { sha: state.sha } };
-      if (method === "GET" && path.startsWith(`${prefix}/compare/`)) return { status: "identical", merge_base_commit: { sha: "c".repeat(40) } };
+      if (method === "GET" && path.startsWith(`${prefix}/compare/`)) return { status: "identical", merge_base_commit: { sha: state.pulls[0]?.state === "open" ? sha : "c".repeat(40) } };
       const file = /^\/repos\/example\/project\/contents\/(.+)\?ref=([a-f0-9]{40})$/.exec(path);
       if (method === "GET" && file) {
         const content = state.snapshots.get(file[2])?.[file[1]];
@@ -64,7 +64,25 @@ async function planningFixture(t, automatic = false) {
       }
       if (method === "GET" && path === `${prefix}/git/commits/${sha}`) return { tree: { sha: "base-tree" } };
       if (method === "POST" && path === `${prefix}/git/trees`) { state.tree = body.tree; return { sha: "planning-tree" }; }
-      if (method === "POST" && path === `${prefix}/git/commits`) return { sha: "b".repeat(40) };
+      if (method === "POST" && path === `${prefix}/git/commits`) return { sha: state.nextCommit ?? "b".repeat(40) };
+      if (method === "PATCH" && path.startsWith(`${prefix}/git/refs/heads/`)) {
+        assert.equal(body.force, false);
+        const files = { ...baseFiles, ...Object.fromEntries(state.tree.map((entry) => [entry.path, entry.content])) };
+        state.snapshots.set(body.sha, files);
+        state.pulls[0].head.sha = body.sha;
+        state.diff = state.tree.filter((entry) => baseFiles[entry.path] !== entry.content).map((entry) => ({ filename: entry.path, status: "added", sha: blob(entry.content) }));
+        state.pulls[0].changed_files = state.diff.length;
+        return {};
+      }
+      if (method === "PATCH" && path === `${prefix}/pulls/13`) { Object.assign(state.pulls[0], body); return state.pulls[0]; }
+      if (method === "POST" && path === "/graphql") {
+        if (state.reviewStateFailure) throw new Error("Review-state API unavailable.");
+        const action = body.query.includes("markPullRequestReadyForReview") ? "markPullRequestReadyForReview" : "convertPullRequestToDraft";
+        const draft = action === "convertPullRequestToDraft";
+        state.pulls[0].draft = draft;
+        return { data: { [action]: { pullRequest: { isDraft: draft } } } };
+      }
+      if (method === "POST" && path === `${prefix}/actions/workflows/crewbie-plan.yml/dispatches`) return null;
       if (method === "POST" && path === `${prefix}/git/refs`) {
         if (body.ref === "refs/tags/crewbie/dispatch-lock") {
           if (state.lock) throw new GitHubError(409, null);
@@ -88,7 +106,11 @@ async function planningFixture(t, automatic = false) {
       if (method === "POST" && path === `${prefix}/actions/workflows/crewbie-dispatch.yml/dispatches`) { state.dispatches++; return null; }
       if (method === "POST" && path === `${prefix}/pulls`) {
         if (state.createPullFailure) throw new Error("Unknown PR publication outcome.");
-        const pull = { html_url: "https://github.com/example/project/pull/13", body: body.body, head: { ref: body.head, repo: { full_name: cfg.repository } } };
+        state.snapshots.set("b".repeat(40), { ...baseFiles, ...Object.fromEntries(state.tree.map((entry) => [entry.path, entry.content])) });
+        state.diff = state.tree.filter((entry) => baseFiles[entry.path] !== entry.content).map((entry) => ({ filename: entry.path, status: "added", sha: blob(entry.content) }));
+        const pull = { number: 13, node_id: "PR_fixture", state: "open", merged: false, draft: body.draft, changed_files: state.diff.length,
+          base: { ref: "main", repo: { full_name: cfg.repository } },
+          html_url: "https://github.com/example/project/pull/13", body: body.body, head: { sha: "b".repeat(40), ref: body.head, repo: { full_name: cfg.repository } } };
         state.pulls = [pull];
         return pull;
       }
@@ -132,12 +154,12 @@ test("ready label loads the actual coordinator charter/history and proposes owne
   assert.equal(f.state.writes.length, 0, "Preparation has no remote write capability.");
   await f.output();
   assert.match(await publishPlanning(f.root, f.client, f.cfg), /pull\/13/);
-  assert.deepEqual(f.state.tree.map((entry) => entry.path), [".crewbie/plans/issue-12/setup.json", ".crewbie/plans/issue-12/plan.md", ".crewbie/plans/issue-12/batch.json"]);
+  assert.deepEqual(f.state.tree.map((entry) => entry.path), [".crewbie/plans/progressive-catalogue-loading-issue-12/setup.json", ".crewbie/plans/progressive-catalogue-loading-issue-12/plan.md", ".crewbie/plans/progressive-catalogue-loading-issue-12/batch.json"]);
   const batch = JSON.parse(f.state.tree.find((entry) => entry.path.endsWith("batch.json")).content);
   assert.equal(batch.approval, null);
   assert.equal(batch.tasks[0].owner, "developer");
   assert.deepEqual(batch.sources, [{ uri: "https://github.com/example/project/issues/12", revision: f.state.source.updated_at, fingerprint: hash(`${f.state.source.title}\n\n${f.state.source.body}`) }]);
-  assert.equal(f.state.writes.at(-1).body.draft, true);
+  assert.equal(f.state.writes.at(-1).body.draft, false);
   assert.match(f.state.writes.at(-1).body.body, /crewbie-coordinator/);
   assert.ok(f.state.writes.every((write) => !write.path.includes("/assignees") && !write.path.endsWith("/issues")));
   assert.match(f.state.writes.find((write) => write.path.endsWith("/git/commits")).body.message, /Co-authored-by: Copilot/);
@@ -306,7 +328,7 @@ async function mergedFixture(t, unchangedPaths = []) {
 
 test("merge-enabled planning materializes team files and verifies the exact human-reviewed merge", async (t) => {
   const f = await mergedFixture(t);
-  for (const path of [".crewbie/config.json", ".github/agents/crewbie-frontend.agent.md", ".crewbie/team/frontend/hot.md", ".crewbie/managed.json", ".crewbie/plans/issue-12/execution.json"]) {
+  for (const path of [".crewbie/config.json", ".github/agents/crewbie-frontend.agent.md", ".crewbie/team/frontend/hot.md", ".crewbie/managed.json", ".crewbie/plans/progressive-catalogue-loading-issue-12/execution.json"]) {
     assert.ok(f.state.tree.some((entry) => entry.path === path), path);
   }
   assert.ok(!f.state.tree.some((entry) => entry.path.startsWith(".github/workflows/")));
@@ -318,9 +340,9 @@ test("merge-enabled planning materializes team files and verifies the exact huma
 });
 
 test("merge execution accepts an unchanged setup listed in the manifest but absent from the PR diff", async (t) => {
-  const path = ".crewbie/plans/issue-12/setup.json";
+  const path = ".crewbie/plans/progressive-catalogue-loading-issue-12/setup.json";
   const f = await mergedFixture(t, [path]);
-  const manifest = JSON.parse(f.state.snapshots.get("b".repeat(40))[".crewbie/plans/issue-12/execution.json"]);
+  const manifest = JSON.parse(f.state.snapshots.get("b".repeat(40))[".crewbie/plans/progressive-catalogue-loading-issue-12/execution.json"]);
   assert.ok(manifest.files[path]);
   assert.ok(!f.state.diff.some((file) => file.filename === path));
   assert.equal(Object.keys(manifest.files).length + 1, f.state.diff.length + 1);
@@ -330,14 +352,14 @@ test("merge execution accepts an unchanged setup listed in the manifest but abse
 });
 
 test("unchanged plan and batch contents remain verified and available for publication", async (t) => {
-  const f = await mergedFixture(t, ["setup.json", "plan.md", "batch.json"].map((name) => `.crewbie/plans/issue-12/${name}`));
+  const f = await mergedFixture(t, ["setup.json", "plan.md", "batch.json"].map((name) => `.crewbie/plans/progressive-catalogue-loading-issue-12/${name}`));
   assert.match(await releaseMergedPlan(f.client, f.active, 13), /dispatch requested/);
   assert.equal(f.state.executionIssues.length, 1);
   assert.equal(f.state.dispatches, 1);
 });
 
 test("manifest files omitted from the PR diff must exist unchanged at the planning base", async (t) => {
-  const path = ".crewbie/plans/issue-12/setup.json";
+  const path = ".crewbie/plans/progressive-catalogue-loading-issue-12/setup.json";
   const f = await mergedFixture(t, [path]);
   const base = f.state.snapshots.get(f.state.run.head_sha);
   const saved = base[path];
@@ -353,7 +375,7 @@ test("manifest files omitted from the PR diff must exist unchanged at the planni
 });
 
 test("unchanged manifest files cannot change at merge or on the current default branch", async (t) => {
-  const path = ".crewbie/plans/issue-12/setup.json";
+  const path = ".crewbie/plans/progressive-catalogue-loading-issue-12/setup.json";
   const f = await mergedFixture(t, [path]);
   const merged = f.state.snapshots.get("c".repeat(40));
   const saved = merged[path];
@@ -368,7 +390,7 @@ test("unchanged manifest files cannot change at merge or on the current default 
 
 test("unchanged manifest entries cannot authorize unrelated files", async (t) => {
   const f = await mergedFixture(t);
-  const manifestPath = ".crewbie/plans/issue-12/execution.json";
+  const manifestPath = ".crewbie/plans/progressive-catalogue-loading-issue-12/execution.json";
   const path = ".github/workflows/unsafe.yml";
   const content = "name: Unrelated workflow\n";
   const head = f.state.snapshots.get("b".repeat(40));
@@ -467,7 +489,7 @@ test("default-branch planning provenance must be successful and cannot reference
 test("tampering, merge conflict changes, extra files and stale source requirements stop before publication", async (t) => {
   const f = await mergedFixture(t);
   const merge = f.state.snapshots.get("c".repeat(40));
-  const batchPath = ".crewbie/plans/issue-12/batch.json";
+  const batchPath = ".crewbie/plans/progressive-catalogue-loading-issue-12/batch.json";
   const saved = merge[batchPath];
   merge[batchPath] += " ";
   await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /changed at merge/);
@@ -506,4 +528,130 @@ test("merge execution workflow is opt-in and checks out only the trusted default
   assert.match(step.run, /internal-release-plan/);
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.throws(() => parseConfig(config({ planning: { enabled: false, model: "", executeOnMerge: true } })), /Enable planning/);
+});
+
+test("planning locations support readable feature names and already-published legacy plans", () => {
+  const key = "a".repeat(16);
+  assert.deepEqual(planningLocation(`crewbie/plans/issue-12-${key}`), { sourceIssue: 12, keyPrefix: key, directory: ".crewbie/plans/issue-12" });
+  assert.equal(planningLocation(`crewbie/plans/catalogue-paging-issue-12-${key}`).directory, ".crewbie/plans/catalogue-paging-issue-12");
+  assert.throws(() => planningLocation(`crewbie/plans/../../unsafe-issue-12-${key}`), /generated planning branch/);
+});
+
+test("explicit same-PR revision reuses context, updates provenance and never force-pushes", async (t) => {
+  const f = await planningFixture(t, true);
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  await f.output();
+  await publishPlanning(f.root, f.client, f.cfg);
+  f.state.writes = [];
+  assert.match(await requestPlanningRevision(f.client, f.cfg, 13, "Split the paging UI from retry behavior.", false), /Preview.*billable/);
+  assert.equal(f.state.writes.length, 0);
+  await requestPlanningRevision(f.client, f.cfg, 13, "Split the paging UI from retry behavior.", true);
+  const requested = f.state.writes.at(-1);
+  assert.equal(requested.path, "/repos/example/project/actions/workflows/crewbie-plan.yml/dispatches");
+  assert.equal(requested.body.inputs.head, "b".repeat(40));
+  f.state.run.event = "workflow_dispatch";
+  const event = { repository: f.event.repository, sender: f.event.sender, inputs: requested.body.inputs };
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, event, 43)).ready, true);
+  const prompt = await readFile(join(f.root, ".crewbie-planning-prompt.txt"), "utf8");
+  assert.match(prompt, /fresh repository assessment was intentionally skipped/);
+  assert.match(prompt, /Split the paging UI from retry behavior/);
+  await f.output({ ...f.candidate, summary: "Separate retry behavior from the catalogue UI." });
+  f.state.nextCommit = "d".repeat(40);
+  f.state.writes = [];
+  assert.match(await publishPlanning(f.root, f.client, f.cfg), /Revised the same planning PR/);
+  assert.equal(f.state.pulls[0].head.sha, "d".repeat(40));
+  assert.ok(f.state.writes.every((write) => write.path !== "/repos/example/project/pulls"));
+  const commit = f.state.writes.find((write) => write.path.endsWith("/git/commits"));
+  assert.deepEqual(commit.body.parents, ["b".repeat(40)]);
+  const manifest = JSON.parse(f.state.tree.find((entry) => entry.path.endsWith("/execution.json")).content);
+  assert.equal(manifest.runId, 43);
+  assert.equal(JSON.parse(f.state.tree.find((entry) => entry.path.endsWith("/batch.json")).content).approval, null);
+  const writes = f.state.writes.length;
+  assert.match(await publishPlanning(f.root, f.client, f.cfg), /already published/);
+  assert.equal(f.state.writes.length, writes);
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, event, 43)).ready, false, "A completed run must skip another paid analysis even though its old head is now stale.");
+  assert.equal(f.state.writes.length, writes);
+});
+
+test("stale, unrelated, untrusted and oversized planning revision requests stop before analysis", async (t) => {
+  const f = await planningFixture(t, true);
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  await f.output();
+  await publishPlanning(f.root, f.client, f.cfg);
+  const event = { repository: f.event.repository, sender: f.event.sender,
+    inputs: { pr: "13", feedback: "Keep retries explicit.", head: "a".repeat(40) } };
+  await assert.rejects(preparePlanning(f.root, f.client, f.cfg, event, 43), /changed after the revision request/);
+  event.inputs.head = "b".repeat(40);
+  event.sender = { login: "outsider", type: "User" };
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, event, 43)).ready, false);
+  await assert.rejects(requestPlanningRevision(f.client, f.cfg, 13, "x".repeat(8001), false), /8000/);
+  f.state.diff.push({ filename: "src/unrelated.ts", status: "added" });
+  f.state.pulls[0].changed_files++;
+  await assert.rejects(requestPlanningRevision(f.client, f.cfg, 13, "Revise scope.", true), /unrelated change/);
+});
+
+test("planning revisions require the exact requested head and source before paid analysis", async (t) => {
+  const f = await planningFixture(t, true);
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  await f.output();
+  await publishPlanning(f.root, f.client, f.cfg);
+  await requestPlanningRevision(f.client, f.cfg, 13, "Keep retries explicit.", true);
+  const inputs = f.state.writes.at(-1).body.inputs;
+  f.state.run.event = "workflow_dispatch";
+  const event = { repository: f.event.repository, sender: f.event.sender, inputs };
+  const writes = f.state.writes.length;
+  await assert.rejects(preparePlanning(f.root, f.client, f.cfg, { ...event, inputs: { ...inputs, head: undefined } }, 43), /changed after the revision request/);
+  f.state.source.body += " Add an unrelated feature.";
+  await assert.rejects(preparePlanning(f.root, f.client, f.cfg, event, 43), /Source changed/);
+  await assert.rejects(readFile(join(f.root, ".crewbie-planning-prompt.txt")), /ENOENT/);
+  assert.equal(f.state.writes.length, writes);
+});
+
+test("clarification revisions become ready for review and report partial metadata failures without repeating analysis", async (t) => {
+  for (const fail of [false, true]) {
+    const f = await planningFixture(t, true);
+    await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+    await f.output({ ...f.candidate, questions: ["Which paging size should be used?"], batch: null });
+    await publishPlanning(f.root, f.client, f.cfg);
+    assert.equal(f.state.pulls[0].draft, true);
+    await requestPlanningRevision(f.client, f.cfg, 13, "Use 20 items per page.", true);
+    const event = { repository: f.event.repository, sender: f.event.sender, inputs: f.state.writes.at(-1).body.inputs };
+    f.state.run.event = "workflow_dispatch";
+    await preparePlanning(f.root, f.client, f.cfg, event, 43);
+    await f.output({ ...f.candidate, summary: Array(100).fill("Plan").join(" ") });
+    f.state.nextCommit = "d".repeat(40);
+    f.state.reviewStateFailure = fail;
+    if (fail) await assert.rejects(publishPlanning(f.root, f.client, f.cfg), /Revision published.*draft\/ready state/);
+    else {
+      await publishPlanning(f.root, f.client, f.cfg);
+      assert.equal(f.state.pulls[0].draft, false);
+    }
+    assert.equal(f.state.pulls[0].head.sha, "d".repeat(40));
+    assert.equal((await preparePlanning(f.root, f.client, f.cfg, event, 43)).ready, false);
+  }
+});
+
+test("a planning PR edited during publication is never overwritten", async (t) => {
+  const f = await planningFixture(t, true);
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  await f.output();
+  await publishPlanning(f.root, f.client, f.cfg);
+  await requestPlanningRevision(f.client, f.cfg, 13, "Keep retries explicit.", true);
+  const event = { repository: f.event.repository, sender: f.event.sender, inputs: f.state.writes.at(-1).body.inputs };
+  f.state.run.event = "workflow_dispatch";
+  await preparePlanning(f.root, f.client, f.cfg, event, 43);
+  await f.output();
+  let reads = 0;
+  const racingClient = {
+    ...f.client,
+    async request(method, path, body) {
+      const result = structuredClone(await f.client.request(method, path, body));
+      if (method === "GET" && path === "/repos/example/project/pulls/13" && ++reads === 2) result.body += "\nHuman edit.";
+      return result;
+    },
+  };
+  f.state.writes = [];
+  await assert.rejects(publishPlanning(f.root, racingClient, f.cfg), /changed before publication/);
+  assert.equal(f.state.pulls[0].head.sha, "b".repeat(40));
+  assert.ok(f.state.writes.every((write) => write.method !== "PATCH"));
 });

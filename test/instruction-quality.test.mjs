@@ -50,11 +50,11 @@ test("generic-only instructions are advisory, not a claim of measured harm", asy
   assert.match(result.instructionQuality.interpretation, /does not.*prove these individual patterns/);
 });
 
-test("instruction length is not a quality gate and assessment limits disclose coverage", async (t) => {
+test("instruction length is an advisory scope-review signal, not a quality gate, and limits disclose coverage", async (t) => {
   const long = "# Context\n\n" + Array.from({ length: 250 }, (_, i) => `Constraint ${i}: preserve version ${i} compatibility at boundary ${i}.`).join("\n");
   const root = await fixture(t, { "AGENTS.md": long, "nested/CLAUDE.md": "x".repeat(65_000) });
   const result = await assess(root);
-  assert.deepEqual(result.instructionQuality.signals, []);
+  assert.deepEqual(result.instructionQuality.signals.map((signal) => [signal.code, signal.level]), [["broad-root-guidance", "advisory"]]);
   assert.deepEqual(result.instructionQuality.inspected, ["AGENTS.md"]);
   assert.equal(result.instructionQuality.omitted[0].path, "nested/CLAUDE.md");
   assert.match(result.instructionQuality.omitted[0].reason, /size alone is not a quality finding/);

@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, linkedPull, renderDispatchResult } from "../dist/execution/dispatch.js";
+import { dispatch as runDispatch, linkedPull, preflight, renderDispatchResult } from "../dist/execution/dispatch.js";
 import { GitHubError } from "../dist/execution/github.js";
 import { approvedBatch, issueBody, issueDigest, parseBatch } from "../dist/specification/batch.js";
 import { watchBatch } from "../dist/execution/watch.js";
 import { approvalComment } from "../dist/tracking/issues.js";
 import { config, batch } from "./helpers.mjs";
+const models = async () => [{ id: "approved-model", name: "Approved model" }];
+const dispatch = (client, cfg, ado, scope) => runDispatch(client, cfg, ado, scope, models);
 
 function githubFixture(input = batch()) {
   const b = parseBatch(input, config());
@@ -13,13 +15,15 @@ function githubFixture(input = batch()) {
     number: index + 1, state: "open", title: task.title, body: issueBody(b, task),
     labels: ["crewbie:managed", "crewbie:blocked", "crewbie:owner:developer"],
   }));
-  const claims = new Set(), pulls = new Map(), assignments = [];
+  const claims = new Set(), pulls = new Map(), assignments = [], launches = new Set();
   let locked = false;
   const fixture = {
-    issues, claims, pulls, assignments, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false,
+    issues, claims, pulls, assignments, launches, paused: false, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false,
     get locked() { return locked; },
     client: {
       async list(path) {
+        if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
+        if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
         if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
         if (path.includes("/issues?")) return structuredClone(issues);
         const match = /\/issues\/(\d+)\/(comments|timeline)$/.exec(path);
@@ -35,6 +39,10 @@ function githubFixture(input = batch()) {
         throw new Error(`Unexpected list: ${path}`);
       },
       async request(method, path, body) {
+        if (path.endsWith("/git/ref/tags/crewbie/paused")) {
+          if (!fixture.paused) throw new GitHubError(404, null);
+          return {};
+        }
         if (path === "/graphql") {
           const pr = pulls.get(body.variables.number);
           return { data: { repository: { issue: { closedByPullRequestsReferences: {
@@ -55,7 +63,10 @@ function githubFixture(input = batch()) {
           return {};
         }
         if (method === "POST" && path.endsWith("/git/refs")) {
-          if (body.ref.endsWith("/dispatch-lock")) {
+          if (body.ref.includes("/crewbie/launches/")) {
+            if (launches.has(body.ref)) throw new GitHubError(422, "reserved");
+            launches.add(body.ref);
+          } else if (body.ref.endsWith("/dispatch-lock")) {
             if (locked) throw new GitHubError(422, "locked");
             locked = true;
           } else {
@@ -118,6 +129,53 @@ test("empty dispatch explains disabled planning without assigning or claiming an
   assert.match(renderDispatchResult(work, policy), /Hosted planning is disabled/);
   assert.match(renderDispatchResult(work, policy), /not an implementation task or execution approval/);
   assert.match(renderDispatchResult(work, config({ planning: { enabled: true, model: "approved-model" } })), /separate Crewbie planning workflow/);
+});
+
+test("batch cap, pause and uncertain reservations stop paid assignments without resetting allowances", async () => {
+  const f = githubFixture();
+  const cfg = config({ execution: { maxLaunchesPerBatch: 1, maxAttemptsPerTask: 3 } });
+  const work = await dispatch(f.client, cfg);
+  assert.equal(f.assignments.length, 1);
+  assert.equal(f.launches.size, 1);
+  assert.match(work.find((item) => item.issue.number === 3).reason, /allowance exhausted/);
+  await dispatch(f.client, cfg);
+  assert.equal(f.assignments.length, 1);
+  const paused = githubFixture(); paused.paused = true;
+  await runDispatch(paused.client, config(), undefined, undefined, async () => { throw new Error("Should not discover models when paused"); });
+  assert.equal(paused.assignments.length, 0);
+  const uncertain = githubFixture();
+  uncertain.launches.add("refs/tags/crewbie/launches/feature/foundation/1/1");
+  const remaining = await dispatch(uncertain.client, config());
+  assert.match(remaining[0].reason, /already reserved/);
+  assert.ok(!uncertain.claims.has(1));
+});
+
+test("read-only preflight shows specialist/model, approval and bounded eligibility without writes", async () => {
+  const f = githubFixture();
+  const cfg = config({ execution: { maxLaunchesPerBatch: 1, maxAttemptsPerTask: 3 } });
+  const client = { ...f.client, async request(method, path, body) {
+    assert.ok(method === "GET" || (path === "/graphql" && body.query.startsWith("query")));
+    return f.client.request(method, path, body);
+  } };
+  const result = await preflight(client, cfg, "feature", models);
+  assert.equal(result.tasks.filter((item) => item.ready).length, 1);
+  assert.equal(result.tasks[0].specialist, "crewbie-developer");
+  assert.equal(result.tasks[0].model, "approved-model");
+  assert.equal(result.tasks[0].approved, true);
+  assert.equal(result.tasks[0].profileRevision, "profile-sha");
+  assert.equal(f.assignments.length, 0);
+  assert.equal(f.launches.size, 0);
+});
+
+test("unavailable account models and unverified legacy histories fail closed before launching", async () => {
+  const f = githubFixture();
+  await assert.rejects(runDispatch(f.client, config(), undefined, undefined, async () => [{ id: "different", name: "Other" }]), /live account catalog/);
+  assert.equal(f.assignments.length, 0);
+  assert.equal(f.launches.size, 0);
+  f.claims.add(1);
+  const work = await dispatch(f.client, config());
+  assert.match(work.find((item) => item.issue.number === 3).reason, /pre-ledger claim/);
+  assert.equal(f.assignments.length, 0);
 });
 test("unknown assignment outcome preserves the claim and releases the dispatcher lock", async () => {
   const fixture = githubFixture();

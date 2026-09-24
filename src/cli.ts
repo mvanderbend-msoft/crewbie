@@ -7,12 +7,15 @@ import { hash, integer, json, optionalText, readJson, record, safePath, string, 
 import { limitsFor, loadConfig } from "./config.js";
 import { probeCapabilities, renderReport } from "./execution/capabilities.js";
 import { githubReader } from "./execution/github.js";
-import { dispatch, eligible, inspectWork, renderDispatchResult } from "./execution/dispatch.js";
+import { dispatch, eligible, inspectWork, preflight, renderDispatchResult } from "./execution/dispatch.js";
+import { baselineLaunches, setLaunchPause } from "./execution/controls.js";
+import { cancelRun } from "./execution/cancel.js";
 import { watchBatch } from "./execution/watch.js";
 import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/review-loop.js";
 import { initCommand } from "./setup/init.js";
+import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
-import { preparePlanning, publishPlanning } from "./specification/planning.js";
+import { preparePlanning, publishPlanning, requestPlanningRevision } from "./specification/planning.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
 import { checkPrDescription } from "./specification/prose.js";
 import { api, requireApprover } from "./tracking/github.js";
@@ -23,10 +26,14 @@ import { memoryContext } from "./memory/context.js";
 import { applyMaintenance, prepareMaintenance } from "./memory/runner.js";
 import { dashboard } from "./reporting/dashboard.js";
 import { collectRecords, parseRecords } from "./reporting/records.js";
+import { collectPrUsage, renderPrUsage } from "./reporting/pr-usage.js";
 
 const HELP = `Crewbie: a project-specific AI implementation crew.
 
   init [--model MODEL] [--out setup.json]          LLM assessment, tailored team and approval
+    --model-policy cost-aware|fixed               New specialists: reviewed catalog choices (default cost-aware)
+    --specialist-model MODEL                      Explicit new-specialist model override
+    --model-profile economy|balanced|quality      Capability-aware selection (default balanced)
     --description "project intent"                Greenfield context; asks again when unclear
     --repo owner/name --approver LOGIN             Setup repository and human approvers
   init --assessment-only [--out setup.json]        Offline inventory; no LLM
@@ -36,7 +43,14 @@ const HELP = `Crewbie: a project-specific AI implementation crew.
     --skip-labels                                Explicit offline setup; no GitHub writes
   init --proposal setup.json --update             Preview safe managed-file upgrades
     --json                                       Machine-readable installation preview
+  update [--apply] [--offline] [--json]            Update repository integration without AI reassessment
+  revise-plan --pr N --feedback-file feedback.txt [--apply]
+                                                 Preview/request one same-PR planning revision
   doctor --repo owner/name [--agent stem] [--model id] [--json]
+  preflight [--batch-id ID] [--json]              Preview approvals, specialist/model and remaining launch limits
+  pause | resume [--apply]                        Control future implementation/review launches, not running sessions
+  cancel --issue N --run-id ID [--apply]           Preview/cancel an attributable cloud-agent Actions run
+  budget --issue N --historical-attempts N [--apply]  Adopt reviewed pre-upgrade launch counts; never reset them
   approve --batch batch.json --yes [--execute]     Approve exact local scope
   publish --batch batch.json [--apply] [--ado-create] [--dispatch-local] [--watch]
     --watch [--timeout-seconds 3600] [--poll-seconds 30]  Reconcile until handoff
@@ -45,6 +59,7 @@ const HELP = `Crewbie: a project-specific AI implementation crew.
   status --batch batch.json                       Validate a task/dependency graph
   status --source requirements.md                 Import text with a content revision
   status --issue 123 | --ado-id 456                Import a remote work item
+  status --pr 123 [--json]                        Read observed token usage and coverage
   status --memory developer [--topic cold/name.md]
   status                                         Reconcile remote work read-only
   dashboard --records runs.json --out report.html
@@ -76,6 +91,9 @@ async function main(): Promise<void> {
     options: {
       help: { type: "boolean", short: "h" }, path: { type: "string" }, repo: { type: "string" },
       agent: { type: "string" }, model: { type: "string" }, json: { type: "boolean" },
+      "model-policy": { type: "string" }, "specialist-model": { type: "string" }, offline: { type: "boolean" },
+      "model-profile": { type: "string" }, "batch-id": { type: "string" }, "run-id": { type: "string" },
+      "historical-attempts": { type: "string" },
       out: { type: "string" }, proposal: { type: "string" }, apply: { type: "boolean" },
       update: { type: "boolean" }, batch: { type: "string" }, yes: { type: "boolean" },
       description: { type: "string" }, approver: { type: "string", multiple: true },
@@ -88,6 +106,7 @@ async function main(): Promise<void> {
       records: { type: "string" }, collect: { type: "boolean" }, prepare: { type: "boolean" },
       "pages-mode": { type: "string" },
       pr: { type: "string" },
+      "feedback-file": { type: "string" },
       "review-loop": { type: "string" },
     },
   });
@@ -103,6 +122,10 @@ async function main(): Promise<void> {
   const root = resolve(values.path ?? ".");
   if (command === "init") {
     await initCommand(root, values, { client: () => api(token()) });
+    return;
+  }
+  if (command === "update") {
+    console.log(await updateRepository(root, values, values.offline ? undefined : api(token())));
     return;
   }
   if (command === "doctor") {
@@ -132,6 +155,33 @@ async function main(): Promise<void> {
     return;
   }
   const config = await loadConfig(root);
+  if (command === "budget") {
+    if (!values.issue || !values["historical-attempts"]) throw new Error("Use budget --issue N --historical-attempts N; review historical attempts before --apply.");
+    console.log(await baselineLaunches(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["historical-attempts"]), "historical attempts"), values.apply === true));
+    return;
+  }
+  if (command === "pause" || command === "resume") {
+    console.log(await setLaunchPause(api(token()), config, command === "pause", values.apply === true));
+    return;
+  }
+  if (command === "cancel") {
+    if (!values.issue || !values["run-id"]) throw new Error("Use cancel --issue N --run-id ID; preview first, then --apply.");
+    console.log(await cancelRun(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["run-id"]), "run ID"), values.apply === true));
+    return;
+  }
+  if (command === "preflight") {
+    const report = await preflight(api(token()), config, values["batch-id"], undefined, config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined);
+    console.log(values.json ? json(report) : [report.notice, ...report.tasks.map((task) =>
+      `#${task.issue} ${task.specialist} / ${task.model}: ${task.ready ? "READY" : "NOT READY"} - ${task.reason}\n  Approval: ${task.approved}; launches ${task.allowance.used}/${task.allowance.maxLaunchesPerBatch}; task attempts ${task.allowance.taskUsed}/${task.allowance.maxAttemptsPerTask}`)].join("\n"));
+    return;
+  }
+  if (command === "revise-plan") {
+    if (!values.pr || !values["feedback-file"]) throw new Error("Use revise-plan --pr N --feedback-file feedback.txt; --apply explicitly requests a potentially billable revision.");
+    const feedback = await optionalText(await safePath(root, values["feedback-file"]));
+    if (feedback === null) throw new Error("Feedback file does not exist.");
+    console.log(await requestPlanningRevision(api(token()), config, integer(Number(values.pr), "planning PR"), feedback, values.apply === true));
+    return;
+  }
   if (command === "publish" && values["review-loop"]) {
     const plan = parseReviewPlan(await readJson(await safePath(root, values["review-loop"])));
     console.log(json({ repository: config.repository, plan, authorization: "Applying authorizes bounded review and same-specialist correction sessions, real GitHub reviews and metadata updates. No merges." }));
@@ -223,7 +273,11 @@ async function main(): Promise<void> {
     return;
   }
   const github = api(token());
-  if (command === "status" && values.issue) {
+  if (command === "status" && values.pr) {
+    const pr = record(await github.request("GET", `/repos/${config.repository}/pulls/${integer(Number(values.pr), "PR number")}`), "pull request");
+    const usage = await collectPrUsage(github, config.repository, pr);
+    console.log(values.json ? json(usage) : `${renderPrUsage(usage)}\n${usage.warnings.join("\n")}`);
+  } else if (command === "status" && values.issue) {
     const number = integer(Number(values.issue), "issue number");
     const issue = record(await github.request("GET", `/repos/${config.repository}/issues/${number}`), "issue");
     console.log(json({

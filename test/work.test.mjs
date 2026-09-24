@@ -135,6 +135,13 @@ test("GitHub writer fails closed and paginates without dropping records", async 
   assert.equal(calls, 2);
 });
 
+test("accepted asynchronous operations permit an empty 202 body without repeating the write", async () => {
+  let calls = 0;
+  const client = api("test", async () => { calls++; return new Response(null, { status: 202 }); });
+  assert.equal(await client.request("POST", "/repos/example/project/actions/runs/42/cancel"), null);
+  assert.equal(calls, 1);
+});
+
 test("transient read failures retry within a bound but mutations and unknown writes never retry", async () => {
     for (const [method, path, body, expected] of [
       ["GET", "/repos/example/project", undefined, 3],

@@ -3,6 +3,7 @@ import { bounded, errorCode, hash, json, matchesTextHash, optionalText, readJson
 import { agentArchivePath, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
 import { roleProfile } from "./agents.js";
+import { validateInstructionScope } from "./instruction-quality.js";
 
 async function hasPrTemplate(root: string): Promise<boolean> {
   for (const directory of ["", ".github", "docs"]) {
@@ -17,15 +18,22 @@ async function hasPrTemplate(root: string): Promise<boolean> {
 }
 
 export interface FileChange { path: string; before: string | null; after: string | null }
-function memorySeed(id: string, tier: string): string {
-  return tier === "hot" ? `# ${id}: current lessons\n\nAdd only approved, durable lessons with source links.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
+export function setupConfiguration(value: unknown): Config {
+  const data = record(value, "setup proposal");
+  const config = parseConfig(data.config);
+  return data.configBeforeHash === null && config.planning?.enabled && config.planning.executeOnMerge === undefined
+    ? { ...config, planning: { ...config.planning, executeOnMerge: true } } : config;
 }
-async function checkedChanges(root: string, files: Record<string, string | null>, owned: Record<string, unknown>, adopted: Record<string, string> = {}): Promise<FileChange[]> {
+function memorySeed(id: string, tier: string): string {
+  return tier === "hot" ? `# ${id}: handoffs and lessons\n\nKeep concise implementation handoffs and reusable lessons with evidence links. Mark new entries proposed until reviewed. Link discoverable implementation details instead of duplicating them.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
+}
+async function checkedChanges(root: string, files: Record<string, string | null>, owned: Record<string, unknown>, adopted: Record<string, string> = {}, conflicts?: string[]): Promise<FileChange[]> {
   const changes: FileChange[] = [];
   for (const [path, after] of Object.entries(files)) {
     const before = await optionalText(await safePath(root, path));
     if (before === after || (before !== null && after !== null && textHash(before) === textHash(after))) continue;
     if (before !== null && !matchesTextHash(before, owned[path]) && adopted[path] !== hash(before)) {
+      if (conflicts) { conflicts.push(path); continue; }
       throw new Error(`Preserving user-owned or edited file: ${path}. Reconcile it manually before installation.`);
     }
     changes.push({ path, before, after });
@@ -61,10 +69,10 @@ export async function teamInstallation(root: string, current: Config, proposed: 
   if (changes.length) result[".crewbie/managed.json"] = json({ ...owned, ...Object.fromEntries(Object.entries(result).map(([path, content]) => [path, textHash(content)])) });
   return result;
 }
-export async function installation(root: string, proposal: unknown): Promise<FileChange[]> {
+export async function installation(root: string, proposal: unknown, conflicts?: string[]): Promise<FileChange[]> {
   const data = record(proposal, "setup proposal");
   if (data.status === "clarification") throw new Error("Resolve setup clarification questions before installation.");
-  const config = parseConfig(data.config);
+  const config = setupConfiguration(data);
   if (data.configBeforeHash !== undefined) {
     const current = await optionalText(await safePath(root, ".crewbie/config.json"));
     const expected = data.configBeforeHash;
@@ -114,6 +122,7 @@ export async function installation(root: string, proposal: unknown): Promise<Fil
         throw new Error(`Unsupported instruction path: ${path}`);
       }
       const content = string(instruction.content, "instruction content");
+      validateInstructionScope(path, content);
       bounded(content, limits.constitution, path);
       files[path] = content;
       const current = await optionalText(await safePath(root, path));
@@ -147,7 +156,7 @@ export async function installation(root: string, proposal: unknown): Promise<Fil
   if (await optionalText(manifestPath) !== null) owned = record(await readJson(manifestPath), "managed file manifest");
   const templatePath = ".github/PULL_REQUEST_TEMPLATE.md";
   if (owned[templatePath] !== undefined || !(await hasPrTemplate(root))) files[templatePath] = PR_TEMPLATE;
-  return checkedChanges(root, files, owned, adopted);
+  return checkedChanges(root, files, owned, adopted, conflicts);
 }
 export async function applyInstallation(root: string, changes: FileChange[]): Promise<void> {
   const manifest = await optionalText(await safePath(root, ".crewbie/managed.json"));

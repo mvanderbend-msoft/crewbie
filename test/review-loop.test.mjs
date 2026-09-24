@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseReviewPlan, parseReviewReport, reconcileReview } from "../dist/execution/review-loop.js";
+import { parseReviewPlan, parseReviewReport, reconcileReview as runReview } from "../dist/execution/review-loop.js";
 import { attributedBody, attributePull } from "../dist/execution/attribution.js";
 import { selectNativeTask } from "../dist/execution/dispatch.js";
 import { GitHubError } from "../dist/execution/github.js";
@@ -9,6 +9,7 @@ import { approvalComment } from "../dist/tracking/issues.js";
 import { config, batch, task } from "./helpers.mjs";
 
 const A = "a".repeat(40), B = "b".repeat(40);
+const reconcileReview = (client, cfg, plan, ado) => runReview(client, cfg, plan, ado, async () => [{ id: "approved-model", name: "Approved model" }]);
 function fixture() {
   const cfg = config({ roles: [
     { id: "frontend", purpose: "UI", model: "approved-model" },
@@ -25,8 +26,9 @@ function fixture() {
   const native = [{ id: "original", state: "completed", artifacts: [{ provider: "github", type: "pull", data: { id: 100 } }] }];
   const reviews = [];
   const writes = [];
+  const launches = new Set(["refs/tags/crewbie/launches/feature/ui/1/1"]);
   let saved = null, revision = null, tree = null, locked = false;
-  const f = { cfg, issues, comments, pulls, native, reviews, writes, report: null, uncertain: false, wrongModel: false, outOfScope: false, extraClaims: [],
+  const f = { cfg, issues, comments, pulls, native, reviews, writes, launches, paused: false, report: null, uncertain: false, wrongModel: false, outOfScope: false, extraClaims: [],
     plan: parseReviewPlan({ schemaVersion: 1, reviewer: { issue: 2, issueDigest: issueDigest(issues[1].title, issues[1].body) },
       targets: [{ issue: 1, pr: 10, issueDigest: issueDigest(issues[0].title, issues[0].body), allowedPaths: ["frontend/"] }], maxRounds: 2 }),
     get state() { return saved; },
@@ -38,6 +40,8 @@ function fixture() {
     },
     client: {
       async list(path) {
+        if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].map((ref) => ({ ref }));
+        if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [1, ...f.extraClaims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
         if (path.endsWith("/pulls?state=open")) return structuredClone([...pulls.values()]);
         const match = /\/(issues|pulls)\/(\d+)\/(comments|reviews|files)$/.exec(path);
         if (!match) throw new Error(`Unexpected list ${path}`);
@@ -48,6 +52,15 @@ function fixture() {
       },
       async request(method, path, body) {
         if (method !== "GET") writes.push({ method, path, body: structuredClone(body) });
+        if (path.endsWith("/git/ref/tags/crewbie/paused")) {
+          if (!f.paused) throw new GitHubError(404, null);
+          return {};
+        }
+        if (path.includes("/contents/.github/agents/")) return { type: "file", sha: A };
+        if (method === "POST" && path.endsWith("/git/refs") && body.ref.includes("/crewbie/launches/")) {
+          if (launches.has(body.ref)) throw new GitHubError(422, null);
+          launches.add(body.ref); return {};
+        }
         if (path === "/user") return actor;
         if (path === "/repos/example/project") return { default_branch: "main" };
         if (path.endsWith("/branches/main")) return { commit: { sha: A } };
@@ -152,6 +165,26 @@ test("uncertain native launches persist intent and never retry a paid write", as
   f.uncertain = false;
   await assert.rejects(reconcileReview(f.client, f.cfg, f.plan), /uncertain outcome/);
   assert.equal(f.writes.filter((w) => w.path === "/agents/repos/example/project/tasks").length, 1);
+  assert.equal(f.launches.size, 2, "Unknown outcomes consume an attempt as well as preserving intent.");
+});
+
+test("review and correction launches share the same batch and task caps and pause gate", async () => {
+  const f = fixture();
+  f.cfg.execution = { maxLaunchesPerBatch: 2, maxAttemptsPerTask: 3 };
+  await reconcileReview(f.client, f.cfg, f.plan);
+  f.complete("native-1"); f.report = report(A, "changes_requested");
+  await reconcileReview(f.client, f.cfg, f.plan);
+  await assert.rejects(reconcileReview(f.client, f.cfg, f.plan), /Batch launch allowance exhausted/);
+  assert.equal(f.native.length, 2);
+  f.cfg.execution = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 1 };
+  await assert.rejects(reconcileReview(f.client, f.cfg, f.plan), /Task attempt allowance exhausted/);
+  f.cfg.execution.maxAttemptsPerTask = 3;
+  f.paused = true;
+  await assert.rejects(reconcileReview(f.client, f.cfg, f.plan), /paused/);
+  assert.equal(f.native.length, 2);
+  f.paused = false;
+  await reconcileReview(f.client, f.cfg, f.plan);
+  assert.equal(f.native.length, 3, "Resume preserves the same pending correction instead of starting a replacement loop.");
 });
 
 test("missing QA evidence does not prevent known fixes; tester refresh follows corrected heads", async () => {

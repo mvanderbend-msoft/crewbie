@@ -130,7 +130,7 @@ test("real SDK assessment survives local context-link repair and saves the revie
       assessment: `Reviewed ${area}.`, recommendation: "Retain useful guidance.",
     })),
     questions: [],
-    roles: [{ id: "catalogue", purpose: "Own catalogue pagination.", checks: ["Retain loaded entries after page failure."],
+    roles: [{ id: "catalogue", purpose: "Own catalogue pagination.", model: "gpt-4.1", complexity: "standard", modelReason: "Use the available test model for catalogue contracts.", checks: ["Retain loaded entries after page failure."],
       nonNegotiables: ["Preserve catalogue IDs."], contextPaths: ["src/catalogue.ts"] }],
     instructions: [], constitutionText: null,
   });
@@ -172,6 +172,7 @@ test("real SDK assessment survives local context-link repair and saves the revie
   }, () => "fixture-only");
   await initCommand(root, { model: "gpt-4.1", description: 'A synthetic test: "quotes" & newlines\nonly.' }, {
     analyze: adapter.analyze,
+    listModels: async () => [{ id: "gpt-4.1", name: "Fixture model" }],
     ask: async (question) => question.startsWith("Replace rejected") ? "1" : "save",
     report() {}, client() { throw new Error("No GitHub writes"); },
   });

@@ -1,4 +1,4 @@
-import { type Config, requireExecution } from "../config.js";
+import { type Config } from "../config.js";
 import { hash, integer, record, string } from "../core.js";
 import { GitHubError } from "./github.js";
 import { batchDigest, issueBody, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
@@ -7,6 +7,9 @@ import { ensureLabels, hasApproval, managedIssues, setStatus } from "../tracking
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { attributePull } from "./attribution.js";
+import { cloudTasks } from "../tracking/native.js";
+import { checkLaunchModels, launchAllowance, listCopilotModels, reserveLaunch, withDispatchLock, type DiscoverModels } from "./controls.js";
+export { withDispatchLock } from "./controls.js";
 
 export type WorkState = "blocked" | "ready" | "running" | "review" | "failed" | "done";
 export interface Work {
@@ -35,29 +38,7 @@ export function renderDispatchResult(work: Work[], config: Config): string {
     "| Issue | State | Explanation |", "| --- | --- | --- |",
     ...work.map((item) => `| #${item.issue.number} | ${item.state} | ${cell(item.reason)} |`)].join("\n");
 }
-export async function cloudTasks(client: GitHubApi, repo: string): Promise<{ tasks: Record<string, unknown>[]; warning: string | null }> {
-  const tasks: Record<string, unknown>[] = [];
-  const ids = new Set<string>();
-  try {
-    for (let page = 1; page <= 100; page++) {
-      const response = record(await client.request("GET", `/agents/repos/${repo}/tasks?per_page=100&page=${page}`), "cloud tasks");
-      if (!Array.isArray(response.tasks)) throw new Error("GitHub returned invalid cloud task telemetry.");
-      for (const raw of response.tasks) {
-        const task = record(raw, "cloud task");
-        const id = string(task.id, "cloud task ID");
-        if (ids.has(id)) throw new Error("Cloud task pagination did not advance; session capacity remains unverified.");
-        ids.add(id); tasks.push(task);
-      }
-      if (response.tasks.length < 100) return { tasks, warning: null };
-    }
-    throw new Error("Cloud task pagination exceeded the safety limit; inspect session capacity before dispatch.");
-  } catch (error) {
-    if (error instanceof GitHubError && [403, 404].includes(error.status)) {
-      return { tasks: [], warning: `Cloud session status is unavailable (HTTP ${error.status}); capacity remains reserved.` };
-    }
-    throw error;
-  }
-}
+export { cloudTasks } from "../tracking/native.js";
 export async function selectNativeTask(client: GitHubApi, config: Config, issue: number, matches: Record<string, unknown>[]): Promise<Record<string, unknown> | undefined> {
   if (matches.length < 2) return matches[0];
   const comments = await client.list(`/repos/${config.repository}/issues/${issue}/comments`);
@@ -245,25 +226,21 @@ export function eligible(work: Work[], maxActive: number, batchId?: string): Wor
     .sort((a, b) => a.metadata.task.priority - b.metadata.task.priority || a.metadata.task.id.localeCompare(b.metadata.task.id))
     .slice(0, Math.max(0, maxActive - active));
 }
-export async function dispatch(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch?: Batch; issueNumbers: number[] }): Promise<Work[]> {
-  return withDispatchLock(client, config, () => dispatchLocked(client, config, ado, scope));
+export async function dispatch(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch?: Batch; issueNumbers: number[] }, discoverModels: DiscoverModels = listCopilotModels): Promise<Work[]> {
+  return withDispatchLock(client, config, () => dispatchLocked(client, config, ado, scope, discoverModels));
 }
-export async function withDispatchLock<T>(client: GitHubApi, config: Config, action: () => Promise<T>): Promise<T> {
-  requireExecution(config);
-  const repo = record(await client.request("GET", `/repos/${config.repository}`), "repository");
-  const branch = string(repo.default_branch, "default branch");
-  const current = record(await client.request("GET", `/repos/${config.repository}/branches/${encodeURIComponent(branch)}`), "branch");
-  const sha = string(record(current.commit, "commit").sha, "lock commit");
-  const prefix = `/repos/${config.repository}`;
-  await client.request("POST", `${prefix}/git/refs`, { ref: "refs/tags/crewbie/dispatch-lock", sha });
-  try { return await action(); }
-  finally { await client.request("DELETE", `${prefix}/git/refs/tags/crewbie/dispatch-lock`); }
-}
-async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, scope?: { batch?: Batch; issueNumbers: number[] }): Promise<Work[]> {
+async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | undefined, scope: { batch?: Batch; issueNumbers: number[] } | undefined, discoverModels: DiscoverModels): Promise<Work[]> {
   await ensureLabels(client, config);
   const work = await inspectWork(client, config, scope?.issueNumbers);
   const scoped = scope?.batch ? batchWork(work, scope.batch) : work;
   const selected = eligible(work, config.maxActive, scope?.batch?.id);
+  for (const item of selected) {
+    const allowance = await launchAllowance(client, config, item.metadata, integer(item.issue.number, "issue"));
+    const blocked = allowance.blocked ?? (allowance.taskUsed > 0 ? "Initial launch already reserved; inspect its outcome instead of retrying." : null);
+    if (blocked) { item.state = "blocked"; item.reason = blocked; }
+  }
+  const launchable = selected.filter((item) => item.state === "ready");
+  if (launchable.length) await checkLaunchModels(await discoverModels(), launchable.map((item) => item.metadata.task), config);
   for (const item of scoped) {
     await setStatus(client, config.repository, item.issue, item.state);
     if (item.state === "review" && item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {
@@ -274,7 +251,7 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, s
   const branch = string(repo.default_branch, "default branch");
   const branchInfo = record(await client.request("GET", `/repos/${config.repository}/branches/${encodeURIComponent(branch)}`), "branch");
   const sha = string(record(branchInfo.commit, "commit").sha, "base SHA");
-  for (const item of selected) {
+  for (const item of launchable) {
     const issue = integer(item.issue.number, "issue number");
     const task = item.metadata.task;
     await verifySources(item.metadata.sources, client, config, ado);
@@ -283,6 +260,13 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, s
       throw new Error(`Issue #${issue} changed during dispatch. Nothing was launched for this issue.`);
     }
     await client.request("GET", `/repos/${config.repository}/contents/.github/agents/crewbie-${task.owner}.agent.md?ref=${sha}`);
+    const allowance = await launchAllowance(client, config, item.metadata, issue);
+    if (allowance.blocked) {
+      item.state = "blocked"; item.reason = allowance.blocked;
+      await setStatus(client, config.repository, fresh, "blocked");
+      continue;
+    }
+    await reserveLaunch(client, config, item.metadata, issue, sha, true);
     // Atomic remote claim prevents a second workflow from launching the same issue.
     await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/tags/crewbie/claims/${issue}`, sha });
     try {
@@ -302,4 +286,36 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado?: AdoApi, s
     }
   }
   return work;
+}
+
+export async function preflight(client: GitHubApi, config: Config, batchId?: string, discoverModels: DiscoverModels = listCopilotModels, ado?: AdoApi) {
+  const work = await inspectWork(client, config);
+  const candidates = eligible(work, config.maxActive, batchId);
+  const models = candidates.length ? await discoverModels() : [];
+  const prefix = `/repos/${config.repository}`;
+  const repo = record(await client.request("GET", prefix), "repository");
+  const branch = string(repo.default_branch, "default branch");
+  const pending = new Map<string, number>();
+  const tasks = [];
+  for (const item of work.filter((item) => !batchId || item.metadata.batch === batchId)) {
+    const issue = integer(item.issue.number, "issue");
+    const allowance = await launchAllowance(client, config, item.metadata, issue);
+    let reason = allowance.blocked ?? item.reason;
+    let ready = candidates.includes(item) && !allowance.blocked;
+    if (ready && allowance.taskUsed > 0) { ready = false; reason = "Initial launch already reserved; inspect its outcome instead of retrying."; }
+    let profileRevision: string | null = null;
+    if (ready) {
+      await checkLaunchModels(models, [item.metadata.task], config);
+      await verifySources(item.metadata.sources, client, config, ado);
+      const profile = record(await client.request("GET", `${prefix}/contents/.github/agents/crewbie-${item.metadata.task.owner}.agent.md?ref=${encodeURIComponent(branch)}`), "specialist profile");
+      if (profile.type !== "file") throw new Error("Specialist profile is not a regular file.");
+      profileRevision = string(profile.sha, "specialist profile revision");
+      const queued = pending.get(allowance.batch) ?? 0;
+      if (allowance.used + queued >= allowance.maxLaunchesPerBatch) { ready = false; reason = "Batch allowance is reserved by earlier candidates in this preview."; }
+      else { pending.set(allowance.batch, queued + 1); reason = "Current approval, dependencies, source and account model verified; cloud runtime acceptance remains unverified."; }
+    } else if (item.state === "ready" && !candidates.includes(item) && !allowance.blocked) reason = "Waiting for repository capacity.";
+    tasks.push({ issue, title: item.metadata.task.title, specialist: `crewbie-${item.metadata.task.owner}`, model: item.metadata.task.model,
+      approved: item.approved, ready, reason, profileRevision, allowance });
+  }
+  return { repository: config.repository, branch, tasks, notice: "Read-only snapshot; launch rechecks policy and reserves allowance under the repository lock. No session started. Account catalog availability does not prove cloud-runtime acceptance." };
 }

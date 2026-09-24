@@ -4,11 +4,50 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assess } from "../dist/setup/assessment.js";
 import { parseSetupReview, proposeSetup, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
-import { initCommand, installSetup } from "../dist/setup/init.js";
+import { initCommand as runInit, installSetup } from "../dist/setup/init.js";
 import { installation, applyInstallation, teamInstallation } from "../dist/setup/install.js";
 import { profile } from "../dist/setup/templates.js";
 import { setupLabels } from "../dist/tracking/issues.js";
 import { config, fixture } from "./helpers.mjs";
+
+const initCommand = (root, options, io) => runInit(root, { "model-policy": "fixed", ...options }, io);
+
+test("economy, balanced and quality profiles persist reviewed choices with a non-code capability floor", async (t) => {
+  for (const profile of ["economy", "balanced", "quality"]) {
+    const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};" });
+    const assessment = await assess(root);
+    await runInit(root, { model: "assessment-model", "model-profile": profile, out: "team.json" }, {
+      client() { throw new Error("No remote writes"); }, report() {},
+      listModels: async () => [{ id: "capable-model", name: "Capable" }],
+      analyze: async (prompt) => {
+        assert.match(prompt, new RegExp(`Model-selection profile: ${profile}`));
+        assert.match(prompt, /Never downgrade quality-sensitive work merely because it is non-code/);
+        assert.match(prompt, /No automatic model fallback or paid rerun/);
+        const value = response(assessment);
+        Object.assign(value.roles[0], { model: "capable-model", complexity: "complex", modelReason: "Complex invariant reasoning needs a capable model; review its price tradeoff." });
+        return JSON.stringify(value);
+      },
+    });
+    const proposal = JSON.parse(await readFile(join(root, "team.json"), "utf8"));
+    assert.equal(proposal.config.modelProfile, profile);
+    assert.equal(proposal.config.roles[0].model, "capable-model");
+    assert.deepEqual(proposal.config.execution, { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 });
+  }
+});
+
+test("installation previews explain the purpose and ownership of every proposed file without extra templates", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};" });
+  const assessment = await assess(root);
+  const proposal = parseSetupReview(JSON.stringify(response(assessment)), assessment, "", "chosen-model");
+  const preview = JSON.parse(await installSetup(root, proposal, { apply: false, guidance: "skip", skipLabels: true, json: true }));
+  assert.ok(preview.files.length > 0);
+  assert.ok(preview.files.every((file) => file.ownership && file.purpose));
+  assert.equal(preview.files.find((file) => file.path === ".crewbie/config.json").ownership, "User policy");
+  assert.equal(preview.files.find((file) => file.path.endsWith("/hot.md")).ownership, "User knowledge");
+  assert.ok(preview.files.every((file) => !file.path.includes("/templates/")));
+  assert.match(await installSetup(root, proposal, { apply: false, guidance: "skip", skipLabels: true }), /edited workflows block update/);
+  await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
+});
 
 function response(assessment, overrides = {}) {
   return {
@@ -63,7 +102,7 @@ test("init asks the LLM for a domain team and creates no fixed implementation pr
   const root = await fixture(t, { "src/domain.ts": "export const catalogue = {};", ".github/agents/domain.agent.md": "Reuse catalogue invariants." });
   const report = await assess(root);
   const proposal = await proposeSetup(report, "", "chosen-model", { analyze: async (prompt) => {
-    assert.match(prompt, /smallest useful implementation crew/);
+    assert.match(prompt, /project-specific implementation crew/);
     return JSON.stringify(response(report));
   }, report() {} });
   assert.deepEqual(proposal.config.roles.map((role) => role.id), ["catalogue"]);
@@ -488,7 +527,7 @@ test("init explicitly opts into hosted planning and does not discard skipped gui
     report() {}, client() { throw new Error("No GitHub writes"); },
   });
   const installed = JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8"));
-  assert.deepEqual(installed.planning, { enabled: true, model: "chosen-model", executeOnMerge: false });
+  assert.deepEqual(installed.planning, { enabled: true, model: "chosen-model", executeOnMerge: true });
   assert.match(await readFile(join(root, ".github/workflows/crewbie-plan.yml"), "utf8"), /issues:\s+types: \[labeled\]/);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Preserve IDs.");
   const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
@@ -542,4 +581,67 @@ test("model discovery failure, empty catalogue and cancellation do not create a 
     }), expected);
     await assert.rejects(readFile(join(root, "crewbie-setup.json")), /ENOENT/);
   }
+});
+
+test("cost-aware init proposes catalog models by role complexity and preserves installed choices", async (t) => {
+  const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config()), "src/catalogue.ts": "export const pageSize = 20;" });
+  const report = await assess(root);
+  const models = [
+    { id: "efficient", name: "Efficient", tokenPrices: { inputPrice: 1, outputPrice: 2, batchSize: 1000000 } },
+    { id: "reasoning", name: "Reasoning", multiplier: 3 },
+  ];
+  const proposed = response(report, { roles: [
+    { ...report.installedRoles[0], model: "efficient", checks: ["Check existing behavior."], nonNegotiables: ["Preserve approved scope."] },
+    { id: "catalogue", purpose: "Own bounded catalogue changes.", model: "efficient", complexity: "routine", modelReason: "Narrow component changes fit the lower reported token prices.", checks: ["Preserve stable ordering."], nonNegotiables: ["Preserve IDs."] },
+    { id: "integration", purpose: "Review cross-system consistency.", model: "reasoning", complexity: "complex", modelReason: "Cross-system failure reasoning warrants the stronger proposed model.", checks: ["Trace transactional boundaries."], nonNegotiables: ["Preserve data."] },
+  ] });
+  let calls = 0;
+  await initCommand(root, { model: "assessment-model", "model-policy": "cost-aware" }, {
+    listModels: async () => models, client() { throw new Error("No writes"); }, report() {},
+    analyze: async (prompt) => { calls++; assert.match(prompt, /Account catalog:.*inputPrice/s); return JSON.stringify(proposed); },
+  });
+  assert.equal(calls, 1);
+  const result = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.deepEqual(result.config.roles.map((role) => role.model), ["approved-model", "efficient", "reasoning"]);
+  assert.match(await readFile(join(root, "crewbie-setup.md"), "utf8"), /Model proposal \(complex\)/);
+  proposed.roles[1].model = "invented";
+  assert.throws(() => parseSetupReview(JSON.stringify(proposed), report, "", "assessment-model", models), /not in the inspected account catalog/);
+});
+
+test("approved scoped guidance splits replace existing text while team-only keeps it intact", async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Shared policy.\nFrontend: preserve accessible names.", "frontend/view.ts": "export {};" });
+  const report = await assess(root);
+  const changes = [
+    { path: "AGENTS.md", content: "Shared policy.\nFor frontend work, read frontend/AGENTS.md.", reason: "Move domain-only guidance out of shared context." },
+    { path: "frontend/AGENTS.md", content: "Preserve accessible names.", reason: "Preserve frontend scope." },
+    { path: ".github/instructions/frontend.instructions.md", content: '---\napplyTo: "frontend/**"\n---\nRead frontend/AGENTS.md for frontend constraints.\n', reason: "Route matching Copilot work." },
+  ];
+  const proposal = parseSetupReview(JSON.stringify(response(report, { instructions: changes })), report, "", "model");
+  await installSetup(root, proposal, { apply: true, guidance: "skip", skipLabels: true });
+  assert.match(await readFile(join(root, "AGENTS.md"), "utf8"), /Frontend: preserve/);
+  await installSetup(root, proposal, { apply: true, guidance: "apply", skipLabels: true });
+  assert.doesNotMatch(await readFile(join(root, "AGENTS.md"), "utf8"), /Frontend: preserve/);
+  assert.match(await readFile(join(root, ".github/instructions/frontend.instructions.md"), "utf8"), /applyTo: "frontend\/\*\*"/);
+  changes[2].content = "Missing scope.";
+  assert.throws(() => parseSetupReview(JSON.stringify(response(report, { instructions: changes })), report, "", "model"), /applyTo/);
+});
+
+test("new hosted setups default to merge execution while explicit opt-outs remain unchanged", async (t) => {
+  for (const executeOnMerge of [undefined, false]) {
+    const root = await fixture(t);
+    const proposal = { configBeforeHash: null, config: config({ planning: { enabled: true, model: "planner", ...(executeOnMerge === undefined ? {} : { executeOnMerge }) } }), constitutionText: null };
+    await applyInstallation(root, await installation(root, proposal));
+    assert.equal(JSON.parse(await readFile(join(root, ".crewbie/config.json"), "utf8")).planning.executeOnMerge, executeOnMerge ?? true);
+  }
+});
+
+test("findings cannot promise edits that have no concrete replacement", async (t) => {
+  const report = await assess(await fixture(t, { "AGENTS.md": "Existing policy." }));
+  const review = response(report);
+  const finding = review.findings.find((item) => item.path === "AGENTS.md");
+  finding.action = "edit";
+  finding.editPaths = ["AGENTS.md"];
+  assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "model"), /without replacement text/);
+  finding.action = "defer";
+  assert.equal(parseSetupReview(JSON.stringify(review), report, "", "model").instructions.length, 0);
 });

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import { parseConfig, type Config, type Role } from "../config.js";
+import { DEFAULT_EXECUTION_LIMITS, parseConfig, type Config, type Role } from "../config.js";
 import { optionalText, safePath, textHash } from "../core.js";
 import { assessInstructions, instructionFile, type InstructionQuality } from "./instruction-quality.js";
 import { assessTeam, type TeamAssessment } from "./team.js";
@@ -76,13 +76,13 @@ export async function assess(root: string): Promise<Assessment> {
     ],
     config: installed ? { ...installed, roles } : {
       schemaVersion: 1, repository: "", approvers: [], roles, constitution: existingConstitution,
-      maxActive: 2, nightly: {
+      maxActive: 2, modelProfile: "balanced", execution: { ...DEFAULT_EXECUTION_LIMITS }, nightly: {
         enabled: false, maxRecords: 20,
         allowedPaths: [
           ".crewbie/team/", ".crewbie/decisions/", ".crewbie/decisions.md", ".crewbie/instructions.md",
           ...[...roles.map((role) => role.id), "coordinator", "improver"].map((role) => `.github/agents/crewbie-${role}.agent.md`),
         ],
-      }, ado: null, planning: { enabled: false, model: "", executeOnMerge: false },
+      }, ado: null, planning: { enabled: false, model: "" },
     },
     constitutionText: null,
     instructions: [],

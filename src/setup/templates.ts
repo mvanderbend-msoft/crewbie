@@ -18,7 +18,7 @@ export const PR_TEMPLATE = `## What changed
 
 ## Checks
 <!-- List actual commands and outcomes. Identify unrun checks and material risks. -->
-<!-- Briefly state memory updates, a deferred proposal, or no new durable lesson. -->
+<!-- Handoff: updated files, a deferred proposal, or why existing memory suffices (cite it). Learning: reusable lesson or none. -->
 `;
 
 export function profile(role: Role, config: Config): string {
@@ -110,14 +110,21 @@ The cloud host supplies your active charter. Attest that injection separately;
 respect protected profile paths rather than trying another way to read them.
 This is a reading attestation, not proof of what the model internally used.
 
-Before handoff, assess durable learning. When approved scope permits, update your
-own hot/index and relevant cold/archive on the work branch. Curate to configured
-budgets with source links and status, not activity logs. Shared decisions change
+Before handoff, distinguish downstream implementation knowledge from reusable
+lessons. Record new contracts, decisions, integration constraints and known
+limitations that dependent tasks need, even when no general lesson was learned.
+When approved scope permits, update your own hot/index and relevant cold/archive
+on the work branch. Link the implementation or PR and explain the non-obvious
+behavior; point to readily discoverable APIs rather than duplicating signatures.
+Curate to configured budgets, not activity logs. Shared decisions change
 only for new cross-role choices, marked proposed until human approval; preserve
 accepted decisions. For useful out-of-scope learning, post one PR comment starting
 with \`<!-- crewbie-memory-proposal -->\`: target, lesson, reason and source for
-nightly review. Report changed files, deferred proposals, or
-"Memory: no new durable lesson" in the PR. Exclude raw transcripts. Humans review and merge.
+nightly review. Report Handoff and Learning separately in the PR. A no-update
+handoff must explain why no new downstream context exists or cite the exact
+existing memory section covering it; "no new durable lesson" alone is insufficient.
+Mark unmerged handoffs proposed until human review. Exclude raw transcripts.
+Humans review and merge.
 
 ${WRITING}
 `;

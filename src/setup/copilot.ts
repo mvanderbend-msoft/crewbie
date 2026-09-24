@@ -2,11 +2,15 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CopilotClient, RuntimeConnection, type CopilotClientOptions, type CopilotSession, type SessionConfig } from "@github/copilot-sdk";
+import { CopilotClient, RuntimeConnection, type CopilotClientOptions, type CopilotSession, type SessionConfig, type ModelInfo } from "@github/copilot-sdk";
 import { redact } from "./inventory.js";
 
 export type Analyze = (prompt: string, model: string) => Promise<string>;
-export interface ModelChoice { id: string; name: string; multiplier?: number }
+export interface ModelChoice {
+  id: string; name: string; multiplier?: number;
+  tokenPrices?: NonNullable<ModelInfo["billing"]>["tokenPrices"];
+  capabilities?: ModelInfo["capabilities"];
+}
 type Client = Pick<CopilotClient, "start" | "stop" | "forceStop" | "listModels"> & {
   createSession(config: SessionConfig): Promise<Pick<CopilotSession, "sendAndWait" | "disconnect">>;
 };
@@ -116,6 +120,8 @@ export function copilotAccess(
         && (model.policy === undefined || model.policy.state === "enabled")).map((model) => ({
         id: explicitModel(model.id), name: model.name,
         ...(model.billing?.multiplier === undefined ? {} : { multiplier: model.billing.multiplier }),
+        ...(model.billing?.tokenPrices === undefined ? {} : { tokenPrices: model.billing.tokenPrices }),
+        ...(model.capabilities === undefined ? {} : { capabilities: model.capabilities }),
       }));
       if (!choices.length) throw new Error("No enabled models were returned for this account. Check your Copilot subscription and organization policy.");
       return choices;

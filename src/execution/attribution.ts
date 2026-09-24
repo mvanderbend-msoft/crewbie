@@ -1,14 +1,15 @@
 import type { Config } from "../config.js";
 import { integer, record, string } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
+import { collectPrUsage, renderPrUsage } from "../reporting/pr-usage.js";
 
-export function attributedBody(body: string, specialist: string, model: string, taskUrl: string, issue?: number): string {
+export function attributedBody(body: string, specialist: string, model: string, taskUrl: string, issue?: number, usage?: string): string {
   const start = "<!-- crewbie-attribution -->", end = "<!-- /crewbie-attribution -->";
   const blocks = [...body.matchAll(/<!-- crewbie-attribution -->[\s\S]*?<!-- \/crewbie-attribution -->/g)];
   if (blocks.length > 1 || (body.includes(start) !== body.includes(end)) || (body.includes(start) && !blocks.length)) {
     throw new Error("PR attribution markers are ambiguous; reconcile the description.");
   }
-  const attribution = `${start}\n**Specialist:** \`${specialist}\` | **Requested model:** \`${model}\`\n[GitHub-confirmed specialist task](${taskUrl})${issue === undefined ? "" : `\nCloses #${integer(issue, "execution issue")}`}\n${end}`;
+  const attribution = `${start}\n**Specialist:** \`${specialist}\` | **Requested model:** \`${model}\`\n[GitHub-confirmed specialist task](${taskUrl})${issue === undefined ? "" : `\nCloses #${integer(issue, "execution issue")}`}${usage ? `\n\n${usage}` : ""}\n${end}`;
   return blocks[0] ? body.replace(blocks[0][0], attribution) : `${attribution}\n\n${body}`;
 }
 
@@ -20,7 +21,9 @@ export async function attributePull(client: GitHubApi, config: Config, pr: Recor
   const id = string(task.id, "native task ID");
   if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("Invalid native task ID.");
   const body = typeof pr.body === "string" ? pr.body : "";
-  const after = attributedBody(body, profile, model, `https://github.com/${config.repository}/tasks/${id}`, issue);
+  const usage = typeof task.session_count === "number" ? renderPrUsage(await collectPrUsage(client, config.repository, pr))
+    : "**Observed tokens:** unavailable. **AI credits:** unavailable. Native session metadata was not exposed.";
+  const after = attributedBody(body, profile, model, `https://github.com/${config.repository}/tasks/${id}`, issue, usage);
   if (after === body) return;
   const path = `/repos/${config.repository}/pulls/${integer(pr.number, "PR number")}`;
   const fresh = record(await client.request("GET", path), "fresh PR");

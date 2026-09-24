@@ -3,15 +3,32 @@ import { PLANNING_LABEL } from "../config.js";
 export function planningWorkflow(setup: string, enabled: boolean): string {
   return `name: Crewbie planning
 on:
-${enabled ? "  issues:\n    types: [labeled]" : "  workflow_dispatch:"}
+${enabled ? "  issues:\n    types: [labeled]\n" : ""}  workflow_dispatch:
+    inputs:
+      pr:
+        description: Open planning PR to revise
+        required: true
+        type: string
+      feedback:
+        description: Specific changes requested (one paid revision, reusing context)
+        required: true
+        type: string
+      head:
+        description: Expected PR head (set by crewbie revise-plan)
+        required: false
+        type: string
+      source:
+        description: Current source fingerprint (set by crewbie revise-plan)
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
-  group: crewbie-planning-\${{ github.event.issue.number || github.run_id }}
+  group: crewbie-planning-\${{ github.event.issue.number || inputs.pr || github.run_id }}
   cancel-in-progress: false
 jobs:
   prepare:
-    if: \${{ github.event_name == 'issues' && github.event.label.name == '${PLANNING_LABEL}' }}
+    if: \${{ (github.event_name == 'issues' && github.event.label.name == '${PLANNING_LABEL}') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:

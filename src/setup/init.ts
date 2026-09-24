@@ -1,20 +1,21 @@
 import { createInterface } from "node:readline/promises";
 import { json, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
-import { parseConfig } from "../config.js";
+import { modelProfile, parseConfig } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { requireApprover } from "../tracking/github.js";
 import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
-import { applyInstallation, installation } from "./install.js";
+import { applyInstallation, installation, setupConfiguration } from "./install.js";
 import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
-import { listCopilotModels, type ModelChoice } from "./copilot.js";
-import { renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
+import { explicitModel, listCopilotModels, type ModelChoice } from "./copilot.js";
+import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
   model?: string; repo?: string; approver?: string[]; description?: string;
   guidance?: string; "assessment-only"?: boolean; "skip-labels"?: boolean;
   json?: boolean;
+  "model-policy"?: string; "specialist-model"?: string; "model-profile"?: string;
 }
 interface InitIO {
   client: () => GitHubApi;
@@ -27,15 +28,15 @@ interface InitIO {
 export async function installSetup(root: string, value: unknown, options: { apply: boolean; guidance: "apply" | "skip"; skipLabels: boolean; json?: boolean }, client?: GitHubApi): Promise<string> {
   const raw = record(value, "setup proposal");
   if (raw.status === "clarification") throw new Error("Answer the setup questions and rerun init before creating a team.");
-  const config = parseConfig(raw.config);
+  const config = setupConfiguration(raw);
   const existingConstitution = config.constitution && await optionalText(await safePath(root, config.constitution)) !== null ? config.constitution : null;
-  const proposal = options.guidance === "apply" ? raw : {
+  const proposal = options.guidance === "apply" ? { ...raw, config } : {
     ...raw, instructions: [], constitutionText: null,
     config: { ...config, constitution: raw.constitutionText ? existingConstitution : config.constitution },
   };
   const changes = await installation(root, proposal);
   const labels = options.skipLabels ? [] : setupLabels(config);
-  if (!options.apply) return options.json ? json({ files: changes, labels, repository: config.repository }) : renderInstallationPreview(changes, labels, config.repository);
+  if (!options.apply) return options.json ? json({ files: changes.map(describeInstallationFile), labels, repository: config.repository }) : renderInstallationPreview(changes, labels, config.repository);
   if (!options.skipLabels) {
     if (!config.repository || !config.approvers.length) throw new Error("Set repository and human approvers before creating GitHub labels, or explicitly use --skip-labels for offline setup.");
     if (!client) throw new Error("GitHub authentication is required to create setup labels.");
@@ -57,6 +58,8 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
   const ask = io.ask ?? (terminal ? async (question: string) => terminal.question(`${question}\n> `) : undefined);
   try {
     if (options.guidance !== undefined && !["apply", "skip"].includes(options.guidance)) throw new Error("--guidance must be apply or skip.");
+    if (options["model-policy"] !== undefined && !["fixed", "cost-aware"].includes(options["model-policy"])) throw new Error("--model-policy must be fixed or cost-aware.");
+    if (options["model-profile"] !== undefined) modelProfile(options["model-profile"]);
     if (options["assessment-only"] && (options.proposal || options.apply || options.guidance)) throw new Error("--assessment-only cannot apply setup or guidance.");
     if (options.proposal) {
       const proposal = record(await readJson(await safePath(root, options.proposal)), "setup proposal");
@@ -83,6 +86,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (options.update && assessment.configBeforeHash === null) throw new Error("No installed crew to reassess. Run init without --update first.");
     if (options.repo !== undefined) assessment.config.repository = options.repo;
     if (options.approver !== undefined) assessment.config.approvers = options.approver;
+    if (options["model-profile"] !== undefined) assessment.config.modelProfile = modelProfile(options["model-profile"]);
     assessment.config = parseConfig(assessment.config);
     if (options["assessment-only"]) {
       if (options.out) await writeAtomic(root, options.out, json(assessment));
@@ -90,10 +94,12 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       return;
     }
     let model = options.model ?? "";
+    let catalog: ModelChoice[] | undefined;
     if (!model && ask) {
       const models = await (io.listModels ?? listCopilotModels)();
+      catalog = models;
       if (!models.length) throw new Error("No available models were returned. Check Copilot access before onboarding.");
-      report("Choose a Copilot model for this assessment and new specialists:\n" + models.map((choice, index) =>
+      report("Choose a Copilot model for the assessment (specialist choices are reviewed separately):\n" + models.map((choice, index) =>
         `${index + 1}. ${choice.name} (${choice.id})${choice.multiplier === undefined ? "" : ` - ${choice.multiplier}x billing multiplier`}`).join("\n"));
       while (!model) {
         const selected = (await ask("Enter a model number or an exact model ID from the list (q to cancel).")).trim();
@@ -104,6 +110,10 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       }
     }
     if (!model) throw new Error("Use --model MODEL for LLM onboarding, or --assessment-only for offline inventory.");
+    const dynamic = options["model-policy"] !== "fixed" && !options["specialist-model"];
+    if (dynamic) catalog ??= await (io.listModels ?? listCopilotModels)();
+    if (dynamic && !catalog?.length) throw new Error("No available models were returned for specialist selection.");
+    if (options["specialist-model"]) explicitModel(options["specialist-model"]);
     let description = options.description ?? "";
     if (!description && assessment.inventory.mode === "greenfield" && ask) {
       description = await ask("Describe the greenfield project: purpose, users, main behavior, platform/stack (or freedom to choose), and constraints.");
@@ -114,6 +124,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     report("I'm analysing your codebase, existing agents and project guidance to put your crew together. This may take a few minutes and consume AI credits. I'll show you the recommendations before changing anything; no project scripts or MCP servers are run.");
     const proposal = await proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
+      models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
     });
     const output = options.out ?? "crewbie-setup.json";
     const markdown = setupReportPath(output);
@@ -132,9 +143,10 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (choice === "save") return;
     if (!proposal.config.planning?.enabled) {
       let planning: string;
-      do { planning = (await ask(`Enable hosted planning from crewbie:ready-for-planning using ${model}? Enter yes or no. This permits paid planning, not automatic implementation.`)).trim().toLowerCase(); }
+      do { planning = (await ask(`Enable hosted planning using ${model}? Enter yes or no. New installations default to paid implementation after your exact-head approval and merge; existing explicit execution opt-outs are preserved.`)).trim().toLowerCase(); }
       while (!["yes", "no"].includes(planning));
-      if (planning === "yes") proposal.config.planning = { enabled: true, model, executeOnMerge: false };
+      if (planning === "yes") proposal.config.planning = { enabled: true, model,
+        executeOnMerge: assessment.configBeforeHash === null ? true : proposal.config.planning?.executeOnMerge === true };
       else report("Hosted planning stays disabled. The ready-for-planning label will not create a plan.");
     }
     if (!proposal.config.repository && !options["skip-labels"]) proposal.config.repository = (await ask("GitHub repository (owner/name) for workflow labels?")).trim();

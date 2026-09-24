@@ -1,9 +1,15 @@
 import { readJson, record, string, strings, slug, integer, safePath } from "./core.js";
 
-export interface Role { id: string; purpose: string; model: string; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
+export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const DEFAULT_LIMITS = { spec: 600, charter: 400, hot: 600, index: 400, decisions: 400, constitution: 600, topic: 1500, pr: 250 };
 export type WordLimits = typeof DEFAULT_LIMITS;
+export type ModelProfile = "economy" | "balanced" | "quality";
+export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
+export function modelProfile(value: unknown): ModelProfile {
+  if (value !== "economy" && value !== "balanced" && value !== "quality") throw new Error("Model profile must be economy, balanced or quality.");
+  return value;
+}
 export interface Config {
   schemaVersion: 1;
   repository: string;
@@ -15,6 +21,8 @@ export interface Config {
   ado: { organization: string; project: string; workItemType: string } | null;
   limits?: WordLimits;
   planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
+  modelProfile?: ModelProfile;
+  execution?: typeof DEFAULT_EXECUTION_LIMITS;
 }
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
 export function isRoleContextPath(path: string): boolean {
@@ -52,7 +60,11 @@ export function parseConfig(value: unknown): Config {
     }
     const sourceAgent = role.sourceAgent === undefined ? undefined : string(role.sourceAgent, "source agent");
     if (sourceAgent !== undefined && !isExistingAgentPath(sourceAgent)) throw new Error(`Unsupported source agent: ${sourceAgent}`);
-    return { ...result, ...guidance, ...(sourceAgent === undefined ? {} : { sourceAgent }) };
+    const complexity = role.complexity;
+    if (complexity !== undefined && complexity !== "routine" && complexity !== "standard" && complexity !== "complex") throw new Error("Role complexity must be routine, standard or complex.");
+    return { ...result, ...guidance, ...(sourceAgent === undefined ? {} : { sourceAgent }),
+      ...(complexity === undefined ? {} : { complexity }),
+      ...(role.modelReason === undefined ? {} : { modelReason: string(role.modelReason, "model selection reason") }) };
   });
   if (new Set(roles.map((role) => role.id)).size !== roles.length) throw new Error("Role IDs must be unique.");
   const adopted = roles.flatMap((role) => role.sourceAgent ? [role.sourceAgent] : []);
@@ -88,11 +100,17 @@ export function parseConfig(value: unknown): Config {
     if (value.executeOnMerge === true && !value.enabled) throw new Error("Enable planning before opting into execution on merge.");
     planning = { enabled: value.enabled, model, ...(value.executeOnMerge === undefined ? {} : { executeOnMerge: value.executeOnMerge }) };
   }
+  const execution = data.execution === undefined ? undefined : record(data.execution, "execution limits");
   return {
     schemaVersion: 1, repository, approvers, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),
     nightly: { enabled: nightly.enabled, maxRecords: integer(nightly.maxRecords, "maxRecords", 1, 100), allowedPaths },
     ado, limits, ...(planning ? { planning } : {}),
+    ...(data.modelProfile === undefined ? {} : { modelProfile: modelProfile(data.modelProfile) }),
+    ...(execution === undefined ? {} : { execution: {
+      maxLaunchesPerBatch: integer(execution.maxLaunchesPerBatch, "maximum launches per batch", 1, 1000),
+      maxAttemptsPerTask: integer(execution.maxAttemptsPerTask, "maximum attempts per task", 1, 100),
+    } }),
   };
 }
 export async function loadConfig(root: string): Promise<Config> {

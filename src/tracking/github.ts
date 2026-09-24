@@ -41,6 +41,10 @@ export function api(token: string, fetcher: typeof fetch = fetch): GitHubApi {
       throw error;
     }
     if (response.status === 204) return null;
+    if (response.status === 202) {
+      const text = await response.text();
+      return text.trim() ? JSON.parse(text) as unknown : null;
+    }
     return response.json();
     }
   }

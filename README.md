@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.9/crewbie-cli-0.1.0-alpha.9.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.10/crewbie-cli-0.1.0-alpha.10.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.9.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.10.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -96,8 +96,21 @@ crewbie init
 
 Init presents a numbered list of models available to your account, with names,
 IDs and billing multipliers when supplied by Copilot. Choose a number or an exact
-listed ID; invalid choices are reprompted, and `q` cancels. `--model MODEL` bypasses
-discovery for scripted use; `auto` is not supported.
+listed ID; invalid choices are reprompted, and `q` cancels. This selects the
+**assessment model**. By default, new specialists receive cost-aware model
+proposals from your live account catalog, with complexity and a rationale in the
+report. Reported token prices/capabilities inform the proposal; missing prices
+stay unknown and capability judgments are not benchmark guarantees.
+Installed model choices are preserved. `--model MODEL` skips the assessment picker;
+`--model-policy fixed` or `--specialist-model MODEL` explicitly overrides new-role
+selection and skips specialist discovery. `auto` is not supported.
+
+Choose `--model-profile economy|balanced|quality` (default **balanced**).
+Economy favors the least expensive **capable** option; balanced weighs quality,
+rework risk and cost; quality prioritizes correctness and difficult reasoning.
+Every profile treats language, architecture and other non-code work as potentially
+quality-sensitive. These are reviewed LLM proposals, not measured model rankings.
+The profile is saved in configuration and does not replace explicit model choices.
 
 Init then uses the Copilot SDK to assess existing
 instructions, custom agents, MCP configuration metadata, decisions and project
@@ -106,7 +119,9 @@ assessment, per-file findings, coverage limits, proposed crew and exact guidance
 edits. The editable setup remains in `crewbie-setup.json`. Custom `--out FILE.json`
 produces a sibling `FILE.md` report.
 
-Crewbie adopts suitable existing specialists before proposing extra expertise.
+Crewbie adopts suitable existing specialists and actively considers useful additions:
+domain depth, independent verification, accessibility, performance and integration
+boundaries. Broad existing ownership does not rule out a justified specialization.
 For example, existing frontend and backend engineers become distinct
 `crewbie-frontend-engineer` and `crewbie-backend-engineer` specialists, not an
 unrelated combined role. After approval, originals move into
@@ -129,7 +144,10 @@ for later review instead of discarding them.
 
 Init separately asks whether to enable hosted planning with the selected model.
 Opting in permits potentially billable planning when a trusted human applies
-`crewbie:ready-for-planning`; it does not authorize automatic implementation.
+`crewbie:ready-for-planning`. When hosted planning is enabled in a **new installation**,
+`executeOnMerge` defaults to true: implementation starts only after a configured
+human approves the exact final planning commit and merges it. Existing explicit
+opt-outs are preserved; upgrades do not silently enable paid execution.
 
 Analysis may consume AI credits. It runs tool-free in an isolated working/config
 directory, authenticating through `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`,
@@ -211,6 +229,31 @@ know. Review its purpose, checks and non-negotiables before applying the setup.
 Missing signals never automatically delete a role or its memory. Review open
 work before retirement; model and ownership changes still need approval.
 
+### Upgrade the repository integration without reassessment
+
+First update the CLI separately with npm using the desired release tarball. Then,
+inside your project:
+
+```powershell
+crewbie update
+crewbie update --apply
+```
+
+The first command previews managed workflow, charter, shared-rule and template
+changes. It also checks whether an existing Actions `CREWBIE_PACKAGE` override
+still points at an older package. Apply updates that override and the reviewed
+files using the installed CLI version. Commit the resulting file changes.
+No AI assessment, model change, policy reset, workflow dispatch or agent launch
+occurs. Edited managed files are listed as conflicts and block application;
+memory and accepted decisions are preserved. `--offline` explicitly skips GitHub
+variable inspection, so a remote override may still need attention.
+`init --update` remains the separate, potentially billable **team reassessment**.
+Text and JSON previews explain **why each file exists and who owns it**.
+No duplicate template directory is copied into your project.
+For batches already running before alpha.10, see the
+[historical launch baseline](docs/operations.md#launch-preflight-limits-and-stop-controls)
+before resuming dispatch; no reinitialization is required.
+
 ## From idea to reviewed PR
 
 **Assess > Supply requirements > Decompose > Approve > Implement > Review > Human merge > Learn**
@@ -223,8 +266,11 @@ With [hosted planning enabled](docs/operations.md#ready-label-issue-intake):
 2. A configured human approver adds **`crewbie:ready-for-planning`**.
 3. The hosted coordinator reads its charter/history and repository assessment,
    proposes the right crew, and decomposes the work into specialist-owned tasks.
-4. A draft planning PR references the supplied requirements and presents specialist-owned tasks and
-   dependencies. In merge-enabled mode it includes the actual team files too.
+4. A ready-for-review, **non-draft** planning PR presents specialist-owned tasks and
+   dependencies. Files use readable paths such as
+   `.crewbie/plans/saved-signals-favorites-issue-1/`. In merge-enabled mode it includes
+   the actual team files too. Clarification-only plans remain drafts; repository
+   checks and review requirements still apply.
 5. **Approve the final planning commit and merge the PR.** With
    `planning.executeOnMerge` enabled, Actions publishes the approved tasks and
    dispatches the named cloud specialists. No per-feature CLI handoff is needed.
@@ -240,6 +286,48 @@ job, not a native cloud implementation session. Application PR merges stay yours
 Without `executeOnMerge`, the manual team-installation and batch-approval path
 below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)
 for credentials, workflow recovery and approval boundaries.
+
+### Disagree with the plan
+
+Keep the planning PR open. Put specific feedback in a local `feedback.txt`, then:
+
+```powershell
+crewbie revise-plan --pr 7 --feedback-file feedback.txt
+crewbie revise-plan --pr 7 --feedback-file feedback.txt --apply
+```
+
+Preview is read-only. Apply explicitly requests **one potentially billable revision**
+on the same PR, reusing the previous plan instead of rerunning init or the full
+assessment. Stale heads, changed requirements during analysis and unrelated PR
+edits stop publication; Crewbie never force-pushes. If the default branch moved,
+update the planning branch first. Review and approve the **new final commit**;
+earlier approvals do not authorize it. There is no automatic paid retry loop.
+Use this command for planning revisions so the execution manifest is regenerated,
+rather than asking an unstructured comment to edit only `plan.md`.
+
+### Request implementation changes in a PR comment
+
+Mention **`@copilot`** on the implementation PR. GitHub documents that a PR created
+by a custom agent continues with that same custom agent. The follow-up starts
+another session and can consume AI credits. Review its changes before merging.
+
+For example, on a frontend implementation PR:
+
+> @copilot Please add concise handoff knowledge to
+> `.crewbie/team/frontend-engineer/hot.md` for the dependent frontend tasks:
+> the FavoritesProvider/useFavorites API, storage key and persistence behavior,
+> catalog reconciliation rules, and the known CartContext limitation. Verify
+> these against the implementation and link the relevant code. Preserve existing
+> knowledge and memory budgets; use an indexed topic if needed. Do not make
+> application changes for this request.
+
+**Handoffs and lessons are different.** Specialists must record new contracts,
+decisions and limitations needed by dependent tasks, even without a general
+lesson. They should link discoverable implementation details rather than copy
+them. A no-update handoff must explain why no new downstream context exists or
+cite the existing memory section that covers it. Out-of-scope updates become
+explicit proposals; humans review and merge memory changes. This is curated
+knowledge, not a repetitive task log.
 
 ### Or plan locally
 
@@ -269,6 +357,38 @@ tests or review passed.
 
 See [the batch example](examples/batch.json) and
 [scheduling and recovery](docs/operations.md#scheduling-and-recovery).
+
+### Know what will launch, and stop new work
+
+```powershell
+crewbie preflight
+crewbie preflight --batch-id feature-name --json
+crewbie pause
+crewbie pause --apply
+crewbie resume --apply
+crewbie cancel --issue 42 --run-id 123456789
+crewbie cancel --issue 42 --run-id 123456789 --apply
+```
+
+Preflight is read-only: it shows approvals, dependencies, selected specialist/model,
+profile revision and remaining launch allowances. Execution repeats its guards
+under a repository-wide lock. Models are checked against the live account catalog;
+that does not prove the cloud runtime will accept or use them. No silent fallback.
+
+Defaults are **20 Crewbie launch attempts per batch and 3 per task**, including the
+initial attempt, reviews/corrections and uncertain requests. Configure
+`execution.maxLaunchesPerBatch` and `execution.maxAttemptsPerTask` in the reviewed
+config. Reservations persist across machines and workflow retries. These are
+**not monetary/token caps** and do not control manual `@copilot` sessions, init,
+planning or nightly analysis.
+
+Pause prevents new implementation/review launches after it acquires the dispatch
+lock; it does not stop active sessions. Resume never resets allowances or starts
+work itself. Cancel targets only an attributable Copilot Actions run, preserves
+pushed commits and reports **requested versus confirmed** cancellation. If the
+backend or credential cannot cancel it, use **Stop session** in GitHub's session
+viewer. Neither cancellation nor failure refunds an attempt or automatically
+launches a replacement.
 
 ### Let the reviewer close the loop
 
@@ -347,7 +467,7 @@ scores or token limits. Workflow timeouts are not guaranteed spending caps.
 User-provided requirements stay authoritative; Crewbie adds no Spec Kit scaffolding.
 Cold/archive detail appears when needed, not as empty document trees.
 The installer tracks ownership and stops on conflicting human edits.
-`init --update` uses the same preview and ownership checks.
+`update` refreshes integration; `init --update` reassesses the team. Both preserve ownership.
 
 </details>
 
@@ -363,12 +483,49 @@ Collected work records are not an exhaustive session or billing ledger.
 Hosted reports default to an access-controlled Actions artifact; public hosting
 requires explicit opt-in.
 
+Completed native PRs receive a usage summary during dispatch reconciliation.
+**Observed tokens** aggregate identifiable main-session input/output log records
+across known sessions, with coverage and an evidence link. Missing/expired logs,
+unreported subagent usage and incomplete session coverage are disclosed; these
+counts are not unique context tokens or an invoice. The preview Agent Tasks API
+reports `usage.amount` with a type but does not document its scaling, so **AI credits
+remain unavailable** rather than dividing by a guessed factor. Planning CLI
+metrics likewise remain unavailable. Native telemetry and Actions-log access are
+needed; no new paid inference is used to collect usage.
+
+Use `crewbie status --pr 13 --json` for the observed counts, evidence URLs and
+coverage warnings without editing the PR. If GitHub requires **Approve and run
+workflows** for a Copilot PR, automated metadata updates wait for that permission.
+
 Instruction assessment also flags copied documentation, repeated charter
 boilerplate, generic advice, unverified links and suspect test directives.
 Inspired by [Gloaguen et al., *Evaluating AGENTS.md*](https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd),
 these are advisory engineering heuristics with file/line evidence, not
 paper-validated causal rules or automatic permission to rewrite instructions.
 Read the [evidence and limitations](docs/operations.md#instruction-quality-evidence-and-limits).
+
+### Sources behind guidance assessment
+
+Crewbie favors non-obvious constraints, rationale and gotchas over descriptions
+an agent can cheaply discover from code or configuration. It reviews root-file
+scope, domain `AGENTS.md`, `applyTo` instructions, custom-agent responsibilities,
+permissions and duplication. Safe edits include complete replacement text and
+source/destination changes when splitting guidance; they apply only with your
+separate guidance approval. Unresolved policy choices stay explicitly deferred.
+
+| Source | How Crewbie uses it |
+| --- | --- |
+| [Gloaguen et al., Evaluating AGENTS.md](https://arxiv.org/abs/2602.11988) | Study-specific success/cost findings motivate reviewing unnecessary context and repository overviews, not deleting useful policy or claiming a universal size limit. |
+| [GitHub custom-instruction support](https://docs.github.com/en/copilot/reference/custom-instructions-support) and [response customization](https://docs.github.com/en/copilot/concepts/prompting/response-customization) | Choose repository-wide, path-scoped and agent instructions for the host that actually supports them. |
+| [GitHub custom-agent configuration](https://docs.github.com/en/copilot/reference/custom-agents-configuration) | Review concrete descriptions, tool restrictions, model settings and precedence rather than inventing agent behavior. |
+| [Copilot SDK usage and billing](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing) | Discover account models and reported pricing; distinguish token telemetry from credit accounting. |
+| [Agent Tasks REST API](https://docs.github.com/en/rest/agent-tasks/agent-tasks) | Attribute native sessions to PRs and disclose preview API/accounting limitations. |
+| [Continuing a cloud-agent session](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/use-cloud-agent-on-github#tracking-and-continuing-a-session) | Document same-custom-agent `@copilot` follow-ups. |
+
+The scanner's 600-word root-guidance review threshold and other static signals
+are **Crewbie heuristics**, not proven causal rules or quality certifications.
+Preserve intentional policy and assess representative task outcomes before
+claiming a token or quality improvement.
 
 ## Build and contribute
 
