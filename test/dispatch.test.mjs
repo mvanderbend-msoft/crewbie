@@ -121,7 +121,13 @@ function githubFixture(input = batch()) {
             fixture.posted.push({ issue: issue.number, comment: { user: { type: "User", login: "maintainer" }, created_at: `z${fixture.posted.length}`, updated_at: `z${fixture.posted.length}`, body: body.body } });
             return {};
           }
-          if (match[2] === "/assignees" && method === "DELETE") { fixture.unassigned.push(body); issue.assignees = []; return issue; }
+          if (match[2] === "/assignees" && method === "DELETE") {
+            fixture.unassigned.push(body);
+            // GitHub shows the bot as "Copilot" but removes it only by its account login.
+            const login = (name) => name === "Copilot" ? "copilot-swe-agent[bot]" : name;
+            issue.assignees = (issue.assignees ?? []).filter((item) => !body.assignees.includes(login(item.login)));
+            return structuredClone(issue);
+          }
           if (match[2] === "/assignees") {
             assignments.push(body);
             if (fixture.failAssignment) throw new GitHubError(503, "unknown-outcome");
@@ -620,7 +626,7 @@ test("an approver's restart label relaunches a verified non-start as a counted a
   request(1, "maintainer");
   const work = await dispatch(fixture.client, config());
   assert.equal(launchesFor(1), 2);
-  assert.deepEqual(fixture.unassigned, [{ assignees: ["Copilot"] }]);
+  assert.deepEqual(fixture.unassigned, [{ assignees: ["copilot-swe-agent[bot]"] }]);
   assert.match(fixture.posted.at(-1).comment.body, /attempt 1 of 3[\s\S]*<!-- crewbie-restart:/);
   assert.ok(!fixture.issues[0].labels.includes("crewbie:restart"));
   assert.equal(work[0].state, "running");

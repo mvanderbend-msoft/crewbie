@@ -459,15 +459,17 @@ async function restarts(client: GitHubApi, config: Config, work: Work[], branch:
     }
     await checkLaunchModels(await discoverModels(), [item.metadata.task], config);
     const fresh = await freshLaunchable(client, config, item, sha, ado);
+    // Copilot starts on a new assignment event; an earlier assignment from the ended attempt would suppress it.
+    // The API shows the bot as "Copilot" but only removes it by its account login.
+    if (copilotAssigned(fresh)) {
+      const after = record(await client.request("DELETE", `${prefix}/issues/${issue}/assignees`, { assignees: ["copilot-swe-agent[bot]"] }), "unassign response");
+      if (copilotAssigned(after)) throw new Error(`Issue #${issue}: GitHub did not remove the earlier Copilot assignment, so a new one would not start a session. No attempt was used; unassign Copilot, then run dispatch again.`);
+    }
     const reserved = await reserveLaunch(client, config, item.metadata, issue, sha);
     await client.request("DELETE", `${prefix}/issues/${issue}/labels/${encodeURIComponent(RESTART_LABEL)}`);
     await client.request("POST", `${prefix}/issues/${issue}/comments`, {
       body: `Crewbie restart requested by @${String(record(labeled.actor, "actor").login)}: attempt ${reserved.taskUsed + 1} of ${reserved.maxAttemptsPerTask} for this task. The previous session had ended.\n${RESTART_MARKER}${reserved.taskUsed + 1} -->`,
     });
-    const copilot = Array.isArray(fresh.assignees) ? fresh.assignees.map((value) => String(record(value, "assignee").login))
-      .filter((login) => ["copilot-swe-agent[bot]", "copilot-swe-agent", "Copilot"].includes(login)) : [];
-    // Copilot starts on a new assignment event; an earlier assignment from the ended attempt would suppress it.
-    if (copilot.length) await client.request("DELETE", `${prefix}/issues/${issue}/assignees`, { assignees: copilot });
     item.sessionEnded = false;
     await assign(client, config, item, { ...fresh, assignees: [] }, branch);
   }
