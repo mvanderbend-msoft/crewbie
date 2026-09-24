@@ -9,11 +9,13 @@ import { config, batch } from "./helpers.mjs";
 
 function fixture() {
   const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0]));
-  const state = { refs: new Set(), objects: new Map(), tag: null, writes: [], user: "maintainer", cancelled: false, denial: false, confirmation: false };
+  const state = { refs: new Set(), objects: new Map(), comments: {}, tag: null, writes: [], user: "maintainer", cancelled: false, denial: false, confirmation: false };
   const run = { id: 42, run_attempt: 1, event: "dynamic", repository: { full_name: "example/project" }, head_branch: "copilot/work", pull_requests: [{ id: 100 }], status: "in_progress" };
   const client = {
     async list(path) {
       if (path.includes("/git/matching-refs/")) return [...state.refs].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref, object: state.objects.get(ref) }));
+      const comments = /\/issues\/(\d+)\/comments$/.exec(path);
+      if (comments) return state.comments[comments[1]] ?? [];
       throw new Error(`Unexpected list ${path}`);
     },
     async request(method, path, body) {
@@ -69,6 +71,21 @@ test("persistent reservations are shared, capped at exactly three attempts, and 
   await assert.rejects(withDispatchLock(f.client, config(), () => reserveLaunch(f.client, config(), f.metadata, 1, "a".repeat(40))), /Task attempt allowance exhausted/);
   assert.equal(f.state.refs.size, 3);
   assert.equal((await launchAllowance(f.client, config(), f.metadata, 1)).used, 3);
+});
+
+test("a sole launch that Copilot verifiably could not start is not counted as an attempt", async () => {
+  const f = fixture();
+  const task = f.metadata.task.id, ledger = (issue, n) => `refs/tags/crewbie/launches/${f.metadata.batch}/${task}/${issue}/${n}`;
+  for (const [issue, n] of [[16, 1], [24, 2], [39, 3]]) f.state.refs.add(ledger(issue, n));
+  const failure = { user: { type: "Bot", login: "Copilot" }, body: "The agent encountered an error and was unable to start working on this issue: Please try again later." };
+  f.state.comments["39"] = [failure];
+  f.state.comments["24"] = [{ ...failure, user: { type: "User", login: "someone" } }];
+  const allowance = await launchAllowance(f.client, config(), f.metadata, 46);
+  assert.equal(allowance.taskUsed, 2, "Only Copilot's own start-failure report releases the attempt.");
+  assert.equal(allowance.used, 2);
+  assert.equal(allowance.blocked, null);
+  f.state.refs.add(ledger(39, 4));
+  assert.equal((await launchAllowance(f.client, config(), f.metadata, 46)).taskUsed, 4, "Issues with several launches keep every attempt counted.");
 });
 
 test("pre-upgrade attempts need a human-attested baseline that consumes rather than resets allowance", async () => {

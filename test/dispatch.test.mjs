@@ -18,7 +18,7 @@ function githubFixture(input = batch()) {
   const claims = new Set(), pulls = new Map(), assignments = [], launches = new Set();
   let locked = false;
   const fixture = {
-    issues, claims, pulls, assignments, launches, paused: false, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false,
+    issues, claims, pulls, assignments, launches, paused: false, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false, extraComments: {},
     get locked() { return locked; },
     client: {
       async list(path) {
@@ -32,7 +32,7 @@ function githubFixture(input = batch()) {
           if (match[2] === "comments") return [{
             user: { type: "User", login: "maintainer" }, created_at: "same", updated_at: "same",
             body: approvalComment(issueDigest(issue.title, issue.body), true),
-          }];
+          }, ...(fixture.extraComments[issue.number] ?? [])];
           const pr = pulls.get(issue.number);
           return pr ? [{ event: "cross-referenced", source: { issue: { pull_request: { url: `https://api.github.com/repos/example/project/pulls/${pr.number}` } } } }] : [];
         }
@@ -313,6 +313,30 @@ test("closing completed trial work frees its slot without erasing claims or rele
   assert.equal(work[0].sessionComplete, true);
   assert.ok(fixture.claims.has(1), "Keep the historical launch claim.");
   assert.ok(!fixture.claims.has(2), "An unmerged prerequisite still blocks its dependent.");
+});
+
+test("Copilot start failures free capacity; claims without that evidence stay reserved", async () => {
+  for (const verified of [true, false]) {
+    const fixture = githubFixture();
+    await dispatch(fixture.client, config({ maxActive: 1 }));
+    fixture.issues[0].state = "closed";
+    fixture.issues[0].assignees = [{ login: "Copilot" }];
+    fixture.extraComments[1] = [{ user: verified ? { type: "Bot", login: "Copilot" } : { type: "User", login: "someone" },
+      body: "The agent encountered an error and was unable to start working on this issue: Please try again later." }];
+    const work = await dispatch(fixture.client, config({ maxActive: 1 }));
+    assert.equal(work[0].state, "failed");
+    assert.equal(fixture.assignments.length, verified ? 2 : 1, verified ? "A verified start failure frees its slot." : "Human text cannot release capacity.");
+    if (verified) assert.match(work[0].reason, /could not start/);
+    else assert.match(work[0].reason, /capacity stays reserved/);
+    assert.ok(fixture.claims.has(1), "Keep the historical launch claim.");
+  }
+  const fixture = githubFixture();
+  await dispatch(fixture.client, config({ maxActive: 1 }));
+  fixture.issues[0].state = "closed";
+  fixture.pulls.set(1, { id: 1001, number: 101, state: "closed", merged_at: null, user: { login: "Copilot" } });
+  fixture.cloudTasks.push({ id: "cancelled-task", state: "cancelled", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+  await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.equal(fixture.assignments.length, 2, "Closed work whose native task is verified cancelled frees its slot.");
 });
 
 test("closed PRs with active or unverified native sessions keep their capacity reservation", async () => {

@@ -9,6 +9,14 @@ export type DiscoverModels = () => Promise<ModelChoice[]>;
 export { listCopilotModels };
 const PAUSE = "tags/crewbie/paused";
 
+export function copilotStartFailure(comments: Record<string, unknown>[]): boolean {
+  return comments.some((comment) => {
+    const user = comment.user === null || comment.user === undefined ? {} : record(comment.user, "comment author");
+    return user.type === "Bot" && ["Copilot", "copilot-swe-agent[bot]", "copilot-swe-agent"].includes(String(user.login))
+      && /unable to start working on this issue/i.test(String(comment.body ?? ""));
+  });
+}
+
 const LOCK_REF = "tags/crewbie/dispatch-lock";
 export const LOCK_WAIT = { attempts: 60, delayMs: 5_000 };
 
@@ -76,16 +84,21 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
       if (baseline.schemaVersion !== 1 || baseline.batch !== batch || baseline.task !== match[2] || baseline.issue !== issue) throw new Error("Historical baseline does not match its launch ref.");
       attempts = integer(baseline.attempts, "historical attempts", 1, 10000);
     } else integer(Number(match[4]), "ledger attempt");
-    entries.push({ ref, task: match[2]!, issue, attempts });
+    entries.push({ ref, task: match[2]!, issue, attempts, baseline: match[4] === "baseline" });
   }
   if (new Set(entries.map((entry) => entry.ref)).size !== entries.length) throw new Error("Duplicate launch-ledger entries.");
+  // A sole launch that Copilot reports it could not start ran no session, so it is not an attempt.
+  for (const entry of entries) {
+    if (entry.baseline || entries.filter((other) => other.issue === entry.issue).length !== 1) continue;
+    if (copilotStartFailure(await client.list(`${prefix}/issues/${entry.issue}/comments`))) entry.attempts = 0;
+  }
   const limits = config.execution ?? DEFAULT_EXECUTION_LIMITS;
   const result: LaunchAllowance = { batch, task, issue, used: entries.reduce((n, entry) => n + entry.attempts, 0),
     taskUsed: entries.filter((entry) => entry.task === task).reduce((n, entry) => n + entry.attempts, 0),
     issueUsed: entries.filter((entry) => entry.task === task && entry.issue === issue).reduce((n, entry) => n + entry.attempts, 0), ...limits, blocked: null };
   if (await launchesPaused(client, config)) result.blocked = "Future Crewbie launches are paused. Running sessions are unchanged.";
   else if (result.used >= limits.maxLaunchesPerBatch) result.blocked = `Batch launch allowance exhausted (${result.used}/${limits.maxLaunchesPerBatch}).`;
-  else if (result.taskUsed >= limits.maxAttemptsPerTask) result.blocked = `Task attempt allowance exhausted (${result.taskUsed}/${limits.maxAttemptsPerTask}); initial and uncertain requests count.`;
+  else if (result.taskUsed >= limits.maxAttemptsPerTask) result.blocked = `Task attempt allowance exhausted (${result.taskUsed}/${limits.maxAttemptsPerTask}); initial and uncertain requests count; verified start failures do not.`;
   if (result.blocked) return result;
   // Older claims have no reliable continuation count. Never present a partial history as a lifetime cap.
   const claims = await client.list(`${prefix}/git/matching-refs/tags/crewbie/claims/`);

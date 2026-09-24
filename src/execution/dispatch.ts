@@ -8,7 +8,7 @@ import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { attributePull } from "./attribution.js";
 import { cloudTasks } from "../tracking/native.js";
-import { checkLaunchModels, launchAllowance, listCopilotModels, reserveLaunch, withDispatchLock, type DiscoverModels } from "./controls.js";
+import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, reserveLaunch, withDispatchLock, type DiscoverModels } from "./controls.js";
 export { withDispatchLock } from "./controls.js";
 
 export type WorkState = "blocked" | "ready" | "running" | "review" | "failed" | "done";
@@ -19,6 +19,8 @@ export interface Work {
   approved: boolean;
   claimed: boolean;
   sessionComplete?: boolean;
+  /** Verified that no cloud session is still running: native task terminal, or Copilot reported it could not start. */
+  sessionEnded?: boolean;
   reason: string;
   pull?: Record<string, unknown>;
   nativeTask?: Record<string, unknown>;
@@ -138,10 +140,14 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     const claim = await claimed(client, config.repository, number);
     const pr = claim ? await linkedPull(client, config.repository, number) : null;
     let sessionComplete = false;
+    let sessionEnded = false;
     let nativeTask: Record<string, unknown> | undefined;
     let state: WorkState = !approved ? "blocked" : claim ? "running" : "ready";
     let reason = !approved ? "Missing current human execution approval." : claim ? "Launch already claimed; awaiting or reconciling its session/PR." : "Approved; dependencies will be checked.";
-    if (claim && !pr && !copilotAssigned(issue)) {
+    if (claim && !pr && copilotStartFailure(await client.list(`/repos/${config.repository}/issues/${number}/comments`))) {
+      state = "failed"; sessionEnded = true;
+      reason = "Copilot reported it could not start this task; no session ran, so it does not count as a task attempt. Relaunching still needs a new approved issue.";
+    } else if (claim && !pr && !copilotAssigned(issue)) {
       state = "blocked"; reason = "Launch was claimed but neither Copilot assignment nor a linked PR is visible. Inspect the outcome before retrying.";
     }
     if (pr?.merged_at) { state = "done"; reason = "Linked Copilot PR merged."; }
@@ -156,6 +162,8 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
       nativeTask = await selectNativeTask(client, config, number, matches);
       sessionComplete = nativeTask?.state === "completed";
       const failed = nativeTask !== undefined && ["failed", "timed_out", "cancelled"].includes(String(nativeTask.state));
+      // An open PR may still receive an authorized continuation, so only closure releases a failed session's slot.
+      sessionEnded = failed && (pr.state === "closed" || issue.state === "closed");
       state = sessionComplete ? "review" : failed ? "failed" : "running";
       reason = sessionComplete ? "Cloud task completed; linked PR awaits human review."
         : failed ? `Cloud task ${String(nativeTask?.state)}; inspect its saved work before an explicitly authorized continuation.`
@@ -163,7 +171,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     }
     if (!pr?.merged_at && (pr?.state === "closed" || issue.state === "closed")) {
       state = "failed";
-      reason = `Closed without a merged prerequisite PR.${claim && !sessionComplete ? ` Native completion remains unverified or unsuccessful; capacity stays reserved. ${reason}` : ""}`;
+      reason = `Closed without a merged prerequisite PR.${claim && !sessionComplete ? sessionEnded ? ` ${reason}` : ` Native completion remains unverified or unsuccessful; capacity stays reserved. ${reason}` : ""}`;
     }
     const role = config.roles.find((role) => role.id === metadata.task.owner);
     if (!claim && (!role || role.model !== metadata.task.model)) { state = "blocked"; reason = "Owner/model policy changed; reapproval required."; }
@@ -174,7 +182,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
       state = "blocked"; reason = "Owner label does not match the approved specialist.";
     }
     if (!approved && state !== "failed") { state = "blocked"; reason = "Issue content no longer has current human execution approval."; }
-    result.push({ issue, metadata, state, approved, claimed: claim, sessionComplete, reason, ...(pr ? { pull: pr } : {}), ...(nativeTask ? { nativeTask } : {}) });
+    result.push({ issue, metadata, state, approved, claimed: claim, sessionComplete, ...(sessionEnded ? { sessionEnded } : {}), reason, ...(pr ? { pull: pr } : {}), ...(nativeTask ? { nativeTask } : {}) });
   }
   return result;
 }
@@ -222,7 +230,7 @@ export function eligible(work: Work[], maxActive: number, batchId?: string): Wor
     visiting.delete(key); visited.add(key);
   }
   for (const item of work) visit(item);
-  const active = work.filter((item) => item.claimed && item.state !== "done" && item.sessionComplete !== true).length;
+  const active = work.filter((item) => item.claimed && item.state !== "done" && item.sessionComplete !== true && item.sessionEnded !== true).length;
   return work.filter((item) => item.approved && !item.claimed && item.state === "ready" && (batchId === undefined || item.metadata.batch === batchId))
     .sort((a, b) => a.metadata.task.priority - b.metadata.task.priority || a.metadata.task.id.localeCompare(b.metadata.task.id))
     .slice(0, Math.max(0, maxActive - active));

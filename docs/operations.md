@@ -777,7 +777,13 @@ claims or treat issue closure as successful implementation.
 Reconciliation preserves unrelated labels. Failed/unmerged work blocks its
 descendants. Claims survive session completion to prevent relaunch. A uniquely
 correlated completed cloud task frees execution capacity while its PR awaits
-review or after it is closed without merging. Closed-unmerged work stays failed,
+review or after it is closed without merging. Closed work whose correlated task
+is verified failed, timed out or cancelled also frees capacity; while its PR is
+open the slot stays reserved for an authorized continuation. When Copilot itself
+comments that it was unable to start working on the issue, no session ran:
+capacity is freed and that sole launch does not count toward attempt or batch
+allowances. The claim remains, so a relaunch still needs a new approved issue
+(for example a re-plan). Closed-unmerged work stays failed,
 retains its claim, and never satisfies a prerequisite. Missing, ambiguous, active or
 inaccessible task telemetry retains capacity and reports why. A draft PR alone
 is not proof that a session has finished.
