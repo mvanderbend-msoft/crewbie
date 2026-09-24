@@ -76,3 +76,8 @@ test("review output containing a secret is never posted", async (t) => {
   await assert.rejects(publishReview(root, client, reviewConfig), /secret/);
   assert.equal(comments.length, 0);
 });
+
+test("every Crewbie label description fits GitHub's 100-character limit", async () => {
+  const { labelDescription, setupLabels } = await import("../dist/tracking/issues.js");
+  for (const name of setupLabels(config())) assert.ok(labelDescription(name).length <= 100, `${name} description is too long for GitHub.`);
+});

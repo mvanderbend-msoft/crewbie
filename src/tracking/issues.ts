@@ -13,15 +13,18 @@ export function setupLabels(config: Config): string[] {
 }
 const LABEL_PURPOSES: Record<string, string> = {
   [RESTART_LABEL]: "Approver request: relaunch a task whose previous session ended; counts as an attempt.",
-  [ADDRESS_REVIEW_LABEL]: "Approver request on a PR: the specialist addresses the Crewbie review and PR comments; counts as an attempt.",
+  [ADDRESS_REVIEW_LABEL]: "Approver request on a PR: the specialist addresses the review and comments; counts as an attempt.",
 };
+export function labelDescription(name: string): string {
+  return LABEL_PURPOSES[name] ?? "Crewbie workflow metadata; approval and prerequisites are checked separately.";
+}
 export async function ensureLabels(client: GitHubApi, config: Config): Promise<void> {
   const prefix = `/repos/${config.repository}`;
   const existing = new Set((await client.list(`${prefix}/labels`)).map((label) => label.name));
   const labels = setupLabels(config);
   for (const name of labels) {
     if (!existing.has(name)) await client.request("POST", `${prefix}/labels`, { name, color: "b11f4b",
-      description: LABEL_PURPOSES[name] ?? "Crewbie workflow metadata; approval and prerequisites are checked separately." });
+      description: labelDescription(name) });
   }
 }
 export async function managedIssues(client: GitHubApi, repository: string): Promise<Record<string, unknown>[]> {
