@@ -66,7 +66,7 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
     assert.match(text, /\.crewbie\/instructions\.md/);
     assert.match(text, new RegExp(`Identify yourself as .crewbie-${role}`));
   }
-  assert.match(SHARED_INSTRUCTIONS, /approved scope/i);
+  assert.match(SHARED_INSTRUCTIONS, /always in scope/i);
   assert.match(SHARED_INSTRUCTIONS, /work branch/);
   assert.match(SHARED_INSTRUCTIONS, /crewbie-memory-proposal/);
   assert.match(SHARED_INSTRUCTIONS, /no new durable lesson/i);

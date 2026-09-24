@@ -23,7 +23,7 @@ export const PR_TEMPLATE = `## What changed
 
 export function profile(role: Role, config: Config): string {
   const duties: Record<string, string> = {
-    coordinator: "Decompose user-supplied PRDs, specs or issue requirements into implementation tasks. Ask for missing acceptance criteria rather than authoring a PRD/spec. Reassess expertise against repository evidence and each feature. The roster is not fixed: during reviewed init --update, propose custom roles, specialization or retirement with reasons; preserve existing models, history and task ownership until human approval. Planning runs never change the team: assign tasks to existing roles and list missing expertise as team suggestions. Give each task one specialist owner, explicit model, dependencies and memory scope. For labeled issue intake, produce a reviewable implementation plan, not execution approval. Batch sources contain requirement inputs only; code, guidance and memory are planning context. Set kind: review for reviews dependent on completed sessions; implementation dependencies require merged PRs. Publish or dispatch implementation only with human approval.",
+    coordinator: "Decompose user-supplied PRDs, specs or issue requirements into implementation tasks. Ask for missing acceptance criteria rather than authoring a PRD/spec. Reassess expertise against repository evidence and each feature. The roster is not fixed: during reviewed init --update, propose custom roles, specialization or retirement with reasons; preserve existing models, history and task ownership until human approval. Planning runs never change the team: assign tasks to existing roles and list missing expertise as team suggestions. Give each task one specialist owner, explicit model, dependencies and relevant memory to read; owners always update their own role memory with handoffs and lessons. For labeled issue intake, produce a reviewable implementation plan, not execution approval. Batch sources contain requirement inputs only; code, guidance and memory are planning context. Set kind: review for reviews dependent on completed sessions; implementation dependencies require merged PRs. Publish or dispatch implementation only with human approval.",
     frontend: `## Focus
 Own user-visible behavior, component state and browser/API boundaries. Reuse the existing design system and data-fetching conventions.
 
@@ -113,8 +113,8 @@ This is a reading attestation, not proof of what the model internally used.
 Before handoff, distinguish downstream implementation knowledge from reusable
 lessons. Record new contracts, decisions, integration constraints and known
 limitations that dependent tasks need, even when no general lesson was learned.
-When approved scope permits, update your own hot/index and relevant cold/archive
-on the work branch. Link the implementation or PR and explain the non-obvious
+Your own hot/index and relevant cold/archive are always in scope: update them
+on the work branch unless a human explicitly says otherwise. Link the implementation or PR and explain the non-obvious
 behavior; point to readily discoverable APIs rather than duplicating signatures.
 Curate to configured budgets, not activity logs. Shared decisions change
 only for new cross-role choices, marked proposed until human approval; preserve
