@@ -73,7 +73,7 @@ test("persistent reservations are shared, capped at exactly three attempts, and 
   assert.equal((await launchAllowance(f.client, config(), f.metadata, 1)).used, 3);
 });
 
-test("a sole launch that Copilot verifiably could not start is not counted as an attempt", async () => {
+test("each launch that Copilot verifiably could not start is not counted as an attempt", async () => {
   const f = fixture();
   const task = f.metadata.task.id, ledger = (issue, n) => `refs/tags/crewbie/launches/${f.metadata.batch}/${task}/${issue}/${n}`;
   for (const [issue, n] of [[16, 1], [24, 2], [39, 3]]) f.state.refs.add(ledger(issue, n));
@@ -85,7 +85,9 @@ test("a sole launch that Copilot verifiably could not start is not counted as an
   assert.equal(allowance.used, 2);
   assert.equal(allowance.blocked, null);
   f.state.refs.add(ledger(39, 4));
-  assert.equal((await launchAllowance(f.client, config(), f.metadata, 46)).taskUsed, 4, "Issues with several launches keep every attempt counted.");
+  assert.equal((await launchAllowance(f.client, config(), f.metadata, 46)).taskUsed, 3, "A restart counts; only the launch Copilot could not start is released.");
+  f.state.comments["39"] = [failure, { user: { type: "User", login: "maintainer" }, body: "restart <!-- crewbie-restart:4 -->" }, failure];
+  assert.equal((await launchAllowance(f.client, config(), f.metadata, 46)).taskUsed, 2, "Every verified start failure releases one launch.");
 });
 
 test("pre-upgrade attempts need a human-attested baseline that consumes rather than resets allowance", async () => {

@@ -9,12 +9,25 @@ export type DiscoverModels = () => Promise<ModelChoice[]>;
 export { listCopilotModels };
 const PAUSE = "tags/crewbie/paused";
 
+export { RESTART_LABEL } from "../config.js";
+export const RESTART_MARKER = "<!-- crewbie-restart:";
+function isStartFailure(comment: Record<string, unknown>): boolean {
+  const user = comment.user === null || comment.user === undefined ? {} : record(comment.user, "comment author");
+  return user.type === "Bot" && ["Copilot", "copilot-swe-agent[bot]", "copilot-swe-agent"].includes(String(user.login))
+    && /unable to start working on this issue/i.test(String(comment.body ?? ""));
+}
+/** Comments after the latest Crewbie restart marker. A forged marker only hides a start failure, which keeps capacity reserved. */
+export function sinceRestart(comments: Record<string, unknown>[]): Record<string, unknown>[] {
+  let start = 0;
+  comments.forEach((comment, index) => { if (String(comment.body ?? "").includes(RESTART_MARKER)) start = index + 1; });
+  return comments.slice(start);
+}
+/** Copilot reported that the current launch (since the latest restart) could not start. */
 export function copilotStartFailure(comments: Record<string, unknown>[]): boolean {
-  return comments.some((comment) => {
-    const user = comment.user === null || comment.user === undefined ? {} : record(comment.user, "comment author");
-    return user.type === "Bot" && ["Copilot", "copilot-swe-agent[bot]", "copilot-swe-agent"].includes(String(user.login))
-      && /unable to start working on this issue/i.test(String(comment.body ?? ""));
-  });
+  return sinceRestart(comments).some(isStartFailure);
+}
+export function copilotStartFailures(comments: Record<string, unknown>[]): number {
+  return comments.filter(isStartFailure).length;
 }
 
 const LOCK_REF = "tags/crewbie/dispatch-lock";
@@ -87,10 +100,14 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
     entries.push({ ref, task: match[2]!, issue, attempts, baseline: match[4] === "baseline" });
   }
   if (new Set(entries.map((entry) => entry.ref)).size !== entries.length) throw new Error("Duplicate launch-ledger entries.");
-  // A sole launch that Copilot reports it could not start ran no session, so it is not an attempt.
-  for (const entry of entries) {
-    if (entry.baseline || entries.filter((other) => other.issue === entry.issue).length !== 1) continue;
-    if (copilotStartFailure(await client.list(`${prefix}/issues/${entry.issue}/comments`))) entry.attempts = 0;
+  // Each launch Copilot reports it could not start ran no session, so it is not an attempt.
+  for (const number of new Set(entries.filter((entry) => !entry.baseline).map((entry) => entry.issue))) {
+    let refunds = copilotStartFailures(await client.list(`${prefix}/issues/${number}/comments`));
+    for (const entry of entries) {
+      if (refunds <= 0) break;
+      if (entry.baseline || entry.issue !== number) continue;
+      entry.attempts = 0; refunds--;
+    }
   }
   const limits = config.execution ?? DEFAULT_EXECUTION_LIMITS;
   const result: LaunchAllowance = { batch, task, issue, used: entries.reduce((n, entry) => n + entry.attempts, 0),
@@ -147,8 +164,11 @@ export async function reserveLaunch(client: GitHubApi, config: Config, metadata:
   const allowance = await launchAllowance(client, config, metadata, issue);
   if (allowance.blocked) throw new Error(allowance.blocked);
   if (initial && allowance.issueUsed > 0) throw new Error("Initial launch already reserved; inspect its outcome instead of retrying.");
+  // Refunded start failures lower the count, so number after the highest existing ref rather than reuse one.
+  const existing = await client.list(`/repos/${config.repository}/git/matching-refs/tags/crewbie/launches/${allowance.batch}/${allowance.task}/`);
+  const highest = Math.max(0, ...existing.map((raw) => Number(/\/(\d+)$/.exec(string(raw.ref, "launch ref"))?.[1] ?? 0)));
   await client.request("POST", `/repos/${config.repository}/git/refs`, {
-    ref: `refs/tags/crewbie/launches/${allowance.batch}/${allowance.task}/${issue}/${allowance.taskUsed + 1}`, sha: baseSha,
+    ref: `refs/tags/crewbie/launches/${allowance.batch}/${allowance.task}/${issue}/${Math.max(allowance.taskUsed, highest) + 1}`, sha: baseSha,
   });
   return allowance;
 }

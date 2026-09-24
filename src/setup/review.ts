@@ -17,7 +17,8 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
   const workflowPurposes: Record<string, string> = {
     "crewbie-plan.yml": "Prepare a coordinator plan from approved issue intake; the planning opt-in gate still applies.",
     "crewbie-execute-plan.yml": "Verify exact-head human approval and merge before publishing implementation tasks.",
-    "crewbie-dispatch.yml": "Release approved tasks when dependencies, capacity and launch controls permit.",
+    "crewbie-dispatch.yml": "Release approved tasks when dependencies, capacity and launch controls permit; mark finished PRs ready and merge approved ones.",
+    "crewbie-approval.yml": "On an approving review, ask dispatch to merge; holds no Crewbie secrets and runs no PR code.",
     "crewbie-maintain.yml": "Offer bounded knowledge-maintenance proposals; scheduled analysis remains opt-in.",
     "crewbie-report.yml": "Collect execution evidence into a static report without starting implementation agents.",
   };

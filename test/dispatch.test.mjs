@@ -19,20 +19,24 @@ function githubFixture(input = batch()) {
   let locked = false;
   const fixture = {
     issues, claims, pulls, assignments, launches, paused: false, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false, extraComments: {},
+    events: {}, posted: [], unassigned: [], readied: [], merges: [], reviews: [], checkRuns: [], statuses: [],
     get locked() { return locked; },
     client: {
       async list(path) {
         if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
         if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
-        if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
+        if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "restart", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
         if (path.includes("/issues?")) return structuredClone(issues);
+        const events = /\/issues\/(\d+)\/events$/.exec(path);
+        if (events) return fixture.events[Number(events[1])] ?? [];
+        if (/\/pulls\/\d+\/reviews$/.test(path)) return fixture.reviews;
         const match = /\/issues\/(\d+)\/(comments|timeline)$/.exec(path);
         if (match) {
           const issue = issues.find((item) => item.number === Number(match[1]));
           if (match[2] === "comments") return [{
             user: { type: "User", login: "maintainer" }, created_at: "same", updated_at: "same",
             body: approvalComment(issueDigest(issue.title, issue.body), true),
-          }, ...(fixture.extraComments[issue.number] ?? [])];
+          }, ...(fixture.extraComments[issue.number] ?? []), ...fixture.posted.filter((item) => item.issue === issue.number).map((item) => item.comment)];
           const pr = pulls.get(issue.number);
           return pr ? [{ event: "cross-referenced", source: { issue: { pull_request: { url: `https://api.github.com/repos/example/project/pulls/${pr.number}` } } } }] : [];
         }
@@ -42,6 +46,19 @@ function githubFixture(input = batch()) {
         if (path.endsWith("/git/ref/tags/crewbie/paused")) {
           if (!fixture.paused) throw new GitHubError(404, null);
           return {};
+        }
+        if (path === "/graphql" && body.query.includes("markPullRequestReadyForReview")) {
+          const pr = [...pulls.values()].find((item) => item.node_id === body.variables.id);
+          fixture.readied.push(pr.number); pr.draft = false;
+          return { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } };
+        }
+        if (/\/commits\/[^/]+\/check-runs/.test(path)) return { total_count: fixture.checkRuns.length, check_runs: fixture.checkRuns };
+        if (/\/commits\/[^/]+\/status$/.test(path)) return { statuses: fixture.statuses };
+        const merge = /\/pulls\/(\d+)\/merge$/.exec(path);
+        if (method === "PUT" && merge) {
+          const pr = [...pulls.values()].find((item) => item.number === Number(merge[1]));
+          fixture.merges.push({ number: pr.number, ...body }); pr.merged_at = "now"; pr.state = "closed";
+          return { merged: true };
         }
         if (path === "/graphql") {
           const pr = pulls.get(body.variables.number);
@@ -81,6 +98,11 @@ function githubFixture(input = batch()) {
         if (match) {
           const issue = issues.find((item) => item.number === Number(match[1]));
           if (!match[2]) return structuredClone(issue);
+          if (match[2] === "/comments" && method === "POST") {
+            fixture.posted.push({ issue: issue.number, comment: { user: { type: "User", login: "maintainer" }, created_at: `z${fixture.posted.length}`, updated_at: "posted", body: body.body } });
+            return {};
+          }
+          if (match[2] === "/assignees" && method === "DELETE") { fixture.unassigned.push(body); issue.assignees = []; return issue; }
           if (match[2] === "/assignees") {
             assignments.push(body);
             if (fixture.failAssignment) throw new GitHubError(503, "unknown-outcome");
@@ -445,4 +467,65 @@ test("a replanned batch launches its new issue despite a superseded closed issue
   const launched = fixture.assignments.map((body) => Number(body.agent_assignment.custom_instructions.match(/issue #(\d+)/)[1]));
   assert.ok(launched.includes(1), `revised task issue #1 should launch; launched ${launched}`);
   assert.ok(!launched.includes(99));
+});
+
+test("finished Copilot PRs are marked ready, then merged only after an approver approves the current head with passing checks", async () => {
+  const fixture = githubFixture();
+  await dispatch(fixture.client, config({ maxActive: 1 }));
+  fixture.pulls.set(1, { id: 1001, node_id: "PR_1", number: 101, draft: true, state: "open", mergeable: true, head: { sha: "head-1" }, user: { login: "Copilot" } });
+  fixture.cloudTasks.push({ id: "task-1", state: "completed", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+  await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.deepEqual(fixture.readied, [101]);
+  assert.equal(fixture.merges.length, 0, "Marking a PR ready never merges it in the same pass.");
+  fixture.checkRuns.push(
+    { id: 1, name: "description", status: "completed", conclusion: "failure", app: { slug: "github-actions" } },
+    { id: 2, name: "description", status: "completed", conclusion: "success", app: { slug: "github-actions" } },
+    { id: 3, name: "dispatch", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
+  let work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.match(work[0].reason, /Awaiting a configured approver/);
+  fixture.reviews.push({ user: { type: "User", login: "someone" }, state: "APPROVED", commit_id: "head-1" },
+    { user: { type: "User", login: "maintainer" }, state: "APPROVED", commit_id: "old-head" });
+  work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.equal(fixture.merges.length, 0, "Non-approvers and approvals of an older head never merge.");
+  fixture.reviews.push({ user: { type: "User", login: "maintainer" }, state: "APPROVED", commit_id: "head-1" });
+  fixture.checkRuns.push({ id: 4, name: "build", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
+  work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.equal(fixture.merges.length, 0);
+  assert.match(work[0].reason, /Waiting for check build/);
+  assert.equal((await dispatch(fixture.client, config({ maxActive: 1, merge: { auto: false, method: "merge" } })))[0].reason, "Auto-merge is disabled; merge after review.");
+  fixture.checkRuns[3] = { ...fixture.checkRuns[3], status: "completed", conclusion: "success" };
+  work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.deepEqual(fixture.merges, [{ number: 101, sha: "head-1", merge_method: "merge" }]);
+  assert.equal(work[0].state, "done");
+});
+
+test("an approver's restart label relaunches a verified non-start as a counted attempt; other requests are refused", async () => {
+  const fixture = githubFixture();
+  await dispatch(fixture.client, config());
+  const launchesFor = (issue) => fixture.assignments.filter((body) => body.agent_assignment.custom_instructions.startsWith(`Implement only issue #${issue}.`)).length;
+  fixture.issues[0].assignees = [{ login: "Copilot" }];
+  fixture.extraComments[1] = [{ user: { type: "Bot", login: "Copilot" }, body: "The agent encountered an error and was unable to start working on this issue." }];
+  const request = (issue, login) => {
+    fixture.issues[issue - 1].labels.push("crewbie:restart");
+    (fixture.events[issue] ??= []).push({ event: "labeled", label: { name: "crewbie:restart" }, actor: { type: "User", login } });
+  };
+  request(1, "someone");
+  await dispatch(fixture.client, config());
+  assert.equal(launchesFor(1), 1);
+  assert.ok(!fixture.issues[0].labels.includes("crewbie:restart"), "A refused request is consumed.");
+  assert.match(fixture.posted.at(-1).comment.body, /configured approver/);
+  request(3, "maintainer");
+  await dispatch(fixture.client, config());
+  assert.equal(launchesFor(3), 1, "A running session is never relaunched.");
+  assert.match(fixture.posted.at(-1).comment.body, /not verified as ended/);
+  request(1, "maintainer");
+  const work = await dispatch(fixture.client, config());
+  assert.equal(launchesFor(1), 2);
+  assert.deepEqual(fixture.unassigned, [{ assignees: ["Copilot"] }]);
+  assert.match(fixture.posted.at(-1).comment.body, /attempt 1 of 3[\s\S]*<!-- crewbie-restart:/);
+  assert.ok(!fixture.issues[0].labels.includes("crewbie:restart"));
+  assert.equal(work[0].state, "running");
+  assert.equal([...fixture.launches].filter((ref) => ref.includes("/foundation/1/")).length, 2, "The restart reserves a new ledger entry.");
+  assert.equal((await dispatch(fixture.client, config()))[0].state, "running", "The old start failure no longer describes the relaunched session.");
+  assert.equal(launchesFor(1), 2);
 });

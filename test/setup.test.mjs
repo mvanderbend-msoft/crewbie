@@ -168,6 +168,10 @@ test("generated workflows parse and never execute PR-head code", () => {
   const dispatcher = YAML.parse(files[".github/workflows/crewbie-dispatch.yml"]);
   assert.equal(dispatcher.concurrency["cancel-in-progress"], false);
   assert.equal(dispatcher.jobs.dispatch.steps[0].with.ref, "${{ github.event.repository.default_branch }}");
+  assert.ok(dispatcher.on.pull_request_target.types.includes("review_requested"));
+  const approval = files[".github/workflows/crewbie-approval.yml"];
+  assert.doesNotMatch(approval, /secrets\.|actions\/checkout|npm /, "Review events run the PR's workflow file; it must hold no secrets or code.");
+  assert.deepEqual(YAML.parse(approval).permissions, { actions: "write" });
   const maintenance = files[".github/workflows/crewbie-maintain.yml"];
   assert.match(maintenance, /--no-custom-instructions --disable-builtin-mcps --available-tools --silent/);
   assert.doesNotMatch(maintenance, /--allow-all/);

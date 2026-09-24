@@ -8,7 +8,8 @@ import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { attributePull } from "./attribution.js";
 import { cloudTasks } from "../tracking/native.js";
-import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, reserveLaunch, withDispatchLock, type DiscoverModels } from "./controls.js";
+import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, reserveLaunch, RESTART_LABEL, RESTART_MARKER, withDispatchLock, type DiscoverModels } from "./controls.js";
+import { markReady, mergeApproved } from "./merge.js";
 export { withDispatchLock } from "./controls.js";
 
 export type WorkState = "blocked" | "ready" | "running" | "review" | "failed" | "done";
@@ -111,8 +112,11 @@ export async function linkedPull(client: GitHubApi, repository: string, issue: n
     if (next === after || page === 99) throw new Error("Closing-reference pagination could not complete safely.");
     after = next;
   }
-  if (pulls.length > 1) throw new Error(`Issue #${issue} has multiple candidate agent PRs. Reconcile before dispatch.`);
-  return pulls[0] ?? null;
+  // A restart leaves the earlier closed, unmerged PR linked; the current PR is the one that is open or merged.
+  const current = pulls.length > 1 ? pulls.filter((pr) => pr.state === "open" || pr.merged_at) : pulls;
+  const candidates = current.length || !pulls.length ? current : [pulls.reduce((a, b) => integer(b.number, "PR") > integer(a.number, "PR") ? b : a)];
+  if (candidates.length > 1) throw new Error(`Issue #${issue} has multiple candidate agent PRs. Reconcile before dispatch.`);
+  return candidates[0] ?? null;
 }
 export async function inspectWork(client: GitHubApi, config: Config, knownIssues: readonly number[] = []): Promise<Work[]> {
   const all = await managedIssues(client, config.repository);
@@ -138,15 +142,19 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     const approved = await hasApproval(client, config, issue);
     const number = integer(issue.number, "issue number");
     const claim = await claimed(client, config.repository, number);
-    const pr = claim ? await linkedPull(client, config.repository, number) : null;
+    const comments = claim ? await client.list(`/repos/${config.repository}/issues/${number}/comments`) : [];
+    let pr = claim ? await linkedPull(client, config.repository, number) : null;
+    const restart = [...comments].reverse().find((comment) => String(comment.body ?? "").includes(RESTART_MARKER));
+    // After a restart, an earlier closed, unmerged PR belongs to the ended attempt.
+    if (pr && restart && pr.state === "closed" && !pr.merged_at && String(restart.created_at) > String(pr.created_at)) pr = null;
     let sessionComplete = false;
     let sessionEnded = false;
     let nativeTask: Record<string, unknown> | undefined;
     let state: WorkState = !approved ? "blocked" : claim ? "running" : "ready";
     let reason = !approved ? "Missing current human execution approval." : claim ? "Launch already claimed; awaiting or reconciling its session/PR." : "Approved; dependencies will be checked.";
-    if (claim && !pr && copilotStartFailure(await client.list(`/repos/${config.repository}/issues/${number}/comments`))) {
+    if (claim && !pr && copilotStartFailure(comments)) {
       state = "failed"; sessionEnded = true;
-      reason = "Copilot reported it could not start this task; no session ran, so it does not count as a task attempt. Relaunching still needs a new approved issue.";
+      reason = `Copilot reported it could not start this task; no session ran, so it does not count as a task attempt. Add the ${RESTART_LABEL} label to relaunch it.`;
     } else if (claim && !pr && !copilotAssigned(issue)) {
       state = "blocked"; reason = "Launch was claimed but neither Copilot assignment nor a linked PR is visible. Inspect the outcome before retrying.";
     }
@@ -255,6 +263,16 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
     if (item.state === "review" && item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {
       await attributePull(client, config, item.pull, item.nativeTask, item.metadata.task.owner, item.metadata.task.model, integer(item.issue.number, "execution issue"));
     }
+    if (item.state === "review" && item.sessionComplete && item.pull?.state === "open") {
+      try {
+        if (await markReady(client, item.pull)) { item.reason = "Cloud task completed; Crewbie marked the PR ready for review."; continue; }
+        const outcome = await mergeApproved(client, config, item.pull);
+        item.reason = outcome.reason;
+        if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }
+      } catch (error) {
+        item.reason = `Ready/merge step stopped: ${error instanceof Error ? error.message : "request failed"}`;
+      }
+    }
   }
   const repo = record(await client.request("GET", `/repos/${config.repository}`), "repository");
   const branch = string(repo.default_branch, "default branch");
@@ -262,13 +280,7 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
   const sha = string(record(branchInfo.commit, "commit").sha, "base SHA");
   for (const item of launchable) {
     const issue = integer(item.issue.number, "issue number");
-    const task = item.metadata.task;
-    await verifySources(item.metadata.sources, client, config, ado);
-    const fresh = record(await client.request("GET", `/repos/${config.repository}/issues/${issue}`), "current issue");
-    if (fresh.body !== item.issue.body || fresh.title !== item.issue.title || fresh.state !== "open" || !await hasApproval(client, config, fresh)) {
-      throw new Error(`Issue #${issue} changed during dispatch. Nothing was launched for this issue.`);
-    }
-    await client.request("GET", `/repos/${config.repository}/contents/.github/agents/crewbie-${task.owner}.agent.md?ref=${sha}`);
+    const fresh = await freshLaunchable(client, config, item, sha, ado);
     const allowance = await launchAllowance(client, config, item.metadata, issue);
     if (allowance.blocked) {
       item.state = "blocked"; item.reason = allowance.blocked;
@@ -278,25 +290,99 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
     await reserveLaunch(client, config, item.metadata, issue, sha, true);
     // Atomic remote claim prevents a second workflow from launching the same issue.
     await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/tags/crewbie/claims/${issue}`, sha });
-    try {
-      const assigned = record(await client.request("POST", `/repos/${config.repository}/issues/${issue}/assignees`, {
-        assignees: ["copilot-swe-agent[bot]"],
-        agent_assignment: {
-          target_repo: config.repository, base_branch: branch, custom_agent: `crewbie-${task.owner}`, model: task.model,
-          custom_instructions: `Implement only issue #${issue}. Approved task fingerprint: ${hash(String(fresh.body))}. If the issue changes from this approved scope, stop for reapproval. Approved task:\n${task.body}\nRead your Crewbie charter, shared working rules, configured constitution, shared decisions, hot memory and index first. Link the PR with Closes #${issue}. Identify Specialist: crewbie-${task.owner} in the PR description. Report the memory paths/revisions read. Before handoff, add only non-obvious gotchas (one or two lines each, with a link) to .crewbie/team/${task.owner}/hot.md on this branch, as the shared working rules describe; this is always in scope. Put downstream contracts in the PR Handoff section, not memory. Keep the PR concise: what, why, actual checks and risks. Requested model: ${task.model}; report observed model only with runtime evidence.`,
-        },
-      }), "assignment response");
-      if (!copilotAssigned(assigned)) throw new Error("GitHub did not confirm Copilot among the assignees. The assignment may have been ignored; check push access and cloud-agent entitlement.");
-      if (assigned.number !== issue || assigned.title !== fresh.title || assigned.body !== fresh.body) throw new Error("Issue scope changed during assignment. Inspect the session and obtain reapproval.");
-      item.state = "running"; item.claimed = true; item.reason = "Assignment requested; effective profile/model remain subject to runtime verification.";
-      await setStatus(client, config.repository, fresh, "running");
-    } catch (error) {
-      throw new Error(`Issue #${issue} has a persistent launch claim. Assignment outcome may be unknown; inspect GitHub before any manual retry. ${error instanceof Error ? error.message : "Request failed."}`);
-    }
+    await assign(client, config, item, fresh, branch);
   }
+  await restarts(client, config, work, branch, sha, discoverModels, ado);
   return work;
 }
-
+function labelsOf(issue: Record<string, unknown>): string[] {
+  if (!Array.isArray(issue.labels)) throw new Error("Issue labels are missing.");
+  return issue.labels.map((label) => typeof label === "string" ? label : String(record(label, "label").name));
+}
+async function freshLaunchable(client: GitHubApi, config: Config, item: Work, sha: string, ado?: AdoApi): Promise<Record<string, unknown>> {
+  const issue = integer(item.issue.number, "issue number");
+  await verifySources(item.metadata.sources, client, config, ado);
+  const fresh = record(await client.request("GET", `/repos/${config.repository}/issues/${issue}`), "current issue");
+  if (fresh.body !== item.issue.body || fresh.title !== item.issue.title || fresh.state !== "open" || !await hasApproval(client, config, fresh)) {
+    throw new Error(`Issue #${issue} changed during dispatch. Nothing was launched for this issue.`);
+  }
+  await client.request("GET", `/repos/${config.repository}/contents/.github/agents/crewbie-${item.metadata.task.owner}.agent.md?ref=${sha}`);
+  return fresh;
+}
+async function assign(client: GitHubApi, config: Config, item: Work, fresh: Record<string, unknown>, branch: string): Promise<void> {
+  const issue = integer(fresh.number, "issue number");
+  const task = item.metadata.task;
+  try {
+    const assigned = record(await client.request("POST", `/repos/${config.repository}/issues/${issue}/assignees`, {
+      assignees: ["copilot-swe-agent[bot]"],
+      agent_assignment: {
+        target_repo: config.repository, base_branch: branch, custom_agent: `crewbie-${task.owner}`, model: task.model,
+        custom_instructions: `Implement only issue #${issue}. Approved task fingerprint: ${hash(String(fresh.body))}. If the issue changes from this approved scope, stop for reapproval. Approved task:\n${task.body}\nRead your Crewbie charter, shared working rules, configured constitution, shared decisions, hot memory and index first. Link the PR with Closes #${issue}. Identify Specialist: crewbie-${task.owner} in the PR description. Report the memory paths/revisions read. Before handoff, add only non-obvious gotchas (one or two lines each, with a link) to .crewbie/team/${task.owner}/hot.md on this branch, as the shared working rules describe; this is always in scope. Put downstream contracts in the PR Handoff section, not memory. Keep the PR concise: what, why, actual checks and risks. Requested model: ${task.model}; report observed model only with runtime evidence.`,
+      },
+    }), "assignment response");
+    if (!copilotAssigned(assigned)) throw new Error("GitHub did not confirm Copilot among the assignees. The assignment may have been ignored; check push access and cloud-agent entitlement.");
+    if (assigned.number !== issue || assigned.title !== fresh.title || assigned.body !== fresh.body) throw new Error("Issue scope changed during assignment. Inspect the session and obtain reapproval.");
+    item.state = "running"; item.claimed = true; item.reason = "Assignment requested; effective profile/model remain subject to runtime verification.";
+    await setStatus(client, config.repository, fresh, "running");
+  } catch (error) {
+    throw new Error(`Issue #${issue} has a persistent launch claim. Assignment outcome may be unknown; inspect GitHub before any manual retry. ${error instanceof Error ? error.message : "Request failed."}`);
+  }
+}
+/** Why a restart request cannot relaunch this task, or null when its previous session verifiably ended. */
+export function restartProblem(item: Work): string | null {
+  if (item.issue.state !== "open") return "the issue is closed. Reopen it first if the work is still wanted.";
+  if (!item.approved) return "the issue no longer has current human execution approval.";
+  if (!item.claimed) return "it was never launched; dispatch starts it when it is ready.";
+  if (item.pull?.merged_at) return "its PR is already merged.";
+  if (item.pull?.state === "open") return "it has an open PR; ask for a continuation on that PR instead.";
+  if (item.sessionEnded !== true) return "its previous session is not verified as ended, so a relaunch could run twice.";
+  return null;
+}
+async function restarts(client: GitHubApi, config: Config, work: Work[], branch: string, sha: string, discoverModels: DiscoverModels, ado?: AdoApi): Promise<void> {
+  const prefix = `/repos/${config.repository}`;
+  for (const item of work.filter((item) => labelsOf(item.issue).includes(RESTART_LABEL))) {
+    const issue = integer(item.issue.number, "issue number");
+    const consume = async (message: string) => {
+      await client.request("DELETE", `${prefix}/issues/${issue}/labels/${encodeURIComponent(RESTART_LABEL)}`);
+      await client.request("POST", `${prefix}/issues/${issue}/comments`, { body: message });
+    };
+    const events = await client.list(`${prefix}/issues/${issue}/events`);
+    const labeled = [...events].reverse().find((event) => event.event === "labeled" && event.label !== null && event.label !== undefined
+      && record(event.label, "label").name === RESTART_LABEL);
+    if (!labeled || !isApprover(labeled.actor, config.approvers)) {
+      item.reason = "Restart refused: the label was not applied by a configured approver.";
+      await consume(`Crewbie did not restart this task: the \`${RESTART_LABEL}\` label must be applied by a configured approver.`);
+      continue;
+    }
+    const problem = restartProblem(item);
+    if (problem) {
+      item.reason = `Restart refused: ${problem}`;
+      await consume(`Crewbie did not restart this task: ${problem}`);
+      continue;
+    }
+    const active = work.filter((other) => other.claimed && other.state !== "done" && other.sessionComplete !== true && other.sessionEnded !== true).length;
+    if (active >= config.maxActive) { item.reason = `Restart requested; waiting for a free session slot (${active}/${config.maxActive}).`; continue; }
+    const allowance = await launchAllowance(client, config, item.metadata, issue);
+    if (allowance.blocked) {
+      item.reason = `Restart refused: ${allowance.blocked}`;
+      await consume(`Crewbie did not restart this task: ${allowance.blocked}`);
+      continue;
+    }
+    await checkLaunchModels(await discoverModels(), [item.metadata.task], config);
+    const fresh = await freshLaunchable(client, config, item, sha, ado);
+    const reserved = await reserveLaunch(client, config, item.metadata, issue, sha);
+    await client.request("DELETE", `${prefix}/issues/${issue}/labels/${encodeURIComponent(RESTART_LABEL)}`);
+    await client.request("POST", `${prefix}/issues/${issue}/comments`, {
+      body: `Crewbie restart requested by @${String(record(labeled.actor, "actor").login)}: attempt ${reserved.taskUsed + 1} of ${reserved.maxAttemptsPerTask} for this task. The previous session had ended.\n${RESTART_MARKER}${reserved.taskUsed + 1} -->`,
+    });
+    const copilot = Array.isArray(fresh.assignees) ? fresh.assignees.map((value) => String(record(value, "assignee").login))
+      .filter((login) => ["copilot-swe-agent[bot]", "copilot-swe-agent", "Copilot"].includes(login)) : [];
+    // Copilot starts on a new assignment event; an earlier assignment from the ended attempt would suppress it.
+    if (copilot.length) await client.request("DELETE", `${prefix}/issues/${issue}/assignees`, { assignees: copilot });
+    item.sessionEnded = false;
+    await assign(client, config, item, { ...fresh, assignees: [] }, branch);
+  }
+}
 export async function preflight(client: GitHubApi, config: Config, batchId?: string, discoverModels: DiscoverModels = listCopilotModels, ado?: AdoApi) {
   const work = await inspectWork(client, config);
   const candidates = eligible(work, config.maxActive, batchId);

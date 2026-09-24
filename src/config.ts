@@ -2,11 +2,15 @@ import { readJson, record, string, strings, slug, integer, safePath } from "./co
 
 export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
+export const RESTART_LABEL = "crewbie:restart";
 export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1500 };
 /** `pr` has no evidence-backed default; it is enforced only when a repository sets it explicitly. */
 export type WordLimits = typeof DEFAULT_LIMITS & { pr?: number };
 export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
+export type MergeMethod = "merge" | "squash" | "rebase";
+/** A configured approver's approval of the current head is the human gate; Crewbie merges once checks pass. */
+export const DEFAULT_MERGE: { auto: boolean; method: MergeMethod } = { auto: true, method: "merge" };
 export function modelProfile(value: unknown): ModelProfile {
   if (value !== "economy" && value !== "balanced" && value !== "quality") throw new Error("Model profile must be economy, balanced or quality.");
   return value;
@@ -24,7 +28,9 @@ export interface Config {
   planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
   modelProfile?: ModelProfile;
   execution?: typeof DEFAULT_EXECUTION_LIMITS;
+  merge?: typeof DEFAULT_MERGE;
 }
+export function mergeFor(config: Config): typeof DEFAULT_MERGE { return config.merge ?? DEFAULT_MERGE; }
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
 export function isRoleContextPath(path: string): boolean {
   return /^(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+\.md$/i.test(path)
@@ -103,6 +109,14 @@ export function parseConfig(value: unknown): Config {
     planning = { enabled: value.enabled, model, ...(value.executeOnMerge === undefined ? {} : { executeOnMerge: value.executeOnMerge }) };
   }
   const execution = data.execution === undefined ? undefined : record(data.execution, "execution limits");
+  let merge: Config["merge"];
+  if (data.merge !== undefined) {
+    const value = record(data.merge, "merge");
+    if (typeof value.auto !== "boolean") throw new Error("merge.auto must be true or false.");
+    const method = value.method ?? DEFAULT_MERGE.method;
+    if (method !== "merge" && method !== "squash" && method !== "rebase") throw new Error("merge.method must be merge, squash or rebase.");
+    merge = { auto: value.auto, method };
+  }
   return {
     schemaVersion: 1, repository, approvers, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),
@@ -113,6 +127,7 @@ export function parseConfig(value: unknown): Config {
       maxLaunchesPerBatch: integer(execution.maxLaunchesPerBatch, "maximum launches per batch", 1, 1000),
       maxAttemptsPerTask: integer(execution.maxAttemptsPerTask, "maximum attempts per task", 1, 100),
     } }),
+    ...(merge ? { merge } : {}),
   };
 }
 export async function loadConfig(root: string): Promise<Config> {

@@ -783,14 +783,41 @@ is verified failed, timed out or cancelled also frees capacity; while its PR is
 open the slot stays reserved for an authorized continuation. When Copilot itself
 comments that it was unable to start working on the issue, no session ran:
 capacity is freed and that sole launch does not count toward attempt or batch
-allowances. The claim remains, so a relaunch still needs a new approved issue
-(for example a re-plan). Closed-unmerged work stays failed,
+allowances. The claim remains; a configured approver relaunches it with the
+`crewbie:restart` label (see below). Closed-unmerged work stays failed,
 retains its claim, and never satisfies a prerequisite. Missing, ambiguous, active or
 inaccessible task telemetry retains capacity and reports why. A draft PR alone
 is not proof that a session has finished.
 An explicitly approved `kind: "review"` task can depend on completed sessions
 with linked PRs; default implementation tasks still require merged prerequisites.
 Changing a task's kind invalidates its approval like other scope changes.
+
+### Restart, ready for review and merge on approval
+
+- **Restart.** A configured approver adds `crewbie:restart` to a task issue whose
+  previous session verifiably ended: Copilot reported it could not start, or its
+  task failed, timed out or was cancelled and its PR is closed. Dispatch, under
+  the lock, reserves a new ledger entry that counts as an attempt, comments the
+  attempt number with a `crewbie-restart` marker, reassigns Copilot and removes
+  the label. It refuses (and explains in a comment) for other labellers, closed
+  or unapproved issues, open PRs (ask for a continuation instead), sessions not
+  verified as ended and exhausted allowances. Without a free slot it waits.
+- **Ready for review.** Copilot requests your review when its session finishes;
+  that triggers dispatch, which restores the specialist's description and then
+  marks the draft PR ready, so the description check runs on the final body. If
+  that trigger waits for workflow approval (Copilot-actor runs can require it; see
+  *Settings → Copilot → Cloud agent → Actions workflow approval*), the hourly
+  reconcile does it instead.
+- **Merge on approval.** `crewbie-approval.yml` runs on an approving review. It
+  runs from the PR's merge ref, so it holds no Crewbie secrets and only asks the
+  default-branch dispatch workflow to reconcile. Dispatch merges when a configured
+  approver's latest review approves the current head, no approver requests changes,
+  every check on that head passed (the newest run of each check counts), and GitHub
+  reports no conflict. It merges with the head SHA pinned and never bypasses branch
+  protection. If a check is still running, the next reconcile merges. Set
+  `"merge": { "auto": false }` to merge manually; `merge.method` accepts `merge`
+  (default), `squash` or `rebase`. When branch protection requires approvals, your
+  approval of a Copilot PR you requested does not count; GitHub then refuses the merge.
 
 ## Nightly learning and bounded history
 

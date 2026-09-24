@@ -313,7 +313,10 @@ Both the reviewer and merger must be configured human approvers. Stale approvals
 changed source requirements and clarification-only plans cannot start coding.
 Unlabeled issues and labels applied by unapproved actors do not trigger analysis.
 Planning uses the named coordinator's supplied context in a tool-free Copilot CLI
-job, not a native cloud implementation session. Application PR merges stay yours.
+job, not a native cloud implementation session. Finished implementation PRs are
+marked ready for review automatically; your approval of the current head merges
+them once every check passes (`merge.auto`, default on). A failed start or session
+is relaunched by adding `crewbie:restart`.
 
 Without `executeOnMerge`, the manual team-installation and batch-approval path
 below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)
