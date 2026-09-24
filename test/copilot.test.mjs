@@ -15,14 +15,31 @@ function environment(t, key, value) {
   t.after(() => { if (before === undefined) delete process.env[key]; else process.env[key] = before; });
 }
 
+function fakeSession(reply, onSend = () => {}) {
+  let handler;
+  return {
+    on: (listener) => { handler = listener; return () => { handler = undefined; }; },
+    send: async (request) => {
+      onSend(request);
+      setImmediate(async () => {
+        try {
+          for (const event of await reply()) handler?.(event);
+        } catch (error) { handler?.({ type: "session.error", data: { message: error.message } }); }
+      });
+      return "message-id";
+    },
+  };
+}
+const answer = (content) => async () => [
+  ...(content === undefined ? [] : [{ type: "assistant.message", data: { content } }]),
+  { type: "session.idle", data: {} },
+];
+
 function runtime(overrides = {}) {
   return {
     start: async () => {}, stop: async () => [], forceStop: async () => {},
     listModels: async () => [],
-    createSession: async () => ({
-      sendAndWait: async () => ({ data: { content: '{"summary":"complete"}' } }),
-      disconnect: async () => {},
-    }),
+    createSession: async () => ({ ...fakeSession(answer('{"summary":"complete"}')), disconnect: async () => {} }),
     ...overrides,
   };
 }
@@ -50,18 +67,25 @@ test("assessment sends the explicit prompt/model with no tools and isolated conf
         assert.deepEqual(session.mcpServers, {});
         for (const key of ["enableConfigDiscovery", "enableSkills", "enableFileHooks", "enableOnDemandInstructionDiscovery", "enableHostGitOperations", "enableSessionStore"]) assert.equal(session[key], false);
         assert.equal(session.onPermissionRequest({ kind: "shell" }).kind, "reject");
+        assert.equal(session.streaming, true);
         return {
-          sendAndWait: async (request, timeout) => {
-            assert.equal(request.prompt, 'Prompt with "quotes", & shell characters and\nnewlines');
-            assert.equal(timeout, 300_000);
-            return { data: { content: '{"summary":"complete"}' } };
-          },
+          ...fakeSession(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return [
+              { type: "assistant.reasoning_delta", data: { deltaContent: "think" } },
+              { type: "assistant.message_delta", data: { deltaContent: '{"summary"' } },
+              ...await answer('{"summary":"complete"}')(),
+            ];
+          }, (request) => assert.equal(request.prompt, 'Prompt with "quotes", & shell characters and\nnewlines')),
           disconnect: async () => { disconnected = true; },
         };
       },
     });
   }, () => "fixture-only");
-  assert.equal(await adapter.analyze('Prompt with "quotes", & shell characters and\nnewlines', "chosen-model"), '{"summary":"complete"}');
+  const activity = { reasoning: 0, output: 0 };
+  assert.equal(await adapter.analyze('Prompt with "quotes", & shell characters and\nnewlines', "chosen-model",
+    (kind, size) => { if (kind !== "other") activity[kind] += size; }), '{"summary":"complete"}');
+  assert.deepEqual(activity, { reasoning: 5, output: 10 });
   assert.ok(disconnected && stopped);
   await assert.rejects(access(options.workingDirectory), /ENOENT/);
 });
@@ -80,22 +104,24 @@ test("model catalogue excludes auto and policy-disabled models and preserves bil
   await assert.rejects(copilotAccess(() => runtime(), () => "fixture-only").listModels(), /No enabled models/);
 });
 
-test("empty responses, session errors and timeouts fail explicitly and clean up", async () => {
-  for (const sendAndWait of [
-    async () => undefined,
-    async () => ({ data: { content: "   " } }),
+test("empty responses, session errors and send failures fail explicitly and clean up", async () => {
+  for (const reply of [
+    answer(undefined),
+    answer("   "),
     async () => { throw new Error("Session error: model unavailable"); },
-    async () => { throw new Error("Timeout waiting for session idle"); },
+    "send",
   ]) {
     let directory, disconnected = false, stopped = false;
     const adapter = copilotAccess((options) => {
       directory = options.workingDirectory;
       return runtime({
         stop: async () => { stopped = true; return []; },
-        createSession: async () => ({ sendAndWait, disconnect: async () => { disconnected = true; } }),
+        createSession: async () => reply === "send"
+          ? { on: () => () => {}, send: async () => { throw new Error("Connection closed"); }, disconnect: async () => { disconnected = true; } }
+          : { ...fakeSession(reply), disconnect: async () => { disconnected = true; } },
       });
     }, () => "fixture-only");
-    await assert.rejects(adapter.analyze("Test", "chosen-model"), /no assessment|model unavailable|Timeout/);
+    await assert.rejects(adapter.analyze("Test", "chosen-model"), /no assessment|model unavailable|Connection closed/);
     assert.ok(disconnected && stopped);
     await assert.rejects(access(directory), /ENOENT/);
   }

@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.12 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.13 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -271,13 +271,16 @@ in a temporary working directory and isolated `COPILOT_HOME`, using environment
 credentials or authenticated GitHub CLI. Runtime configuration discovery, skills,
 file hooks, git context and shared session storage are disabled; tool permissions
 are denied. Init waits for a completed assistant response rather than parsing
-process stdout. Startup/model discovery have 30-second timeouts and assessment
-has a five-minute timeout. Empty or malformed JSON produces an explicit error;
+process stdout. Startup/model discovery have 30-second timeouts. Assessment has
+no timeout, because no evidence supports a particular duration; it ends when the
+session completes or reports an error, or when you press Ctrl+C. Empty or malformed JSON produces an explicit error;
 check authentication/model access for runtime errors, or retry/narrow the context
 for incomplete output.
-While waiting, init reports elapsed time every 15 seconds and announces validation
-when the response arrives. This heartbeat does not claim token-level progress or
-predict completion time.
+While waiting, init reports elapsed time every 15 seconds, plus when the model
+last streamed reasoning or output and how many characters it has produced. Steady
+activity means the model is still working; a long silence points to a stalled
+session. This heartbeat does not predict completion time. Init also shows the
+prompt size before sending it. Available from alpha.13; earlier releases stopped after five minutes.
 
 `contextPaths` is a reusable-guidance list, not a list of implementation targets.
 The prompt and validator share the eligible inspected, unredacted Markdown paths.

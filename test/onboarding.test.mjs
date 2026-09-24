@@ -304,7 +304,7 @@ test("progress timers stop after provider failures as well as successful respons
     report: (message) => messages.push(message),
   }), /Provider unavailable/);
   t.mock.timers.tick(30_000);
-  assert.equal(messages.length, 0);
+  assert.equal(messages.filter((message) => message.includes("Still analysing")).length, 0);
 });
 
 test("oversized context lists fail before offering an impossible repair", async (t) => {

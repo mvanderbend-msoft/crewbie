@@ -5,7 +5,7 @@ import { redact } from "./inventory.js";
 import { profile } from "./templates.js";
 import { instructionFile, validateInstructionScope } from "./instruction-quality.js";
 import { adoptedProfile } from "./agents.js";
-import { analyzeWithCopilot, explicitModel, type Analyze, type ModelChoice } from "./copilot.js";
+import { analyzeWithCopilot, explicitModel, type Activity, type Analyze, type ModelChoice } from "./copilot.js";
 export { analyzeWithCopilot, explicitModel, type Analyze } from "./copilot.js";
 
 export interface SetupReview {
@@ -235,11 +235,24 @@ export async function proposeSetup(
   let answers = description;
   for (let attempt = 0; attempt < 6; attempt++) {
     const started = Date.now();
-    const waiting = setInterval(() => io.report(`  Still analysing... ${Math.floor((Date.now() - started) / 1000)}s elapsed. No installation changes.`), 15_000);
+    const prompt = setupPrompt(assessment, answers, io.models);
+    const seen = { at: 0, reasoning: 0, output: 0, events: 0 };
+    const activity: Activity = (kind, size) => {
+      seen.at = Date.now(); seen.events++;
+      if (kind === "reasoning") seen.reasoning += size;
+      else if (kind === "output") seen.output += size;
+    };
+    io.report(`  Prompt: ${Math.ceil(Buffer.byteLength(prompt) / 1024)} KB.`);
+    const waiting = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - started) / 1000);
+      const state = seen.at === 0 ? "no model activity yet"
+        : `model active ${Math.floor((Date.now() - seen.at) / 1000)}s ago; ${seen.reasoning.toLocaleString("en-US")} reasoning and ${seen.output.toLocaleString("en-US")} output characters`;
+      io.report(`  Still analysing... ${elapsed}s elapsed; ${state}. No installation changes.`);
+    }, 15_000);
     waiting.unref();
     let output: string;
     try {
-      output = await (io.analyze ?? analyzeWithCopilot)(setupPrompt(assessment, answers, io.models), explicitModel(model));
+      output = await (io.analyze ?? analyzeWithCopilot)(prompt, explicitModel(model), activity);
     } finally { clearInterval(waiting); }
     io.report(`Copilot response received after ${Math.floor((Date.now() - started) / 1000)}s; validating the assessment and team.`);
     let proposal: SetupProposal;
