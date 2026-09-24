@@ -28,12 +28,9 @@ export async function assess(root: string): Promise<Assessment> {
     encoding: "utf8", maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
   });
   const paths = [...new Set(output.split("\0").filter(Boolean))].sort();
-  const guidance = paths.filter((path) => instructionFile(path) || /(^|\/)CONTRIBUTING\.md$/.test(path));
-  const build = paths.filter((path) => /(^|\/)(package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml|Makefile)$|\.(sln|csproj)$/.test(path));
-  const tests = paths.filter((path) => /(^|\/)(test|tests|__tests__)\//.test(path) || /\.(test|spec)\./.test(path));
+  const guidance = paths.filter(instructionFile);
   const ci = paths.filter((path) => path.startsWith(".github/workflows/") && /\.ya?ml$/.test(path));
   const existingConstitution = paths.find((path) => /(^|\/)constitution\.md$/i.test(path)) ?? null;
-  const decisions = paths.filter((path) => /(^|\/)(adr|adrs|decisions)(\/|\.md$)/i.test(path));
   const installedText = await optionalText(await safePath(root, ".crewbie/config.json"));
   const installed = installedText === null ? null : parseConfig(JSON.parse(installedText) as unknown);
   const team = await assessTeam(root, paths, installed?.roles ?? []);
@@ -42,10 +39,8 @@ export async function assess(root: string): Promise<Assessment> {
     ...team.suggestions.filter(({ role }) => !installed?.roles.some((existing) => existing.id === role.id)).map(({ role }) => role),
   ];
   const findings: Assessment["findings"] = [
-    { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "First check whether existing documentation is enough; propose agent-specific guidance only for useful missing context." },
-    { area: "Build and tests", status: build.length ? "unknown" : "gap", evidence: [...build, ...tests.slice(0, 4), ...ci].slice(0, 12), detail: "File inspection does not prove commands work. Ask permission before running project scripts." },
-    { area: "Code structure", status: "unknown", evidence: paths.filter((path) => /(^|\/)(src|app|lib)\//.test(path)).slice(0, 8), detail: "Read representative implementations to distinguish intentional patterns from legacy exceptions." },
-    { area: "Decisions", status: decisions.length || existingConstitution ? "ready" : "gap", evidence: [...(existingConstitution ? [existingConstitution] : []), ...decisions].slice(0, 10), detail: "Reuse existing decisions. Observed code is evidence, not automatically approved policy." },
+    { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "Propose agent-specific guidance only for useful missing context." },
+    { area: "Decisions", status: existingConstitution ? "ready" : "gap", evidence: existingConstitution ? [existingConstitution] : [], detail: "Reuse the existing constitution." },
     { area: "Cloud execution", status: "unknown", evidence: ci.slice(0, 5), detail: "Run doctor with a selected repository and specialist. Account permissions and model support require separate verification." },
   ];
   const instructionQuality = await assessInstructions(root, paths);

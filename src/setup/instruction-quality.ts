@@ -24,6 +24,10 @@ export interface InstructionQuality {
 export function instructionFile(path: string): boolean {
   return path === ".crewbie/instructions.md" || /(^|\/)(AGENTS\.md|CLAUDE\.md|GEMINI\.md|copilot-instructions\.md)$|\.instructions\.md$|(^|\/)\.github\/agents\/[^/]+\.agent\.md$|(^|\/)\.claude\/agents\/[^/]+\.md$/.test(path);
 }
+// AI guidance that setup may rewrite; Crewbie-managed agents and all non-AI files are excluded.
+export function editableGuidance(path: string): boolean {
+  return /^(?:(?:[a-zA-Z0-9._-]+\/)*(?:AGENTS|CLAUDE|GEMINI)\.md|\.github\/copilot-instructions\.md|\.github\/instructions\/[a-z0-9._/-]+\.instructions\.md|\.github\/agents\/(?!crewbie-)[a-z0-9._-]+\.agent\.md|\.claude\/agents\/[a-z0-9._-]+\.md)$/.test(path);
+}
 export function validateInstructionScope(path: string, content: string): void {
   if (!path.startsWith(".github/instructions/") || !path.endsWith(".instructions.md")) return;
   const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);

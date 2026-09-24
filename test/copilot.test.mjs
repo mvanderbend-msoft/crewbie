@@ -151,7 +151,7 @@ test("real SDK assessment survives local context-link repair and saves the revie
   const root = await fixture(t, { "AGENTS.md": "Retain loaded catalogue entries.", "src/catalogue.ts": "export const pageSize = 20;" });
   const review = JSON.stringify({
     summary: "Use a catalogue specialist.",
-    findings: ["instructions", "mcp", "agents", "constitution", "project"].map((area) => ({
+    findings: ["instructions", "mcp", "agents", "constitution"].map((area) => ({
       area, path: area === "instructions" ? "AGENTS.md" : null,
       assessment: `Reviewed ${area}.`, recommendation: "Retain useful guidance.", action: "retain",
     })),

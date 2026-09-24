@@ -53,8 +53,8 @@ function response(assessment, overrides = {}) {
   return {
     summary: "Use a catalogue specialist, reusing current project guidance.",
     findings: [
-      ...["instructions", "mcp", "agents", "constitution", "project"].map((area) => ({ area, path: null, assessment: `Reviewed ${area}.`, recommendation: "Preserve useful existing guidance.", action: "retain" })),
-      ...assessment.inventory.files.filter((file) => file.kind !== "project").map((file) => ({ area: file.kind, path: file.path, assessment: "Existing project constraint.", recommendation: "Reuse rather than duplicate.", action: "retain" })),
+      ...["instructions", "mcp", "agents", "constitution"].map((area) => ({ area, path: null, assessment: `Reviewed ${area}.`, recommendation: "Preserve useful existing guidance.", action: "retain" })),
+      ...assessment.inventory.files.filter((file) => file.kind !== "archive").map((file) => ({ area: file.kind, path: file.path, assessment: "Existing project constraint.", recommendation: "Reuse rather than duplicate.", action: "retain" })),
       ...assessment.inventory.mcp.map((file) => ({ area: "mcp", path: file.path, assessment: "Configured servers; connectivity unverified.", recommendation: "Retain existing integrations.", action: "retain" })),
     ],
     questions: [],
@@ -220,14 +220,15 @@ test("prompt and parser share the exact eligible Markdown context list", async (
   }));
   const prompt = setupPrompt(report, "");
   const allowed = JSON.parse(prompt.match(/allowedContextPaths: (\[[\s\S]*?\])/)[1]);
-  assert.deepEqual(new Set(allowed), new Set(["AGENTS.md", "docs/decisions/Team Guide.MD"]));
+  assert.deepEqual(new Set(allowed), new Set(["AGENTS.md"]), "Project docs such as ADRs are not AI guidance context.");
   assert.match(prompt, /at most ten entries/);
   assert.match(prompt, /Source code and MCP configuration.*NOT contextPaths/);
   const review = response(report);
   review.roles[0].contextPaths = allowed;
   const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
   assert.deepEqual(proposal.config.roles[0].contextPaths, allowed);
-  assert.match(profile(proposal.config.roles[0], proposal.config), /docs\/decisions\/Team Guide.MD/);
+  assert.match(profile(proposal.config.roles[0], proposal.config), /Reuse existing guidance: `AGENTS\.md`/);
+  assert.doesNotMatch(profile(proposal.config.roles[0], proposal.config), /Team Guide/);
 });
 
 test("unsafe, invented, omitted and redacted context paths cannot be normalized into accepted links", async (t) => {
@@ -293,6 +294,24 @@ test("removing rejected links requires explicit consent and cancelling leaves no
     }
     assert.equal(calls, 1);
   }
+});
+
+test("edits outside AI guidance become deferred recommendations, and the prompt forbids pointers to auto-loaded scoped files", async (t) => {
+  const report = await assess(await fixture(t, { "AGENTS.md": "Keep catalogue IDs stable." }));
+  const prompt = setupPrompt(report, "Catalogue");
+  assert.match(prompt, /applyTo globs.*Never add pointers/s);
+  assert.match(prompt, /NOT supplied; do not review, request, or propose changes/);
+  const base = response(report);
+  const review = response(report, {
+    findings: [...base.findings, { area: "project", path: "README.md", assessment: "Stale setup notes.", recommendation: "Rewrite README.", action: "edit", editPaths: ["README.md"] }],
+    instructions: [{ path: "README.md", content: "# New readme\n", reason: "Refresh." }],
+  });
+  const proposal = parseSetupReview(JSON.stringify(review), report, "", "model");
+  assert.deepEqual(proposal.instructions, []);
+  const deferred = proposal.review.findings.find((finding) => finding.path === "README.md");
+  assert.equal(deferred.action, "defer");
+  assert.equal(deferred.editPaths, undefined);
+  assert.match(deferred.deferReason, /outside the AI guidance/);
 });
 
 test("progress timers stop after provider failures as well as successful responses", async (t) => {

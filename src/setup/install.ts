@@ -3,7 +3,7 @@ import { agentPrompt, bounded, errorCode, hash, json, matchesTextHash, optionalT
 import { agentArchivePath, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
 import { roleProfile } from "./agents.js";
-import { validateInstructionScope } from "./instruction-quality.js";
+import { editableGuidance, validateInstructionScope } from "./instruction-quality.js";
 
 async function hasPrTemplate(root: string): Promise<boolean> {
   for (const directory of ["", ".github", "docs"]) {
@@ -118,7 +118,7 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
       const instruction = record(raw, "instruction proposal");
       const path = string(instruction.path, "instruction path");
       if (config.roles.some((role) => role.sourceAgent === path)) throw new Error(`Cannot both archive and rewrite original agent ${path}. Propose additional guidance on its Crewbie role instead.`);
-      if (!/^(?:(?:[a-zA-Z0-9._-]+\/)*(?:AGENTS|CLAUDE|GEMINI)\.md|\.github\/copilot-instructions\.md|\.github\/instructions\/[a-z0-9._/-]+\.instructions\.md|\.github\/agents\/(?!crewbie-)[a-z0-9._-]+\.agent\.md|\.claude\/agents\/[a-z0-9._-]+\.md)$/.test(path)) {
+      if (!editableGuidance(path)) {
         throw new Error(`Unsupported instruction path: ${path}`);
       }
       const content = string(instruction.content, "instruction content");

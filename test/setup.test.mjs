@@ -4,23 +4,27 @@ import { readFile, writeFile, mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import YAML from "yaml";
 import { assess } from "../dist/setup/assessment.js";
+import { setupPrompt } from "../dist/setup/onboarding.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { workflows, profile, SHARED_INSTRUCTIONS, SKILL } from "../dist/setup/templates.js";
 import { agentPrompt, bounded, hash, safePath } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
 import { fixture, config } from "./helpers.mjs";
 
-test("brownfield assessment reuses guidance, reports unverified builds, and executes no scripts", async (t) => {
+test("brownfield assessment reuses guidance, sends no project files to the LLM, and executes no scripts", async (t) => {
   const root = await fixture(t, {
     "package.json": JSON.stringify({ scripts: { test: "MUST-NOT-EXECUTE" } }),
+    "README.md": "PROJECT-README-MUST-NOT-BE-SENT",
     "AGENTS.md": "Preserve existing API behavior.",
     ".specify/memory/constitution.md": "Existing approved principles.",
-    "src/Button.tsx": "export const Button = 1;",
+    "src/Button.tsx": "export const Button = 'SOURCE-MUST-NOT-BE-SENT';",
     "test/api.test.ts": "test",
   });
   const report = await assess(root);
   assert.equal(report.config.constitution, ".specify/memory/constitution.md");
-  assert.equal(report.findings.find((f) => f.area === "Build and tests").status, "unknown");
+  assert.deepEqual(report.inventory.files.map((file) => file.path).sort(), [".specify/memory/constitution.md", "AGENTS.md"]);
+  assert.ok(!report.findings.some((f) => ["Build and tests", "Code structure"].includes(f.area)));
+  assert.doesNotMatch(setupPrompt(report, ""), /MUST-NOT-BE-SENT|MUST-NOT-EXECUTE/);
   assert.ok(report.config.roles.some((role) => role.id === "frontend"));
   assert.equal(report.constitutionText, null);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Preserve existing API behavior.");
@@ -36,8 +40,7 @@ test("full-stack assessment includes nested source evidence and keeps planning c
   const root = await fixture(t, { "frontend/src/App.tsx": "export const App = 1;", "backend/src/main/java/App.java": "class App {}" });
   const report = await assess(root);
   assert.deepEqual(report.config.roles.map((role) => role.id), ["frontend", "backend", "tester", "reviewer"]);
-  assert.deepEqual(report.findings.find((finding) => finding.area === "Code structure").evidence,
-    ["backend/src/main/java/App.java", "frontend/src/App.tsx"]);
+  assert.deepEqual(report.inventory.files, []);
   assert.match(profile({ id: "coordinator", purpose: "Coordinate.", model: "" }, config()), /requirement inputs only/);
   assert.match(SKILL, /ownership-manifest hashes are not\s+read revisions/);
 });

@@ -6,7 +6,7 @@ import { instructionFile } from "./instruction-quality.js";
 
 export interface Inventory {
   mode: "brownfield" | "greenfield";
-  files: { path: string; kind: "instructions" | "agents" | "project" | "constitution"; content: string; beforeHash: string; redacted: boolean }[];
+  files: { path: string; kind: "instructions" | "agents" | "archive" | "constitution"; content: string; beforeHash: string; redacted: boolean }[];
   mcp: { path: string; servers: { name: string; transport: string; executable: string | null; credentials: string[] }[] }[];
   omitted: { path: string; reason: string }[];
   scope: string;
@@ -24,12 +24,11 @@ export async function inventory(root: string, paths: string[]): Promise<Inventor
     && /\.(?:[cm]?[jt]sx?|py|go|rs|java|cs|rb|php|swift|kt|tf|bicep|vue|svelte)$/.test(path));
   const result: Inventory = {
     mode: implementation.length ? "brownfield" : "greenfield", files: [], mcp: [], omitted: [],
-    scope: "Repository-visible files only, bounded to 256 KB of text. Ignored files and personal/global MCP settings are not read. MCP configurations are inspected, never launched; arguments, URLs, headers and credential values are withheld. Builds and server availability are unverified.",
+    scope: "AI guidance only: agent instructions, custom agents, constitution and MCP metadata, bounded to 256 KB of text. Application code, READMEs, manifests and other project files are not read. Ignored files and personal/global MCP settings are not read. MCP configurations are inspected, never launched; arguments, URLs, headers and credential values are withheld. Builds and server availability are unverified.",
   };
   const mcpPaths = paths.filter((path) => /(^|\/)(?:mcp\.json|mcp-config\.json|\.mcp\.json)$/.test(path) || path === ".vscode/settings.json");
-  const guidance = paths.filter((path) => instructionFile(path) || /^\.crewbie\/agent-archive\/(?:github|claude)\/agents\/.*\.md$/.test(path) || /(^|\/)(?:constitution\.md|CONTRIBUTING\.md)$|(^|\/)(?:adr|adrs|decisions)\/.*\.md$/i.test(path));
-  const project = paths.filter((path) => /(^|\/)(?:README\.md|(?:requirements|spec|prd)\.md|package\.json|pyproject\.toml|go\.mod|Cargo\.toml|pom\.xml)$/i.test(path));
-  const candidates = [...new Set([...guidance, ...mcpPaths, ...project, ...implementation.slice(0, 8)])];
+  const guidance = paths.filter((path) => instructionFile(path) || /^\.crewbie\/agent-archive\/(?:github|claude)\/agents\/.*\.md$/.test(path) || /(^|\/)constitution\.md$/i.test(path));
+  const candidates = [...new Set([...guidance, ...mcpPaths])];
   let remaining = 256_000;
   for (const path of candidates) {
     const absolute = await safePath(root, path);
@@ -69,10 +68,9 @@ export async function inventory(root: string, paths: string[]): Promise<Inventor
     }
     const safe = redact(content);
     result.files.push({
-      path, kind: /(^|\/)constitution\.md$/i.test(path) ? "constitution" : /(^|\/)(?:\.github|\.claude)\/agents\//.test(path) ? "agents" : instructionFile(path) ? "instructions" : "project",
+      path, kind: /(^|\/)constitution\.md$/i.test(path) ? "constitution" : path.startsWith(".crewbie/agent-archive/") ? "archive" : /(^|\/)(?:\.github|\.claude)\/agents\//.test(path) ? "agents" : "instructions",
       content: safe, beforeHash: hash(content), redacted: safe !== content,
     });
   }
-  for (const path of implementation.slice(8)) result.omitted.push({ path, reason: "Representative implementation sample only." });
   return result;
 }

@@ -91,7 +91,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.13 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.14 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -248,8 +248,15 @@ approval, execution or exit-code semantics.
 Use `init --proposal FILE --json` for the machine-readable installation preview.
 
 Init includes every inventoried instruction, custom-agent and MCP configuration
-path in its assessment. Text inspection has a 256 KB total/64 KB per-file budget
-and representative implementation sampling. Omissions are explicit, not a claim
+path in its assessment. The LLM receives only AI guidance: instructions, custom
+agents (including archives), the constitution and sanitized MCP metadata.
+Application code, READMEs, manifests, ADRs and other project files are not sent,
+so the assessment reviews and edits AI guidance only. Proposed edits outside the
+supported guidance paths are shown as deferred recommendations rather than
+failing installation (from alpha.14; earlier releases also sent
+READMEs, manifests and sampled source files). The static team hints above still use file paths and
+bounded manifest detection. Text inspection has a 256 KB total/64 KB per-file
+budget. Omissions are explicit, not a claim
 of complete semantic coverage. MCP JSON/JSONC files expose only server names,
 transport, executable basename and environment-variable names; values, arguments,
 headers and URLs are withheld. Servers are not started or connectivity-tested.
