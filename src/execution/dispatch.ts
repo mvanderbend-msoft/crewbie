@@ -125,7 +125,13 @@ export async function linkedPull(client: GitHubApi, repository: string, issue: n
   }
   // A restart leaves the earlier closed, unmerged PR linked; the current PR is the one that is open or merged.
   const current = pulls.length > 1 ? pulls.filter((pr) => pr.state === "open" || pr.merged_at) : pulls;
-  const candidates = current.length || !pulls.length ? current : [pulls.reduce((a, b) => integer(b.number, "PR") > integer(a.number, "PR") ? b : a)];
+  let candidates = current.length || !pulls.length ? current : [pulls.reduce((a, b) => integer(b.number, "PR") > integer(a.number, "PR") ? b : a)];
+  // Another task's PR can mention this issue with a closing keyword (for example a review quoting "closes #61"). The earliest
+  // merged PR completed the issue; among open PRs, the one titled for this issue is the task's own.
+  const merged = candidates.filter((pr) => pr.merged_at).sort((a, b) => String(a.merged_at).localeCompare(String(b.merged_at)));
+  if (candidates.length > 1 && merged.length) candidates = [merged[0]!];
+  const titled = candidates.filter((pr) => new RegExp(`#${integer(issue, "issue number")}(?!\\d)`).test(String(pr.title ?? "")));
+  if (candidates.length > 1 && titled.length === 1) candidates = titled;
   if (candidates.length > 1) throw new Error(`Issue #${issue} has multiple candidate agent PRs. Reconcile before dispatch.`);
   return candidates[0] ?? null;
 }

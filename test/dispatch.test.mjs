@@ -478,6 +478,22 @@ test("closing-reference reads paginate, exclude other repositories and reject pa
   await assert.rejects(linkedPull({ request: async () => ({ errors: [{ message: "Denied" }], data: {} }) }, "example/project", 1), /could not establish/);
 });
 
+test("another task's PR that merely mentions an issue with a closing keyword does not make its link ambiguous", async () => {
+  const linked = (prs) => ({ async request(method, path) {
+    if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
+      nodes: prs.map((pr) => ({ number: pr.number, repository: { nameWithOwner: "example/project" } })), pageInfo: { hasNextPage: false, endCursor: null },
+    } } } } };
+    return prs.find((pr) => path.endsWith(`/pulls/${pr.number}`));
+  } });
+  const own = { number: 68, state: "closed", merged_at: "2026-09-25T10:48:10Z", title: "Add promo entry", user: { login: "Copilot" } };
+  const review = { number: 69, state: "open", merged_at: null, title: "Review promo interaction accessibility (issue #63)", user: { login: "Copilot" } };
+  assert.equal((await linkedPull(linked([own, review]), "example/project", 61)).number, 68);
+  assert.equal((await linkedPull(linked([{ ...own, merged_at: "2026-09-26T00:00:00Z" }, { ...review, merged_at: "2026-09-25T11:00:00Z", state: "closed" }]), "example/project", 61)).number, 69);
+  const open = { ...own, state: "open", merged_at: null, title: "Integrate promo entry (issue #61)" };
+  assert.equal((await linkedPull(linked([open, review]), "example/project", 61)).number, 68);
+  await assert.rejects(linkedPull(linked([{ ...open, title: "Promo" }, review]), "example/project", 61), /multiple candidate agent PRs/);
+});
+
 test("dispatch lock waits for a concurrent holder and reports a stuck lock", async () => {
   const { withDispatchLock, LOCK_WAIT } = await import("../dist/execution/controls.js");
   const saved = { ...LOCK_WAIT };
