@@ -973,11 +973,12 @@ indexes and shared decisions have no word limit. Legacy `charter`, `index` and
 There is no silent truncation. Oversized external PR feedback is explicitly
 omitted with a source link, not partially presented as a complete summary.
 
-The report workflow also checks Copilot PR wording using trusted default-branch
-code: non-empty What changed, Why and Checks sections. There is no default word
-limit because none is evidence-backed; set `limits.pr` to enforce one.
-This checks structure, not whether a claimed test actually ran. Human
-review still evaluates rationale and evidence.
+The report workflow also checks Copilot PR descriptions using trusted
+default-branch code: the body is not empty, telemetry is not duplicated and, when
+`limits.pr` is set, the length fits. Headings are guidance, not a gate: a missing
+heading would block auto-merge after the session ended, with nobody left to fix
+it. There is no default word limit because none is evidence-backed. Human review
+still evaluates rationale and evidence.
 
 Copilot's final session summary replaces the specialist's own PR description.
 During attribution Crewbie restores the specialist's last description (its own
@@ -987,11 +988,9 @@ summary stays in the body.
 
 Installation proposes a short PR template only when no existing template is
 found in GitHub's supported repository locations. Existing templates are preserved.
-The live agent's original PR description omitted explicit rationale/check sections,
-despite using the correct profile. The check caught this; the example was corrected
-manually, and template support plus explicit heading guidance were added. Another
-paid cloud run has not been used to establish whether that guidance reliably
-controls GitHub's generated summaries.
+Agents do not always follow the heading guidance (a release review used Findings
+and "Established here" instead of Why and Checks), which is why headings are not
+enforced.
 
 The team test confirmed that a specialist can produce a correctly structured
 final handoff while GitHub independently generates a different PR body. Treat

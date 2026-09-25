@@ -219,8 +219,8 @@ test("transient read failures retry within a bound but mutations and unknown wri
 
 test("PR descriptions include concise rationale and real check statements", () => {
   checkPrDescription("## What changed\nPreserved the default when no preference is saved.\n## Why\nExisting callers depend on it.\n## Checks\nRegression test added; execution not run here.");
-  assert.throws(() => checkPrDescription("## Summary\nUpdated the code.\n## Checks\nPassed."), /Why/);
-  assert.throws(() => checkPrDescription("## What changed\n\n## Why\nReason.\n## Checks\nNot run."), /empty/);
+  checkPrDescription("Independent review.\n\n## Findings\nNone.", undefined);
+  assert.throws(() => checkPrDescription("<!-- crewbie-attribution -->x<!-- /crewbie-attribution -->"), /empty/);
 });
 
 test("PR handoff finalization is previewable, human-authorized and bound to current head/body", async () => {

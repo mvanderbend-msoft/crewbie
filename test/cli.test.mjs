@@ -80,14 +80,14 @@ test("CLI rejects watch without local batch dispatch and rejects orphan timing o
 test("CLI routes PR finalization to description validation rather than batch publication", async (t) => {
   const root = await fixture(t, {
     ".crewbie/config.json": JSON.stringify(config()),
-    "handoff.json": JSON.stringify({ headSha: "head", beforeHash: "hash", body: "Missing required sections." }),
+    "handoff.json": JSON.stringify({ headSha: "head", beforeHash: "hash", body: "<!-- only a comment -->" }),
   });
 
   const result = spawnSync(process.execPath, [cli, "--path", root, "publish", "--pr", "2", "--proposal", "handoff.json"], {
     encoding: "utf8", env: { ...process.env, GH_TOKEN: "fixture-only" },
   });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /What changed/);
+  assert.match(result.stderr, /PR description is empty/);
   assert.doesNotMatch(result.stderr, /Choose a batch/);
   const ambiguous = spawnSync(process.execPath, [cli, "--path", root, "publish", "--pr", "2", "--batch", "batch.json"], { encoding: "utf8" });
   assert.equal(ambiguous.status, 1);
