@@ -171,7 +171,7 @@ test("generated workflows parse and never execute PR-head code", () => {
   assert.equal(dispatcher.concurrency["cancel-in-progress"], false);
   assert.equal(dispatcher.jobs.dispatch.steps[0].with.ref, "${{ github.event.repository.default_branch }}");
   assert.ok(dispatcher.on.pull_request_target.types.includes("review_requested"));
-  assert.match(dispatcher.jobs.dispatch.if, /github\.event\.label\.name == 'crewbie:address-review'/);
+  assert.ok(!dispatcher.on.pull_request_target.types.includes("labeled"), "No PR label drives dispatch.");
   assert.equal(files[".github/workflows/crewbie-approval.yml"], undefined);
   const review = YAML.parse(files[".github/workflows/crewbie-review.yml"]);
   assert.deepEqual(Object.keys(review.on), ["workflow_dispatch"], "Only dispatch requests reviews, one per PR head.");

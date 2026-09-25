@@ -12,7 +12,8 @@ function taskKind(value: unknown): NonNullable<Task["kind"]> {
   return value;
 }
 /** Task PRs of a plan merge into this branch; one feature PR then takes the whole plan to the default branch. */
-export function featureBranch(batchId: string): string { return `crewbie/${slug(batchId, "batch ID")}`; }
+/** One branch per approved revision, so a replanned batch never builds on, or reports, an earlier revision's feature PR. */
+export function featureBranch(batch: Batch): string { return `crewbie/${slug(batch.id, "batch ID").slice(0, 55)}-${batchDigest(batch).slice(0, 8)}`; }
 export interface SourceReference { uri: string; revision: string; fingerprint?: string }
 export function sourceReferences(value: unknown): SourceReference[] {
   if (!Array.isArray(value)) throw new Error("sources must be a list of URI/revision records.");
@@ -86,9 +87,8 @@ export function requireApproval(batch: Batch): void {
 export function issueDigest(title: string, body: string): string {
   return hash(JSON.stringify({ title, body }));
 }
-/** `feature: false` renders the body tasks had before feature branches, so their published issues still match. */
-export function issueBody(batch: Batch, task: Task, feature = true): string {
-  const metadata = JSON.stringify({ batch: batch.id, batchDigest: batchDigest(batch), sources: batch.sources, task, ...(feature ? { branch: featureBranch(batch.id) } : {}) });
+export function issueBody(batch: Batch, task: Task): string {
+  const metadata = JSON.stringify({ batch: batch.id, batchDigest: batchDigest(batch), sources: batch.sources, task, branch: featureBranch(batch) });
   if (task.body.includes("<!-- crewbie-task:")) throw new Error("Task body contains a reserved metadata marker.");
   return `${task.body}\n\n## Context\n\n${batch.spec}\n\n${batch.sources.map((source) => `- ${source.uri} (revision: ${source.revision})`).join("\n")}\n\nUse the named Crewbie specialist. Link the resulting PR to this issue. Read and report the specialist's charter and relevant memory. Keep the PR description concise.\n\n<!-- crewbie-task:${Buffer.from(metadata).toString("base64")} -->`;
 }
@@ -97,13 +97,14 @@ function taskBranch(value: unknown): string {
   if (!/^crewbie\/[a-z][a-z0-9-]{0,63}$/.test(branch)) throw new Error("Invalid Crewbie feature branch.");
   return branch;
 }
-/** `branch` is absent on tasks published before feature branches; those PRs still target the default branch. */
-export interface TaskMetadata { batch: string; batchDigest: string; sources: SourceReference[]; task: Task; branch?: string }
+export interface TaskMetadata { batch: string; batchDigest: string; sources: SourceReference[]; task: Task; branch: string }
+/** Null for bodies without Crewbie metadata and for tasks published before feature branches, which people finish by hand. */
 export function taskMetadata(body: string): TaskMetadata | null {
   const matches = [...body.matchAll(/<!-- crewbie-task:([A-Za-z0-9+/=]+) -->/g)];
   if (!matches.length) return null;
   if (matches.length !== 1 || !matches[0]?.[1]) throw new Error("Issue has ambiguous Crewbie metadata.");
   const value = record(JSON.parse(Buffer.from(matches[0][1], "base64").toString("utf8")) as unknown, "issue metadata");
+  if (value.branch === undefined) return null;
   const task = record(value.task, "issue task");
   return {
     batch: slug(value.batch, "batch"), batchDigest: string(value.batchDigest, "batch digest"),
@@ -115,6 +116,6 @@ export function taskMetadata(body: string): TaskMetadata | null {
       ...(task.kind === undefined ? {} : { kind: taskKind(task.kind) }),
       ...(task.adoWorkItem === undefined ? {} : { adoWorkItem: integer(task.adoWorkItem, "ADO work item") }),
     },
-    ...(value.branch === undefined ? {} : { branch: taskBranch(value.branch) }),
+    branch: taskBranch(value.branch),
   };
 }

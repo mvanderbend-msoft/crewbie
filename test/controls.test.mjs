@@ -9,7 +9,7 @@ import { config, batch } from "./helpers.mjs";
 
 function fixture() {
   // Default-branch task (pre-feature-branch), whose PR GitHub links through closing references.
-const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0], false));
+const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0])), BRANCH = metadata.branch;
   const state = { refs: new Set(), objects: new Map(), comments: {}, tag: null, writes: [], user: "maintainer", cancelled: false, denial: false, confirmation: false };
   const run = { id: 42, run_attempt: 1, event: "dynamic", repository: { full_name: "example/project" }, head_branch: "copilot/work", pull_requests: [{ id: 100 }], status: "in_progress" };
   const client = {
@@ -17,6 +17,7 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0], false));
       if (path.includes("/git/matching-refs/")) return [...state.refs].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref, object: state.objects.get(ref) }));
       const comments = /\/issues\/(\d+)\/comments$/.exec(path);
       if (comments) return state.comments[comments[1]] ?? [];
+      if (path.endsWith("/issues/1/timeline")) return [{ event: "cross-referenced", source: { issue: { pull_request: { url: "https://api.github.com/repos/example/project/pulls/10" } } } }];
       throw new Error(`Unexpected list ${path}`);
     },
     async request(method, path, body) {
@@ -38,11 +39,11 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0], false));
         return {};
       }
       if (method === "DELETE" && path.includes("/git/refs/")) { state.refs.delete(`refs/${path.split("/git/refs/")[1]}`); return null; }
-      if (path.endsWith("/issues/1")) return { body: issueBody(b, b.tasks[0], false) };
+      if (path.endsWith("/issues/1")) return { body: issueBody(b, b.tasks[0]) };
       if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
         nodes: [{ number: 10, repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false },
       } } } } };
-      if (path.endsWith("/pulls/10")) return { id: 100, user: { login: "Copilot" }, head: { ref: "copilot/work", repo: { full_name: "example/project" } } };
+      if (path.endsWith("/pulls/10")) return { id: 100, number: 10, user: { login: "Copilot" }, head: { ref: "copilot/work", repo: { full_name: "example/project" } }, base: { ref: BRANCH } };
       if (path.endsWith("/actions/runs/42/cancel")) {
         if (state.denial) throw new GitHubError(403, null);
         state.cancelled = true;

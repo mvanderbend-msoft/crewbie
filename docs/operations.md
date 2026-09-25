@@ -20,7 +20,7 @@ assignment permissions alone do not grant telemetry access. The optional
 same-PR correction loop needs **Agent tasks: read/write**. See GitHub's
 [Agent Tasks permissions](https://docs.github.com/en/rest/agent-tasks/agent-tasks).
 Unavailable telemetry keeps capacity reserved rather than guessing completion.
-Auto-merge reads the PR's check runs and commit statuses with the dispatch job's
+Merging a task PR into its feature branch reads the PR's check runs and commit statuses with the dispatch job's
 own `GITHUB_TOKEN` (`checks: read`, `statuses: read`), so the user credential
 needs no Checks or Commit statuses access; the merge itself uses the user
 credential's Contents and Pull requests write access.
@@ -43,8 +43,8 @@ The installed workflows use:
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
-| Config `review.enabled` / `review.role` | Have a configured role review every finished PR head in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist); an installed choice, including `enabled: false`, is kept |
-| Config `merge.minConfidence` | Auto-merge threshold for the planner's per-task confidence (0–1, default `0.85`). Tasks at or above it merge automatically once checks pass (and the reviewer passed the head, when configured); lower-rated or unrated tasks wait for a human merge. The rating is the planner's estimate, not a measured outcome; `plan.md` lists each task's rating and reason. A legacy `merge.mode` is ignored |
+| Config `review.enabled` / `review.role` | Have a configured role review every head of a plan's feature PR in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist); an installed choice, including `enabled: false`, is kept |
+| Config `merge.method` | How task PRs merge into the feature branch: `merge` (default), `squash` or `rebase`. Legacy `merge.mode` and `merge.minConfidence` are ignored |
 
 Generated workflows embed the exact installed version's GitHub release tarball
 URL. A missing
@@ -291,8 +291,7 @@ installed role gets a warning. Before any launch, dispatch checks each model the
 same way; tasks using a rejected model stay `crewbie:blocked` without a claim or
 attempt, while the rest of the batch launches. The check needs Agent tasks **read
 and write** on `CREWBIE_USER_TOKEN`; with read-only access GitHub answers 403, and
-dispatch warns and launches without the check (the address-review continuation
-also creates tasks and needs write). The check uses a
+dispatch warns and launches without the check. The check uses a
 branch that never exists, so no session starts. GitHub still lists a failed task
 in the Agents tab for each check. Preflight skips it to stay read-only.
 
@@ -852,15 +851,27 @@ An explicitly approved `kind: "review"` task can depend on completed sessions
 with linked PRs; default implementation tasks still require merged prerequisites.
 Changing a task's kind invalidates its approval like other scope changes.
 
-### Restart, ready for review, Crewbie review and auto-merge
+### Feature branch, restart, Crewbie review and merge
 
+- **Feature branch.** Every approved plan revision gets `crewbie/<plan>-<revision>`
+  (the first 8 characters of its digest, so a replan never reuses a branch), created from the
+  default branch when its first task launches. Tasks start from it and their PRs
+  target it; a task that depends on another waits until that task's PR merged
+  into the branch, review tasks included. GitHub links closing keywords only on PRs
+  into the default branch, so Crewbie finds task PRs through the issue timeline,
+  and task issues stay open with `crewbie:done` until the feature PR merges. Make
+  your CI run on PRs into `crewbie/**` (a `branches: [main]` filter skips them and
+  Crewbie then merges with no checks), and protect the default branch. Issues
+  published before feature branches carry no branch and are ignored by dispatch
+  and launch allowances;
+  finish them by hand.
 - **Restart.** A configured approver adds `crewbie:restart` to a task issue whose
   previous session verifiably ended: Copilot reported it could not start, or its
   task failed, timed out or was cancelled and its PR is closed. Dispatch, under
   the lock, reserves a new ledger entry that counts as an attempt, comments the
   attempt number with a `crewbie-restart` marker, reassigns Copilot and removes
   the label. It refuses (and explains in a comment) for other labellers, closed
-  or unapproved issues, open PRs (use `crewbie:address-review` instead), sessions
+  or unapproved issues, open PRs (push fixes to them, or close them first), sessions
   not verified as ended and exhausted allowances. Without a free slot it waits.
 - **Ready for review.** Copilot requests your review when its session finishes;
   that triggers dispatch, which restores the specialist's description and then
@@ -868,33 +879,32 @@ Changing a task's kind invalidates its approval like other scope changes.
   that trigger waits for workflow approval (Copilot-actor runs can require it; see
   *Settings → Copilot → Cloud agent → Actions workflow approval*), the hourly
   reconcile does it instead.
+- **Merge into the feature branch.** Dispatch merges a task PR into its feature
+  branch once the session completed, every check on the head passed (the newest
+  run of each check counts), no workflow run awaits approval in Actions and GitHub
+  reports no conflict. Task PRs are not
+  reviewed. It pins the head SHA and never bypasses branch protection. Pending
+  checks are re-evaluated on the next dispatch run, including the hourly schedule.
+  A PR that changes `.github/workflows/` is left for a human merge, because
+  workflows on the feature branch run with repository secrets for PRs into it.
+  `merge.method` accepts `merge` (default), `squash` or `rebase`.
+- **Feature PR.** When every task of the plan merged, dispatch opens one PR from
+  the feature branch into the default branch, listing the tasks and closing their
+  issues. Only a human merges it. If it is closed without merging, Crewbie reports
+  that and does not reopen it.
 - **Crewbie review.** With `"review": { "enabled": true, "role": "<role id>" }`,
-  dispatch starts `crewbie-review.yml` once for each finished PR head. The
+  dispatch starts `crewbie-review.yml` once for each head of a feature PR. The
   reviewer reads its own charter and memory from the default branch plus the PR's
   API diff (the PR's code is never checked out), runs tool-free in Copilot CLI
   with the role's model, and posts one PR comment: a verdict, a summary and
   findings marked blocking or minor, in the reviewer's voice. Any blocking finding
   makes the verdict "changes". Dispatch trusts only comments posted by that
   default-branch workflow run, started by an approver, for the PR's current head.
+  On "changes", push fixes to the feature branch for a fresh review, or merge
+  anyway if you disagree.
   A failed review run is reported with its link and not retried automatically;
   re-run it from Actions. Patches that do not fit the Copilot CLI prompt are
   listed as not reviewed.
-- **Address the review.** A configured approver adds `crewbie:address-review` to
-  the PR. Dispatch continues the specialist's session on the same branch with the
-  review of the current head plus approver PR comments, reviews and line comments
-  posted since the last such request as feedback. It counts as a task attempt and
-  posts the attempt number on the PR. When the session finishes, the new head is
-  reviewed again. Other labellers, a still-running session, no feedback and
-  exhausted allowances are refused with a comment; without a free slot it waits.
-- **Merge.** The approved plan's confidence decides. A task rated at or above
-  `merge.minConfidence` (default 0.85) is merged by dispatch once the session
-  completed, the reviewer passed the current head when `review` is configured
-  (minor findings allowed), every check on that head passed (the newest run of each
-  check counts) and GitHub reports no conflict. Lower-rated and unrated tasks wait
-  for you to merge. Pending checks are re-evaluated on the next dispatch run,
-  including the hourly schedule. It pins the head SHA and never bypasses branch
-  protection. A partial review, an `address-review` label or a new head blocks the
-  merge. `merge.method` accepts `merge` (default), `squash` or `rebase`.
 ## Nightly learning and bounded history
 
 Set `nightly.enabled` to true in a reviewed setup proposal and install it.

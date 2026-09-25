@@ -42,15 +42,16 @@ test("closed is not done: prerequisites release only after verified merge", () =
   assert.deepEqual(eligible(merged, 2).map((item) => item.metadata.task.id), ["b"]);
 });
 
-test("explicit review tasks wait for completed sessions, while implementation still waits for merge", () => {
-  const ready = { ...work("a", { state: "review", claimed: true }), sessionComplete: true };
+test("review tasks, like implementation, wait until their prerequisites merged into the feature branch", () => {
+  const finished = { ...work("a", { state: "review", claimed: true }), sessionComplete: true };
   const review = work("b", { dependencies: ["a"] });
   review.metadata.task.kind = "review";
   const implement = work("c", { dependencies: ["a"] });
-  assert.deepEqual(eligible([ready, review, implement], 2).map((item) => item.metadata.task.id), ["b"]);
-  const pending = work("b", { dependencies: ["a"] });
-  pending.metadata.task.kind = "review";
-  assert.deepEqual(eligible([{ ...ready, sessionComplete: false }, pending], 2), []);
+  assert.deepEqual(eligible([finished, review, implement], 2), []);
+  assert.equal(review.reason, "Waiting for a to merge into crewbie/feature.");
+  const merged = work("b", { dependencies: ["a"] });
+  merged.metadata.task.kind = "review";
+  assert.deepEqual(eligible([{ ...finished, state: "done" }, merged], 2).map((item) => item.metadata.task.id), ["b"]);
   const b = parseBatch({ ...batch(), tasks: [{ ...task("inspect"), kind: "review" }] }, config());
   assert.equal(taskMetadata(issueBody(b, b.tasks[0])).task.kind, "review");
   assert.throws(() => parseBatch({ ...batch(), tasks: [{ ...task("inspect"), kind: "bypass" }] }), /kind/);

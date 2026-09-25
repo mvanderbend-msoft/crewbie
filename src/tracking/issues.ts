@@ -1,5 +1,5 @@
 import type { Config } from "../config.js";
-import { ADDRESS_REVIEW_LABEL, limitsFor, PLANNING_LABEL, RESTART_LABEL, requireExecution } from "../config.js";
+import { limitsFor, PLANNING_LABEL, RESTART_LABEL, requireExecution } from "../config.js";
 import { GitHubError, hash, integer, record, string } from "../core.js";
 import { checkPrDescription } from "../specification/prose.js";
 import { batchDigest, issueBody, issueDigest, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
@@ -9,11 +9,10 @@ import type { AdoApi } from "./ado.js";
 
 export const STATUSES = ["blocked", "ready", "running", "review", "failed", "done"] as const;
 export function setupLabels(config: Config): string[] {
-  return ["crewbie:managed", PLANNING_LABEL, RESTART_LABEL, ADDRESS_REVIEW_LABEL, ...STATUSES.map((status) => `crewbie:${status}`), ...config.roles.map((role) => `crewbie:owner:${role.id}`)];
+  return ["crewbie:managed", PLANNING_LABEL, RESTART_LABEL, ...STATUSES.map((status) => `crewbie:${status}`), ...config.roles.map((role) => `crewbie:owner:${role.id}`)];
 }
 const LABEL_PURPOSES: Record<string, string> = {
   [RESTART_LABEL]: "Approver request: relaunch a task whose previous session ended; counts as an attempt.",
-  [ADDRESS_REVIEW_LABEL]: "Approver request on a PR: the specialist addresses the review and comments; counts as an attempt.",
 };
 export function labelDescription(name: string): string {
   return LABEL_PURPOSES[name] ?? "Crewbie workflow metadata; approval and prerequisites are checked separately.";

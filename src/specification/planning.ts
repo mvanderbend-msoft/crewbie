@@ -220,7 +220,7 @@ PRD source: ${json(source)}`;
 function deliveryNote(config: Config, batch: Batch | null): string {
   if (!batch) return "";
   const reviewer = reviewerFor(config);
-  return `## Delivery\n\nEach task PR merges into \`${featureBranch(batch.id)}\` once its checks pass. When every task merged, Crewbie opens one feature PR to the default branch${reviewer ? ` that crewbie-${reviewer.role} reviews` : ""}; test the feature on that branch and merge it yourself.\n\n`;
+  return `## Delivery\n\nEach task PR merges into \`${featureBranch(batch)}\` once its checks pass. When every task merged, Crewbie opens one feature PR to the default branch${reviewer ? ` that crewbie-${reviewer.role} reviews` : ""}; test the feature on that branch and merge it yourself.\n\n`;
 }
 
 export function parsePlan(value: unknown, config: Config, source: Source): Plan {

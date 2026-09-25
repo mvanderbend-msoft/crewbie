@@ -45,7 +45,7 @@ These are the design rules behind Crewbie, not extra documents for your team to 
 | **Fit the repository.** | Assess before generating. Reuse existing instructions, tests and decisions; don't demand a rewrite to adopt AI. |
 | **Implement supplied requirements.** | The user owns the PRD/spec and acceptance criteria. Crewbie decomposes the work and asks about gaps rather than authoring requirements. Small fixes can use an issue. |
 | **Let the crew evolve.** | Derive expertise from the repository and each feature, not a fixed roster. Add, specialize or retire roles through review; preserve history and existing task ownership. |
-| **People own the decisions.** | Humans approve scope, owners, models and execution. Crewbie merges only application changes the approved plan rated at or above the confidence threshold; everything else, and every learning proposal, needs a human merge. |
+| **People own the decisions.** | Humans approve scope, owners, models and execution. Crewbie merges task PRs only into the plan's feature branch; a human tests that branch and merges its one feature PR into the default branch, and every learning proposal. |
 | **Automate inside clear limits.** | Bound concurrency, review rounds and maintenance work. Stop visibly on blockers or uncertain launches; don't blindly retry paid sessions. |
 | **Remember lessons, not everything.** | Keep current knowledge hot, retrieve deeper history by topic, and archive superseded detail. No new lesson means no forced memory change. |
 | **Instructions must earn their place.** | Prefer concrete repository guidance over duplicated docs or generic advice. Quality warnings cite evidence; length alone is not a quality score. |
@@ -313,14 +313,17 @@ Both the reviewer and merger must be configured human approvers. Stale approvals
 changed source requirements and clarification-only plans cannot start coding.
 Unlabeled issues and labels applied by unapproved actors do not trigger analysis.
 Planning uses the named coordinator's supplied context in a tool-free Copilot CLI
-job, not a native cloud implementation session. Finished implementation PRs are
-marked ready for review automatically. Init picks a Crewbie reviewer role
-(`review.role`, preferring an existing review specialist) that comments on each
-finished PR head before you are asked to review or Crewbie merges it; add `crewbie:address-review` to the PR to
-have the specialist address it. Tasks the approved plan rated at or above
-`merge.minConfidence` (default 0.85) merge automatically once checks pass (and the
-reviewer passed the head, when configured); lower or unrated tasks wait for you. A
-failed start or session is relaunched by adding `crewbie:restart`.
+job, not a native cloud implementation session. Each plan is delivered on its
+own feature branch, `crewbie/<plan>-<revision>`: tasks start from it, and their finished PRs
+are marked ready and merged into it once every check passes, without review. When
+every task merged, Crewbie opens one feature PR into the default branch that closes
+all of the plan's issues. Init picks a Crewbie reviewer role (`review.role`,
+preferring an existing review specialist) that comments on each head of that
+feature PR. You test the feature branch and merge the feature PR yourself; Crewbie
+never merges it. A task PR that changes `.github/workflows/` is left for you to
+merge. A failed start or session is relaunched by adding `crewbie:restart`.
+Issues published before feature branches are no longer dispatched; finish them
+by hand.
 
 Without `executeOnMerge`, the manual team-installation and batch-approval path
 below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)

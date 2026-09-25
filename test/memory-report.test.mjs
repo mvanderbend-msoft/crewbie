@@ -4,7 +4,8 @@ import { unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { fixture, config, run, batch } from "./helpers.mjs";
-import { issueBody, parseBatch } from "../dist/specification/batch.js";
+import { featureBranch, issueBody, parseBatch } from "../dist/specification/batch.js";
+const BRANCH = featureBranch(parseBatch(batch(), config()));
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { memoryContext, relevantTopics } from "../dist/memory/context.js";
 import { allowedPath, parseProposal, selectEvidence, validateProposal } from "../dist/memory/improvement.js";
@@ -30,7 +31,7 @@ test("deferred memory proposals reach nightly evidence without accepting arbitra
   const b = parseBatch(batch(), cfg);
   const client = {
     async list(path) {
-      if (path.includes("/issues?")) return [{ number: 1, body: issueBody(b, b.tasks[0], false), updated_at: "2026-09-22T07:00:00Z" }];
+      if (path.includes("/issues?")) return [{ number: 1, body: issueBody(b, b.tasks[0]), updated_at: "2026-09-22T07:00:00Z" }];
       if (path.endsWith("/timeline")) return [{ event: "cross-referenced", source: { issue: { pull_request: { url: "https://api.github.com/repos/example/project/pulls/2" } } } }];
       if (path.endsWith("/issues/2/comments")) return [
         { id: 8, user: { login: "Copilot", type: "Bot" }, updated_at: "2026-09-22T08:00:00Z", body: "<!-- crewbie-memory-proposal -->\nPropose a primitive-string regression lesson in developer/hot.md. Source: PR #2." },
@@ -43,8 +44,9 @@ test("deferred memory proposals reach nightly evidence without accepting arbitra
       if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
         nodes: [{ number: 2, repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false, endCursor: null },
       } } } } };
-      if (path.endsWith("/pulls/2")) return { number: 2, body: "Focused change.", state: "open", user: { login: "Copilot" }, updated_at: "2026-09-22T07:00:00Z", head: { sha: "head" } };
+      if (path.endsWith("/pulls/2")) return { number: 2, body: "Focused change.", state: "open", user: { login: "Copilot" }, updated_at: "2026-09-22T07:00:00Z", head: { sha: "head" }, base: { ref: BRANCH } };
       if (path.includes("/check-runs")) return { check_runs: [] };
+      if (path.includes("/check-suites")) return { check_suites: [] };
       throw new Error(`Unexpected ${path}`);
     },
   };
@@ -58,7 +60,7 @@ test("closing an unexecuted issue is reported without inventing a completed sess
   const cfg = config(), b = parseBatch(batch(), cfg);
   const client = {
     async list(path) {
-      return path.includes("/issues?") ? [{ number: 1, state: "closed", body: issueBody(b, b.tasks[0], false), updated_at: "2026-09-22T08:00:00Z" }] : [];
+      return path.includes("/issues?") ? [{ number: 1, state: "closed", body: issueBody(b, b.tasks[0]), updated_at: "2026-09-22T08:00:00Z" }] : [];
     },
     async request(_method, path) {
       assert.equal(path, "/graphql");

@@ -33,7 +33,7 @@ export async function fixture(t, files = {}) {
 export function work(id, { dependencies = [], state = "ready", claimed = false, approved = true, priority = 1 } = {}) {
   return {
     issue: { number: id.charCodeAt(0), labels: [] },
-    metadata: { batch: "feature", batchDigest: "same-batch", task: { ...task(id, dependencies), priority } },
+    metadata: { batch: "feature", batchDigest: "same-batch", branch: "crewbie/feature", task: { ...task(id, dependencies), priority } },
     state, claimed, approved, reason: "fixture",
   };
 }

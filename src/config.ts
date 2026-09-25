@@ -8,7 +8,6 @@ export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1
 export type WordLimits = typeof DEFAULT_LIMITS & { pr?: number };
 export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
-export const ADDRESS_REVIEW_LABEL = "crewbie:address-review";
 export type MergeMethod = "merge" | "squash" | "rebase";
 /** How Crewbie merges task PRs into their plan's feature branch once the session completed and every check passed. */
 export interface MergePolicy { method: MergeMethod }

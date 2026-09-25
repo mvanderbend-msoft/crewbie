@@ -51,6 +51,9 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   if (pr.draft === true) return { merged: false, reason: "PR is still a draft." };
   const head = string(record(pr.head, "PR head").sha, "PR head SHA");
   if (head !== reviewed) return { merged: false, reason: "The PR head changed; waiting for the next dispatch run." };
+  // Workflows on the feature branch run with repository secrets for PRs into it, so a person merges workflow changes.
+  const workflows = (await client.list(`${prefix}/pulls/${number}/files`)).map((file) => String(file.filename)).filter((name) => name.startsWith(".github/workflows/"));
+  if (workflows.length) return { merged: false, reason: `PR #${number} changes ${workflows.join(", ")}; review and merge it yourself.` };
   const checks = CHECK_READER.client ?? client;
   const runs = record(await checks.request("GET", `${prefix}/commits/${head}/check-runs?per_page=100`), "check runs");
   if (!Array.isArray(runs.check_runs) || integer(runs.total_count, "check run count", 0) > runs.check_runs.length) {
@@ -58,6 +61,11 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   }
   const combined = record(await checks.request("GET", `${prefix}/commits/${head}/status`), "commit status");
   const statuses = Array.isArray(combined.statuses) ? combined.statuses.map((status) => record(status, "commit status")) : [];
+  // Workflows awaiting approval (the default for Copilot PRs) create no check runs, only an action_required suite.
+  const suites = record(await checks.request("GET", `${prefix}/commits/${head}/check-suites?per_page=100`), "check suites");
+  const held = (Array.isArray(suites.check_suites) ? suites.check_suites : []).map((suite) => record(suite, "check suite"))
+    .some((suite) => suite.conclusion === "action_required");
+  if (held) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. Workflow runs on this PR await approval in Actions; approve them, then Crewbie merges once they pass.` };
   const waiting = checksPassed(runs.check_runs.map((run) => record(run, "check run")), statuses);
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
   if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };

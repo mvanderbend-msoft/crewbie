@@ -125,7 +125,10 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
     const number = integer(Number(match[1]), "claimed issue");
     if (entries.some((entry) => entry.issue === number)) continue;
     const claimed = record(await client.request("GET", `${prefix}/issues/${number}`), "claimed issue");
-    const prior = taskMetadata(string(claimed.body, "claimed body"));
+    const body = string(claimed.body, "claimed body");
+    const prior = taskMetadata(body);
+    // Tasks published before feature branches are finished by hand and never launch again.
+    if (!prior && body.includes("<!-- crewbie-task:")) continue;
     if (!prior) throw new Error("Claimed issue has no Crewbie metadata.");
     if (prior.batch === batch) {
       result.blocked = `Batch ${batch} has pre-ledger claim #${number}; historical attempts are unverified. Review its history, then use budget --issue ${number} --historical-attempts COUNT to preview an explicit baseline; no automatic allowance reset.`;

@@ -251,7 +251,7 @@ on:
   issues:
     types: [labeled]
   pull_request_target:
-    types: [closed, ready_for_review, review_requested, labeled]
+    types: [closed, ready_for_review, review_requested]
 
   workflow_dispatch:
     inputs:
@@ -271,12 +271,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   dispatch:
-    # Copilot requests review when its session finishes; of PR labels, only address-review needs reconciliation.
+    # Copilot requests review when its session finishes.
     if: >-
       github.event_name != 'pull_request_target'
       || github.event.action == 'closed' || github.event.action == 'ready_for_review'
       || (github.event.action == 'review_requested' && github.event.sender.login == 'Copilot')
-      || (github.event.action == 'labeled' && github.event.label.name == 'crewbie:address-review')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
