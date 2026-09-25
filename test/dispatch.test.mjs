@@ -518,7 +518,7 @@ test("a replanned batch launches its new issue despite a superseded closed issue
 });
 
 const HEAD = "a".repeat(40), HEAD2 = "b".repeat(40);
-const reviewing = (overrides = {}) => config({ maxActive: 2, review: { enabled: true, role: "developer" }, merge: { mode: "auto", method: "squash" }, ...overrides });
+const reviewing = (overrides = {}) => config({ maxActive: 2, review: { enabled: true, role: "developer" }, merge: { method: "squash" }, ...overrides });
 function finishedPull(fixture) {
   fixture.pulls.set(1, { id: 1001, node_id: "PR_1", number: 101, draft: true, state: "open", mergeable: true, labels: [],
     head: { sha: HEAD, ref: "copilot/foundation" }, base: { ref: "main" }, user: { login: "Copilot" } });
@@ -535,22 +535,37 @@ function reviewComment(fixture, cfg, runId, findings, { head = HEAD, login = "gi
   (fixture.prComments[101] ??= []).push({ user: { type: "Bot", login }, created_at: `r${runId}`, updated_at: `r${runId}`, body, html_url: "https://comment" });
 }
 
-test("without a reviewer, finished PRs are marked ready and left for a human merge", async () => {
-  const fixture = githubFixture();
-  await dispatch(fixture.client, config({ maxActive: 1 }));
-  finishedPull(fixture);
-  const work = await dispatch(fixture.client, config({ maxActive: 1 }));
-  assert.deepEqual(fixture.readied, [101]);
-  assert.match(work[0].reason, /awaits your review and merge/);
-  assert.equal(fixture.reviewRequests.length + fixture.merges.length, 0);
-});
-
 const rated = (confidence) => {
   const input = batch();
   for (const task of input.tasks) Object.assign(task, { confidence, confidenceReason: "Small, well-covered change." });
   return input;
 };
-test("the Crewbie reviewer reviews each head once; auto mode merges only a trusted pass with passing checks", async () => {
+test("without a reviewer, finished PRs below the confidence threshold are marked ready and left for a human merge", async () => {
+  for (const input of [batch(), rated(0.84)]) {
+    const fixture = githubFixture(input);
+    await dispatch(fixture.client, config({ maxActive: 1 }));
+    finishedPull(fixture);
+    const work = await dispatch(fixture.client, config({ maxActive: 1 }));
+    assert.deepEqual(fixture.readied, [101]);
+    assert.match(work[0].reason, /below the 0\.85 auto-merge threshold; review and merge it yourself/);
+    assert.equal(fixture.reviewRequests.length + fixture.merges.length, 0);
+  }
+});
+test("without a reviewer, a finished PR at or above the confidence threshold merges once every check passes", async () => {
+  const fixture = githubFixture(rated(0.85));
+  await dispatch(fixture.client, config({ maxActive: 1 }));
+  finishedPull(fixture);
+  fixture.checkRuns.push({ id: 4, name: "build", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
+  let work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.match(work[0].reason, /Session completed on aaaaaaa\. Waiting for check build/);
+  assert.equal(fixture.merges.length, 0);
+  fixture.checkRuns[0] = { ...fixture.checkRuns[0], status: "completed", conclusion: "success" };
+  work = await dispatch(fixture.client, config({ maxActive: 1 }));
+  assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD, merge_method: "merge" }]);
+  assert.equal(work[0].state, "done");
+  assert.equal(fixture.reviewRequests.length, 0);
+});
+test("the Crewbie reviewer reviews each head once; Crewbie merges only a trusted pass with passing checks", async () => {
   const cfg = reviewing();
   const fixture = githubFixture(rated(0.9));
   await dispatch(fixture.client, cfg);
@@ -584,7 +599,6 @@ test("the Crewbie reviewer reviews each head once; auto mode merges only a trust
     { id: 2, name: "description", status: "completed", conclusion: "success", app: { slug: "github-actions" } },
     { id: 3, name: "dispatch", status: "in_progress", conclusion: null, app: { slug: "github-actions" } },
     { id: 4, name: "build", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
-  assert.match((await dispatch(fixture.client, reviewing({ merge: { mode: "manual", method: "merge" } })))[0].reason, /no blocking issues; merge when you are satisfied/);
   work = await dispatch(fixture.client, cfg);
   assert.match(work[0].reason, /Waiting for check build/);
   fixture.checkRuns[3] = { ...fixture.checkRuns[3], status: "completed", conclusion: "success" };
@@ -593,7 +607,7 @@ test("the Crewbie reviewer reviews each head once; auto mode merges only a trust
   assert.equal(work[0].state, "done");
 });
 
-test("auto mode leaves tasks below the plan's confidence threshold for a human; the threshold is configurable", async () => {
+test("Crewbie leaves tasks below the plan's confidence threshold for a human; the threshold is configurable", async () => {
   const cfg = reviewing();
   const fixture = githubFixture(rated(0.6));
   await dispatch(fixture.client, cfg);
@@ -604,7 +618,7 @@ test("auto mode leaves tasks below the plan's confidence threshold for a human; 
   const work = await dispatch(fixture.client, cfg);
   assert.match(work[0].reason, /rated this task 0\.6 confidence, below the 0\.85 auto-merge threshold/);
   assert.equal(fixture.merges.length, 0);
-  await dispatch(fixture.client, reviewing({ merge: { mode: "auto", method: "squash", minConfidence: 0.5 } }));
+  await dispatch(fixture.client, reviewing({ merge: { method: "squash", minConfidence: 0.5 } }));
   assert.equal(fixture.merges.length, 1);
 });
 
@@ -634,7 +648,7 @@ test("an open task whose prerequisite closed long ago launches once that prerequ
 });
 
 test("an approver's address-review label continues the session with the review and comments, then the new head is reviewed", async () => {
-  const cfg = reviewing({ merge: { mode: "manual", method: "merge" } });
+  const cfg = reviewing({ merge: { method: "merge" } });
   const fixture = githubFixture();
   await dispatch(fixture.client, cfg);
   finishedPull(fixture);

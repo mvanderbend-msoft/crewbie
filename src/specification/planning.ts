@@ -201,7 +201,7 @@ This planning run only writes the plan: do not change the team, roles, models, a
 Assign every task to an existing role from the supplied config, using exactly that role's id as owner and its model. If the feature needs expertise the current team lacks, explain it in teamSuggestions (at most three short notes for humans, who reassess the team with crewbie init --update) and still assign the closest existing owner or ask a question.
 Decompose into at most eight small tasks, each with one specialist owner, an explicit model, acceptance criteria and dependencies.
 Use kind: review for reviews of completed unmerged work; implementation dependencies require merged PRs.
-Rate every task with confidence, from 0 to 1: how likely the owner's PR is correct and safe to merge without human changes. Weigh requirement clarity, complexity, blast radius (data, security, migrations, public contracts, money), how verifiable the acceptance criteria are, and the context the owner has. Give confidenceReason in one short sentence naming the deciding factor. Be calibrated, not optimistic: ${mergeFor(config).mode === "auto" ? `tasks at or above ${mergeFor(config).minConfidence} merge automatically after review and checks; lower ones wait for a human.` : "humans use it to prioritize review."}
+Rate every task with confidence, from 0 to 1: how likely the owner's PR is correct and safe to merge without human changes. Weigh requirement clarity, complexity, blast radius (data, security, migrations, public contracts, money), how verifiable the acceptance criteria are, and the context the owner has. Give confidenceReason in one short sentence naming the deciding factor. Be calibrated, not optimistic: tasks at or above ${mergeFor(config).minConfidence} merge automatically once checks pass; lower ones wait for a human.
 Implement the user-supplied requirements; PRD/spec authoring is outside Crewbie's scope.
 The legacy batch.spec field is a source reference, supplied by Crewbie, not a document to author. Never approve execution or claim unrun checks.
 Links and attachments have NOT been fetched. If essential information is missing, ask at most five concise questions and return batch: null.
@@ -221,10 +221,10 @@ PRD source: ${json(source)}`;
 function confidenceTable(config: Config, batch: Batch | null): string {
   if (!batch) return "";
   const merge = mergeFor(config);
-  const outcome = (task: Batch["tasks"][number]) => merge.mode !== "auto" ? "human merge" : autoMergeFor(config, task.confidence) ? "auto-merge after review" : "human review";
+  const outcome = (task: Batch["tasks"][number]) => autoMergeFor(config, task.confidence) ? "auto-merge" : "human merge";
   const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
   return `## Confidence\n\n| Task | Owner | Confidence | Merge | Why |\n| --- | --- | --- | --- | --- |\n${batch.tasks.map((task) =>
-    `| ${cell(task.title)} | crewbie-${task.owner} | ${task.confidence ?? "unrated"} | ${outcome(task)} | ${cell(task.confidenceReason ?? "")} |`).join("\n")}\n\n${merge.mode === "auto" ? `Auto-merge threshold: ${merge.minConfidence} (\`merge.minConfidence\`). ` : ""}Scores are the planner's estimate, not measured outcomes.\n\n`;
+    `| ${cell(task.title)} | crewbie-${task.owner} | ${task.confidence ?? "unrated"} | ${outcome(task)} | ${cell(task.confidenceReason ?? "")} |`).join("\n")}\n\nAuto-merge threshold: ${merge.minConfidence} (\`merge.minConfidence\`). Scores are the planner's estimate, not measured outcomes.\n\n`;
 }
 
 export function parsePlan(value: unknown, config: Config, source: Source): Plan {

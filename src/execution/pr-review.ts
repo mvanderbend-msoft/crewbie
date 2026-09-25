@@ -117,8 +117,7 @@ export function renderReview(config: Config, snapshot: Snapshot, review: ReturnT
     ? `Add the \`${ADDRESS_REVIEW_LABEL}\` label to this PR to have crewbie-${snapshot.owner} address these findings and any comments you add (counts as one task attempt). You can also fix or merge it yourself.`
     : snapshot.omitted.length ? "Some patches were not reviewed, so Crewbie will not auto-merge. Review them, then merge yourself."
     : auto ? `Crewbie merges this PR automatically once every check passes. To stop that, add \`${ADDRESS_REVIEW_LABEL}\` with comments, or close the PR.`
-    : merge.mode === "auto" ? `The plan rated this task ${snapshot.confidence === undefined ? "without a confidence score" : `${snapshot.confidence} confidence`}, below the ${merge.minConfidence} auto-merge threshold, so a human reviews and merges it. Merge when you are satisfied, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.`
-    : `Merge when you are satisfied, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.`;
+    : `The plan rated this task ${snapshot.confidence === undefined ? "without a confidence score" : `${snapshot.confidence} confidence`}, below the ${merge.minConfidence} auto-merge threshold, so a human reviews and merges it. Merge when you are satisfied, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.`;
   return [
     marker,
     `## Crewbie review · crewbie-${snapshot.role}`,

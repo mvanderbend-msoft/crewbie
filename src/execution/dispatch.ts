@@ -336,21 +336,26 @@ function labelsOf(issue: Record<string, unknown>): string[] {
 }
 const prLabels = (pull: Record<string, unknown>) => Array.isArray(pull.labels) ? labelsOf(pull) : [];
 const activeSessions = (work: Work[]) => work.filter((other) => other.claimed && other.state !== "done" && other.sessionComplete !== true && other.sessionEnded !== true).length;
-/** After a completed session: mark the PR ready, have the Crewbie reviewer review each new head, and auto-merge a passed head in auto mode. */
+/** After a completed session: mark the PR ready, have the Crewbie reviewer (if enabled) review each new head, and auto-merge tasks the plan rated at or above the threshold. */
 async function afterSession(client: GitHubApi, config: Config, item: Work): Promise<string> {
   const pull = item.pull!;
   const number = integer(pull.number, "PR number");
   const lead = await markReady(client, pull) ? "Crewbie marked the PR ready for review. " : "";
   if (prLabels(pull).includes(ADDRESS_REVIEW_LABEL)) return `${lead}Address-review requested on PR #${number}.`;
   const reviewer = reviewerFor(config);
-  if (!reviewer) return `${lead}Cloud task completed; the PR awaits your review and merge.`;
+  const confidence = item.metadata.task.confidence;
+  const rated = confidence === undefined ? "without a confidence score" : `${confidence} confidence`;
   const head = string(record(pull.head, "PR head").sha, "PR head SHA");
+  if (!reviewer) {
+    if (!autoMergeFor(config, confidence)) return `${lead}Cloud task completed. The plan rated this task ${rated}, below the ${mergeFor(config).minConfidence} auto-merge threshold; review and merge it yourself.`;
+    const outcome = await autoMerge(client, config, number, head);
+    if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }
+    return lead + outcome.reason;
+  }
   const review = await trustedReview(client, config, number, head);
   if (!review) return lead + await requestReview(client, config, number, head);
   if (review.verdict === "changes") return `${lead}crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}. Add ${ADDRESS_REVIEW_LABEL} to PR #${number} to have crewbie-${item.metadata.task.owner} address them.`;
-  if (mergeFor(config).mode === "manual") return `${lead}crewbie-${reviewer.role} found no blocking issues; merge when you are satisfied.`;
-  const confidence = item.metadata.task.confidence;
-  if (!autoMergeFor(config, confidence)) return `${lead}crewbie-${reviewer.role} found no blocking issues. The plan rated this task ${confidence === undefined ? "without a confidence score" : `${confidence} confidence`}, below the ${mergeFor(config).minConfidence} auto-merge threshold; review and merge it yourself.`;
+  if (!autoMergeFor(config, confidence)) return `${lead}crewbie-${reviewer.role} found no blocking issues. The plan rated this task ${rated}, below the ${mergeFor(config).minConfidence} auto-merge threshold; review and merge it yourself.`;
   if (review.partial) return `${lead}The review could not cover every patch, so Crewbie does not auto-merge; review and merge it yourself.`;
   const outcome = await autoMerge(client, config, number, head);
   if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }

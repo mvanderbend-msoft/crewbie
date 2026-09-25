@@ -11,12 +11,12 @@ export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPe
 export const ADDRESS_REVIEW_LABEL = "crewbie:address-review";
 export type MergeMethod = "merge" | "squash" | "rebase";
 /**
- * manual: a human merges. auto: Crewbie merges once the session completed, the reviewer passed the current head, checks passed
- * and the approved plan rated the task at least minConfidence; lower-confidence tasks wait for a human.
+ * Crewbie merges a task's PR once the session completed, the Crewbie reviewer (when enabled) passed the current head, checks
+ * passed and the approved plan rated the task at least minConfidence; unrated and lower-confidence tasks wait for a human.
  */
-export interface MergePolicy { mode: "auto" | "manual"; method: MergeMethod; minConfidence?: number }
+export interface MergePolicy { method: MergeMethod; minConfidence?: number }
 export const DEFAULT_MIN_CONFIDENCE = 0.85;
-export const DEFAULT_MERGE: MergePolicy = { mode: "manual", method: "merge" };
+export const DEFAULT_MERGE: MergePolicy = { method: "merge" };
 export interface ReviewConfig { enabled: boolean; role: string; model?: string }
 export function modelProfile(value: unknown): ModelProfile {
   if (value !== "economy" && value !== "balanced" && value !== "quality") throw new Error("Model profile must be economy, balanced or quality.");
@@ -39,10 +39,9 @@ export interface Config {
   review?: ReviewConfig;
 }
 export function mergeFor(config: Config): Required<MergePolicy> { return { minConfidence: DEFAULT_MIN_CONFIDENCE, ...(config.merge ?? DEFAULT_MERGE) }; }
-/** Auto mode merges only tasks the approved plan rated at or above minConfidence; unrated tasks go to a human. */
+/** The approved plan's confidence decides: at or above minConfidence Crewbie merges; unrated and lower tasks go to a human. */
 export function autoMergeFor(config: Config, confidence: number | undefined): boolean {
-  const merge = mergeFor(config);
-  return merge.mode === "auto" && confidence !== undefined && confidence >= merge.minConfidence;
+  return confidence !== undefined && confidence >= mergeFor(config).minConfidence;
 }
 /** The enabled reviewer role and the model it runs with, or null when PR review is off. */
 export function reviewerFor(config: Config): { role: string; model: string } | null {
@@ -132,13 +131,12 @@ export function parseConfig(value: unknown): Config {
   let merge: Config["merge"];
   if (data.merge !== undefined) {
     const value = record(data.merge, "merge");
-    const mode = value.mode ?? DEFAULT_MERGE.mode;
-    if (mode !== "auto" && mode !== "manual") throw new Error("merge.mode must be auto or manual.");
     const method = value.method ?? DEFAULT_MERGE.method;
     if (method !== "merge" && method !== "squash" && method !== "rebase") throw new Error("merge.method must be merge, squash or rebase.");
     const minConfidence = value.minConfidence;
     if (minConfidence !== undefined && (typeof minConfidence !== "number" || !(minConfidence >= 0 && minConfidence <= 1))) throw new Error("merge.minConfidence must be a number from 0 to 1.");
-    merge = { mode, method, ...(minConfidence === undefined ? {} : { minConfidence }) };
+    // A legacy merge.mode is ignored: confidence alone decides between auto-merge and human merge.
+    merge = { method, ...(minConfidence === undefined ? {} : { minConfidence }) };
   }
   let review: ReviewConfig | undefined;
   if (data.review !== undefined) {
@@ -150,7 +148,6 @@ export function parseConfig(value: unknown): Config {
     if (model !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) || model.toLowerCase() === "auto")) throw new Error("Choose an explicit review model identifier, not auto.");
     review = { enabled: value.enabled, role, ...(model === undefined ? {} : { model }) };
   }
-  if (merge?.mode === "auto" && !review?.enabled) throw new Error("merge.mode auto merges only after the Crewbie reviewer passes the PR; enable review with a reviewer role.");
   return {
     schemaVersion: 1, repository, approvers, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),

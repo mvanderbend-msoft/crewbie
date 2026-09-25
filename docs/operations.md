@@ -40,8 +40,7 @@ The installed workflows use:
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
 | Config `review.enabled` / `review.role` | Have a configured role review every finished PR head in a tool-free Copilot CLI job (`review.model` overrides the role's model) |
-| Config `merge.mode` | `manual` (default): you merge. `auto`: Crewbie merges once the reviewer passed the head and checks passed, and only tasks the plan rated at or above `merge.minConfidence` |
-| Config `merge.minConfidence` | Auto-merge threshold for the planner's per-task confidence (0–1, default `0.85`). Lower-rated or unrated tasks wait for human review. The rating is the planner's estimate, not a measured outcome; `plan.md` lists each task's rating and reason |
+| Config `merge.minConfidence` | Auto-merge threshold for the planner's per-task confidence (0–1, default `0.85`). Tasks at or above it merge automatically once checks pass (and the reviewer passed the head, when configured); lower-rated or unrated tasks wait for a human merge. The rating is the planner's estimate, not a measured outcome; `plan.md` lists each task's rating and reason. A legacy `merge.mode` is ignored |
 
 Generated workflows embed the exact installed version's GitHub release tarball
 URL. A missing
@@ -876,11 +875,13 @@ Changing a task's kind invalidates its approval like other scope changes.
   posts the attempt number on the PR. When the session finishes, the new head is
   reviewed again. Other labellers, a still-running session, no feedback and
   exhausted allowances are refused with a comment; without a free slot it waits.
-- **Merge.** `merge.mode` is `manual` by default: you merge. With
-  `"merge": { "mode": "auto" }` (which requires the reviewer), dispatch merges
-  once the session completed, the reviewer passed the current head (minor findings
-  allowed), every check on that head passed (the newest run of each check counts)
-  and GitHub reports no conflict. It pins the head SHA and never bypasses branch
+- **Merge.** The approved plan's confidence decides. A task rated at or above
+  `merge.minConfidence` (default 0.85) is merged by dispatch once the session
+  completed, the reviewer passed the current head when `review` is configured
+  (minor findings allowed), every check on that head passed (the newest run of each
+  check counts) and GitHub reports no conflict. Lower-rated and unrated tasks wait
+  for you to merge. Pending checks are re-evaluated on the next dispatch run,
+  including the hourly schedule. It pins the head SHA and never bypasses branch
   protection. A partial review, an `address-review` label or a new head blocks the
   merge. `merge.method` accepts `merge` (default), `squash` or `rebase`.
 ## Nightly learning and bounded history

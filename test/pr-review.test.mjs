@@ -2,19 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseConfig } from "../dist/config.js";
+import { autoMergeFor, parseConfig } from "../dist/config.js";
 import { issueBody, parseBatch } from "../dist/specification/batch.js";
 import { parseReview, prepareReview, publishReview } from "../dist/execution/pr-review.js";
 import { config, batch, fixture } from "./helpers.mjs";
 
 const HEAD = "c".repeat(40);
-const reviewConfig = config({ review: { enabled: true, role: "developer" }, merge: { mode: "auto", method: "merge" } });
+const reviewConfig = config({ review: { enabled: true, role: "developer" } });
 
-test("merge defaults to manual; auto mode requires an enabled reviewer that is a configured role", () => {
+test("confidence alone decides auto-merge; a legacy merge.mode is ignored and the reviewer must be a configured role", () => {
   assert.equal(parseConfig(config()).merge, undefined);
-  assert.deepEqual(parseConfig(config({ merge: { mode: "manual" } })).merge, { mode: "manual", method: "merge" });
-  assert.throws(() => parseConfig(config({ merge: { mode: "auto" } })), /enable review/);
-  assert.throws(() => parseConfig(config({ merge: { mode: "yes" } })), /merge.mode must be auto or manual/);
+  assert.deepEqual(parseConfig(config({ merge: { mode: "manual" } })).merge, { method: "merge" });
+  assert.deepEqual(parseConfig(config({ merge: { method: "squash", minConfidence: 0.9 } })).merge, { method: "squash", minConfidence: 0.9 });
+  assert.throws(() => parseConfig(config({ merge: { minConfidence: 2 } })), /from 0 to 1/);
+  const cfg = parseConfig(config());
+  assert.equal(autoMergeFor(cfg, 0.85), true);
+  assert.equal(autoMergeFor(cfg, 0.84), false);
+  assert.equal(autoMergeFor(cfg, undefined), false);
   assert.throws(() => parseConfig(config({ review: { enabled: true, role: "ghost" } })), /not a configured role/);
   assert.deepEqual(parseConfig(reviewConfig).review, { enabled: true, role: "developer" });
 });

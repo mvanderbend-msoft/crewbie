@@ -1,4 +1,4 @@
-import { mergeFor, type Config } from "../config.js";
+import { mergeFor, reviewerFor, type Config } from "../config.js";
 import { GitHubError, integer, record, string } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
 
@@ -38,26 +38,26 @@ export function checksPassed(runs: Record<string, unknown>[], statuses: Record<s
   return null;
 }
 
-/** Auto mode: merges the reviewed head of a ready PR once every check passed and GitHub reports it mergeable. Never bypasses protection. */
+/** Merges the vetted head of a ready PR once every check passed and GitHub reports it mergeable. Never bypasses protection. */
 export async function autoMerge(client: GitHubApi, config: Config, number: number, reviewed: string): Promise<{ merged: boolean; reason: string }> {
   const merge = mergeFor(config);
   const prefix = `/repos/${config.repository}`;
-  if (merge.mode !== "auto") return { merged: false, reason: "Manual merge mode; merge after your review." };
+  const vetted = reviewerFor(config) ? "Reviewer passed" : "Session completed on";
   const pr = record(await client.request("GET", `${prefix}/pulls/${number}`), "pull request");
   if (pr.state !== "open") return { merged: false, reason: "PR is not open." };
   if (pr.draft === true) return { merged: false, reason: "PR is still a draft." };
   const head = string(record(pr.head, "PR head").sha, "PR head SHA");
-  if (head !== reviewed) return { merged: false, reason: "The PR changed after its review; awaiting a review of the new head." };
+  if (head !== reviewed) return { merged: false, reason: reviewerFor(config) ? "The PR changed after its review; awaiting a review of the new head." : "The PR head changed; waiting for the next dispatch run." };
   const runs = record(await client.request("GET", `${prefix}/commits/${head}/check-runs?per_page=100`), "check runs");
   if (!Array.isArray(runs.check_runs) || integer(runs.total_count, "check run count", 0) > runs.check_runs.length) {
-    return { merged: false, reason: "Reviewed, but not every check run could be read; merge manually after verifying checks." };
+    return { merged: false, reason: "Not every check run could be read; merge manually after verifying checks." };
   }
   const combined = record(await client.request("GET", `${prefix}/commits/${head}/status`), "commit status");
   const statuses = Array.isArray(combined.statuses) ? combined.statuses.map((status) => record(status, "commit status")) : [];
   const waiting = checksPassed(runs.check_runs.map((run) => record(run, "check run")), statuses);
-  if (waiting) return { merged: false, reason: `Reviewer passed ${head.slice(0, 7)}. ${waiting}` };
-  if (pr.mergeable === false) return { merged: false, reason: "Reviewer passed it, but the PR conflicts with its base branch." };
-  if (pr.mergeable !== true) return { merged: false, reason: "Reviewer passed it; GitHub is still computing mergeability." };
+  if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
+  if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };
+  if (pr.mergeable !== true) return { merged: false, reason: "GitHub is still computing mergeability; Crewbie retries on its next run." };
   try {
     const result = record(await client.request("PUT", `${prefix}/pulls/${number}/merge`, { sha: head, merge_method: merge.method }), "merge result");
     if (result.merged !== true) return { merged: false, reason: `GitHub did not confirm the merge of PR #${number}.` };
@@ -67,5 +67,5 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
     }
     throw error;
   }
-  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)}: the Crewbie reviewer passed it and every check passed.` };
+  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)}: ${reviewerFor(config) ? "the Crewbie reviewer passed it, " : ""}the plan rated it ${merge.minConfidence} or above and every check passed.` };
 }

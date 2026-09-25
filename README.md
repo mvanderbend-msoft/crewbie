@@ -45,7 +45,7 @@ These are the design rules behind Crewbie, not extra documents for your team to 
 | **Fit the repository.** | Assess before generating. Reuse existing instructions, tests and decisions; don't demand a rewrite to adopt AI. |
 | **Implement supplied requirements.** | The user owns the PRD/spec and acceptance criteria. Crewbie decomposes the work and asks about gaps rather than authoring requirements. Small fixes can use an issue. |
 | **Let the crew evolve.** | Derive expertise from the repository and each feature, not a fixed roster. Add, specialize or retire roles through review; preserve history and existing task ownership. |
-| **People own the decisions.** | Humans approve scope, owners, models and execution. Application changes and learning proposals still need human review and merge. |
+| **People own the decisions.** | Humans approve scope, owners, models and execution. Crewbie merges only application changes the approved plan rated at or above the confidence threshold; everything else, and every learning proposal, needs a human merge. |
 | **Automate inside clear limits.** | Bound concurrency, review rounds and maintenance work. Stop visibly on blockers or uncertain launches; don't blindly retry paid sessions. |
 | **Remember lessons, not everything.** | Keep current knowledge hot, retrieve deeper history by topic, and archive superseded detail. No new lesson means no forced memory change. |
 | **Instructions must earn their place.** | Prefer concrete repository guidance over duplicated docs or generic advice. Quality warnings cite evidence; length alone is not a quality score. |
@@ -316,8 +316,9 @@ Planning uses the named coordinator's supplied context in a tool-free Copilot CL
 job, not a native cloud implementation session. Finished implementation PRs are
 marked ready for review automatically. With `review` configured, a Crewbie reviewer
 role comments on each finished PR head; add `crewbie:address-review` to the PR to
-have the specialist address it. `merge.mode: "auto"` merges once the reviewer
-passed the head and checks passed; `manual` (default) leaves the merge to you. A
+have the specialist address it. Tasks the approved plan rated at or above
+`merge.minConfidence` (default 0.85) merge automatically once checks pass (and the
+reviewer passed the head, when configured); lower or unrated tasks wait for you. A
 failed start or session is relaunched by adding `crewbie:restart`.
 
 Without `executeOnMerge`, the manual team-installation and batch-approval path
