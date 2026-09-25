@@ -2,6 +2,7 @@ import { parseDocument, isMap, isSeq } from "yaml";
 import { agentArchivePath, type Config, type Role } from "../config.js";
 import { agentPrompt, optionalText, safePath } from "../core.js";
 import { profile } from "./templates.js";
+import { removeAutoLoadedPointers } from "./auto-loaded.js";
 
 export async function roleProfile(root: string, role: Role, config: Config): Promise<string> {
   const generated = profile(role, config);
@@ -32,7 +33,8 @@ export function adoptedProfile(role: Role, config: Config, original: string): st
       && candidate.sourceAgent.split("/").at(-1)?.replace(/(?:\.agent)?\.md$/, "") === target);
     if (adopted) handoff.set("agent", `crewbie-${adopted.id}`);
   }
-  const body = header ? text.slice(header[0].length) : text;
+  // Pointers to guidance Copilot already attaches only repeat context; the archive keeps the original.
+  const body = removeAutoLoadedPointers(header ? text.slice(header[0].length) : text).text;
   const result = `---\n${document.toString()}---\n${body}\n\n${generated.replace(/^---\n[\s\S]*?\n---\n# [^\n]*\n/, "## Crewbie integration\n")}`;
   agentPrompt(result, `Adopted ${role.id} charter`, `Shorten the original ${role.sourceAgent} and rerun init, leaving room for Crewbie integration. No original instructions were truncated or archived.`);
   return result;

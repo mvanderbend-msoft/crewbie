@@ -2,10 +2,11 @@ import { stat } from "node:fs/promises";
 import { posix } from "node:path";
 import YAML from "yaml";
 import { errorCode, optionalText, safePath } from "../core.js";
+import { autoLoadedGuidance, autoLoadedPointer } from "./auto-loaded.js";
 
 export const INSTRUCTION_STUDY = "https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd";
 export interface InstructionSignal {
-  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "unconditional-full-suite" | "missing-path-scope" | "broad-root-guidance";
+  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "unconditional-full-suite" | "missing-path-scope" | "broad-root-guidance" | "auto-loaded-reference" | "agent-only-context";
   level: "warning" | "advisory";
   path: string;
   line: number;
@@ -160,12 +161,34 @@ export async function assessInstructions(root: string, paths: readonly string[])
       }
       lineNumber += (paragraph.match(/\n/g) ?? []).length;
     }
+    // Files Copilot reads; other hosts (Claude, Gemini) do not attach .github guidance, so their pointers are needed.
+    const copilotHost = /^\.github\/(?:copilot-instructions\.md|instructions\/.+\.instructions\.md|agents\/(?!crewbie-)[^/]+\.agent\.md)$|(^|\/)AGENTS\.md$/.test(path);
     const directory = scopeDirectory(path);
     const scopedManifests = manifests.filter((manifest) => manifest.startsWith(directory));
     let fenced = false;
     for (let index = 0; index < lines.length; index++) {
       const line = lines[index]!;
       if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+      const pointer = !fenced && copilotHost ? autoLoadedPointer(line) : null;
+      const targets = pointer?.references.map((reference) => reference.replace(/^\.\//, "").replace(/^copilot-instructions\.md$/, ".github/copilot-instructions.md")
+        .replace(/^([\w.-]+\.instructions\.md)$/, ".github/instructions/$1")).filter((target) => target !== path) ?? [];
+      if (pointer && targets.length) {
+        const missing = targets.filter((target) => autoLoadedGuidance(target) && !visible.has(target));
+        add({ code: "auto-loaded-reference", level: "warning", path, line: index + 1, related: targets[0]!,
+          detail: `Tells the agent to read ${targets.join(", ")}, which Copilot already attaches: repository-wide instructions and AGENTS.md always, path-specific instructions when the working files match applyTo.${missing.length ? ` ${missing.join(", ")} does not exist.` : ""}`,
+          recommendation: pointer.pointerOnly
+            ? "Remove the line. Adopted agents are cleaned on install; the archive keeps the original."
+            : "Remove only the pointer and keep the rest of the line. If the agent needs rules that no automatically loaded file contains, put them in a path-scoped .github/instructions/<domain>.instructions.md." });
+      }
+      if (!fenced && path.startsWith(".github/agents/") && copilotHost && /\b(?:read|consult|follow|review|see)\b/i.test(line)) {
+        for (const match of line.matchAll(/`([\w./-]+\.md)`|\]\(([\w./-]+\.md)\)/g)) {
+          const target = posix.normalize(match[1] ?? match[2]!).replace(/^\.\//, "");
+          if (autoLoadedGuidance(target) || target.startsWith(".crewbie/") || target.startsWith(".github/agents/") || !visible.has(target)) continue;
+          add({ code: "agent-only-context", level: "advisory", path, line: index + 1, related: target,
+            detail: "Only this agent is told to read this document; other agents and Copilot chat working on the same files do not get it.",
+            recommendation: "If it holds rules for specific paths, consider a path-scoped .github/instructions/<domain>.instructions.md with applyTo globs so Copilot loads them automatically, then drop the pointer." });
+        }
+      }
       if (!fenced) for (const match of line.matchAll(/\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
         const raw = match[1]!;
         if (/^(?:[a-z][a-z0-9+.-]*:|#|\/|~)/i.test(raw) || /[<>{}$*]/.test(raw)) continue;

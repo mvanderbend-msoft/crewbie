@@ -1,6 +1,7 @@
 import { agentArchivePath, type Config, type Role } from "../config.js";
 import { executionWorkflow, planningWorkflow, reviewWorkflow } from "./planning-workflow.js";
 import { PACKAGE_PIN } from "./package.js";
+import { autoLoadedGuidance } from "./auto-loaded.js";
 
 export const WRITING = `Use plain, concrete language. Lead with the result; explain terms and uncertainty.
 Give reasons and evidence, not a thinking transcript.
@@ -24,6 +25,8 @@ export const PR_TEMPLATE = `## What changed
 `;
 
 export function profile(role: Role, config: Config): string {
+  // Copilot attaches these itself; listing them again only repeats context.
+  const guidance = (role.contextPaths ?? []).filter((path) => !autoLoadedGuidance(path));
   const duties: Record<string, string> = {
     coordinator: "Decompose user-supplied PRDs, specs or issue requirements into implementation tasks. Ask for missing acceptance criteria rather than authoring a PRD/spec. Reassess expertise against repository evidence and each feature. The roster is not fixed: during reviewed init --update, propose custom roles, specialization or retirement with reasons; preserve existing models, history and task ownership until human approval. Planning runs never change the team: assign tasks to existing roles and list missing expertise as team suggestions. Give each task one specialist owner, explicit model, dependencies and relevant memory to read; owners always record gotchas in their own role memory. For labeled issue intake, produce a reviewable implementation plan, not execution approval. Batch sources contain requirement inputs only; code, guidance and memory are planning context. Set kind: review for reviews dependent on completed sessions; implementation dependencies require merged PRs. Publish or dispatch implementation only with human approval.",
     frontend: `## Focus
@@ -92,7 +95,7 @@ ${role.sourceAgent ? `The original instructions are included above. Backup prove
 ${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions.md\`,
 \`.crewbie/team/${role.id}/hot.md\`, and \`.crewbie/team/${role.id}/index.md\`.
 Read linked cold/archive detail only when relevant. Follow applicable repository instructions.
-${role.contextPaths?.length ? `Reuse existing guidance: ${role.contextPaths.map((path) => `\`${path}\``).join(", ")}.\n` : ""}Work from the supplied requirements and approved acceptance criteria.
+${guidance.length ? `Reuse existing guidance: ${guidance.map((path) => `\`${path}\``).join(", ")}.\n` : ""}Work from the supplied requirements and approved acceptance criteria.
 Identify yourself as \`crewbie-${role.id}\` in the PR description; distinguish implementation from review.
 Use \`## What changed\`, \`## Why\`, and \`## Checks\`; name real outcomes and remaining risks.
 ${role.sourceAgent ? "If the original instructions define a persona or voice, write every PR description, comment, Learning note and final summary in it; the headings set structure, not tone. Keep memory files neutral.\n" : ""}`;

@@ -228,7 +228,7 @@ test("prompt and parser share the exact eligible Markdown context list", async (
   review.roles[0].contextPaths = allowed;
   const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
   assert.deepEqual(proposal.config.roles[0].contextPaths, allowed);
-  assert.match(profile(proposal.config.roles[0], proposal.config), /Reuse existing guidance: `AGENTS\.md`/);
+  assert.doesNotMatch(profile(proposal.config.roles[0], proposal.config), /AGENTS\.md/, "Copilot already attaches AGENTS.md");
   assert.doesNotMatch(profile(proposal.config.roles[0], proposal.config), /Team Guide/);
 });
 

@@ -190,6 +190,9 @@ The archive preserves the complete original bytes as backup provenance. The acti
 profile embeds the complete original instruction body, retains the description,
 persona and frontmatter tool restrictions, and adds Crewbie memory, identity and
 handoff rules. The archive is not a substitute for the active instructions.
+The only lines left out are those that just tell the agent to read guidance Copilot
+already attaches (`.github/copilot-instructions.md`, `AGENTS.md`, matching
+`.github/instructions/*.instructions.md`); lines with other content stay and are flagged.
 Known adopted-agent handoffs are
 retargeted. The selected model governs the active profile. Unsupported tool
 metadata requires manual review rather than silently widening permissions.
@@ -563,6 +566,17 @@ is not a reason to defer a safe proposal: approval already gates every write.
 The model must assess every inspected file for all justified improvements, not
 stop after one file or the static warning list. Retained guidance needs an
 evidence-based rationale; nothing forces edits to already useful rules.
+Copilot attaches repository-wide instructions, `AGENTS.md` and matching path-specific
+instructions to every session, including custom agents. The `auto-loaded-reference`
+warning flags lines in Copilot guidance and agents that tell the agent to read those
+files, and notes targets that do not exist; the assessment proposes removing the pointer.
+Claude and Gemini files are exempt because those hosts do not load `.github` guidance.
+The `agent-only-context` advisory flags documents only one agent is told to read; when
+they hold path conventions, a scoped `.github/instructions/<domain>.instructions.md` with
+`applyTo` globs lets every session get them. The assessment also proposes new scoped files
+when agents or root guidance carry path-specific conventions, and never invents rules for
+documents it was not given. Generated profiles no longer list automatically loaded files
+under "Reuse existing guidance".
 See the [README sources](../README.md#sources-behind-guidance-assessment).
 
 The scanner reads visible non-ignored instruction files, README/CONTRIBUTING
