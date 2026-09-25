@@ -44,8 +44,18 @@ async function taskIssue(client: GitHubApi, config: Config, pr: number) {
     const metadata = taskMetadata(String(issue.body ?? ""));
     if (metadata) tasks.push({ issue, metadata });
   }
-  if (tasks.length !== 1) throw new Error(`PR #${pr} must close exactly one Crewbie task issue to be reviewed.`);
-  return tasks[0]!;
+  // A PR can mention another task's issue with a closing keyword; its own task is the one whose linked PR it is.
+  let own = tasks;
+  if (tasks.length > 1) {
+    const { linkedPull } = await import("./dispatch.js");
+    own = [];
+    for (const task of tasks) {
+      const linked = await linkedPull(client, config.repository, integer(task.issue.number, "issue")).catch(() => null);
+      if (linked && linked.number === pr) own.push(task);
+    }
+  }
+  if (own.length !== 1) throw new Error(`PR #${pr} must close exactly one Crewbie task issue to be reviewed.`);
+  return own[0]!;
 }
 
 /** Builds the reviewer prompt from the PR's API diff and the default-branch reviewer charter; no PR code is checked out. */

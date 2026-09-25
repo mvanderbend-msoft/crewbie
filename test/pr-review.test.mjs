@@ -73,6 +73,27 @@ test("review preparation uses the reviewer's charter and the API diff; publicati
   assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 56)).ready, false, "A stale head is never reviewed.");
 });
 
+test("a PR that also mentions another task's issue as closing is reviewed for its own task", async (t) => {
+  const { root, client } = await setup(t);
+  const b = parseBatch(batch(), config());
+  const request = client.request;
+  const own = { 1: 101, 2: 200 };
+  client.request = async (method, path, body) => {
+    if (path === "/graphql" && body.query.includes("closingIssuesReferences")) return { data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 1 }, { number: 2 }] } } } } };
+    if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
+      nodes: [{ number: own[body.variables.number], repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+    if (path.endsWith("/issues/2")) return { number: 2, body: issueBody(b, b.tasks[1]) };
+    if (path.endsWith("/pulls/200")) return { number: 200, state: "closed", merged_at: "then", user: { login: "Copilot" } };
+    const result = await request(method, path, body);
+    return path.endsWith("/pulls/101") ? { ...result, user: { login: "Copilot" } } : result;
+  };
+  const prepared = await prepareReview(root, client, reviewConfig, 101, HEAD, 58);
+  assert.equal(prepared.ready, true);
+  assert.match(await readFile(join(root, ".crewbie-review-prompt.txt"), "utf8"), new RegExp(b.tasks[0].title));
+  own[1] = 300;
+  await assert.rejects(prepareReview(root, client, reviewConfig, 101, HEAD, 59), /exactly one Crewbie task issue/);
+});
+
 test("review output containing a secret is never posted", async (t) => {
   const { root, comments, client } = await setup(t);
   await prepareReview(root, client, reviewConfig, 101, HEAD, 57);
