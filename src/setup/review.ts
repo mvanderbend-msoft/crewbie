@@ -56,7 +56,8 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     "## Proposed crew", "",
     "| Specialist | Action | Model | Responsibility |", "| --- | --- | --- | --- |",
     ...config.roles.map((role) => `| ${cell(role.id)} | ${installed.has(role.id) ? "Keep/update installed specialist" : role.sourceAgent ? `Adopt ${cell(role.sourceAgent)}` : "New specialist"} | ${cell(role.model)} | ${cell(role.purpose)} |`),
-    "", `Concurrency: ${config.maxActive} active sessions. This is not a limit on team size.`, "",
+    "", `Concurrency: ${config.maxActive} active sessions. This is not a limit on team size.`,
+    config.review?.enabled ? `PR reviewer: crewbie-${config.review.role} reviews every finished PR before you are asked to review and before Crewbie auto-merges it.` : "PR reviewer: off.", "",
     `Model profile: **${config.modelProfile ?? "balanced"}**. Explicit model overrides remain authoritative.`,
     `Crewbie launch limits: **${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxLaunchesPerBatch} per batch / ${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxAttemptsPerTask} per task**, including the first attempt and uncertain requests. Not a monetary cap.`, "",
   ];

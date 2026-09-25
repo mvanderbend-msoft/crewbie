@@ -338,6 +338,21 @@ test("oversized context lists fail before offering an impossible repair", async 
   }), /catalogue contextPaths.*at most ten/);
 });
 
+test("init gives every crew a PR reviewer: the proposed role, else a review specialist, and keeps an installed choice", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};" });
+  const report = await assess(root);
+  const good = response(report);
+  const tester = { ...good.roles[0], id: "release-reviewer" };
+  assert.match(setupPrompt(report, ""), /Set reviewer to the id of one proposed role/);
+  assert.deepEqual(parseSetupReview(JSON.stringify(good), report, "", "m").config.review, { enabled: true, role: good.roles[0].id });
+  assert.deepEqual(parseSetupReview(JSON.stringify({ ...good, roles: [good.roles[0], tester] }), report, "", "m").config.review, { enabled: true, role: "release-reviewer" });
+  assert.deepEqual(parseSetupReview(JSON.stringify({ ...good, reviewer: good.roles[0].id, roles: [good.roles[0], tester] }), report, "", "m").config.review, { enabled: true, role: good.roles[0].id });
+  const installed = await fixture(t, { ".crewbie/config.json": JSON.stringify(config({ review: { enabled: false, role: "developer" } })) });
+  const again = await assess(installed);
+  const kept = response(again);
+  assert.deepEqual(parseSetupReview(JSON.stringify({ ...kept, roles: [{ ...kept.roles[0], id: "developer" }] }), again, "", "m").config.review, { enabled: false, role: "developer" });
+});
+
 test("reassessment preserves existing models, approvals and policy; retirement is explicit", async (t) => {
   const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config({ maxActive: 1 })) });
   const report = await assess(root);

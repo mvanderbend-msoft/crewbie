@@ -314,8 +314,9 @@ changed source requirements and clarification-only plans cannot start coding.
 Unlabeled issues and labels applied by unapproved actors do not trigger analysis.
 Planning uses the named coordinator's supplied context in a tool-free Copilot CLI
 job, not a native cloud implementation session. Finished implementation PRs are
-marked ready for review automatically. With `review` configured, a Crewbie reviewer
-role comments on each finished PR head; add `crewbie:address-review` to the PR to
+marked ready for review automatically. Init picks a Crewbie reviewer role
+(`review.role`, preferring an existing review specialist) that comments on each
+finished PR head before you are asked to review or Crewbie merges it; add `crewbie:address-review` to the PR to
 have the specialist address it. Tasks the approved plan rated at or above
 `merge.minConfidence` (default 0.85) merge automatically once checks pass (and the
 reviewer passed the head, when configured); lower or unrated tasks wait for you. A

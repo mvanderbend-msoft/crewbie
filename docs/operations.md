@@ -39,7 +39,7 @@ The installed workflows use:
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
-| Config `review.enabled` / `review.role` | Have a configured role review every finished PR head in a tool-free Copilot CLI job (`review.model` overrides the role's model) |
+| Config `review.enabled` / `review.role` | Have a configured role review every finished PR head in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist); an installed choice, including `enabled: false`, is kept |
 | Config `merge.minConfidence` | Auto-merge threshold for the planner's per-task confidence (0–1, default `0.85`). Tasks at or above it merge automatically once checks pass (and the reviewer passed the head, when configured); lower-rated or unrated tasks wait for a human merge. The rating is the planner's estimate, not a measured outcome; `plan.md` lists each task's rating and reason. A legacy `merge.mode` is ignored |
 
 Generated workflows embed the exact installed version's GitHub release tarball

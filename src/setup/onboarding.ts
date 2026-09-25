@@ -46,6 +46,7 @@ Choose arbitrary domain-specific role IDs, not a preset roster. Each role needs 
 Adopt suitable EXISTING specialists first: preserve frontend, backend, testing and review responsibilities rather than merging them into invented end-to-end roles. maxActive limits concurrent sessions, NOT team size.
 For each adopted role, set sourceAgent to its exact existing agent path and use a recognizable role ID derived from that agent. The installer copies the complete original instructions into the active Crewbie charter and archives the original as backup provenance. Tool restrictions and professional persona boundaries remain in the active file. Never narrow an adopted persona or voice (for example to "conversational only") unless the original says so; it applies to everything the specialist writes for humans. Put adoption mechanics in agentDecisions.reason, not in checks or nonNegotiables; those fields contain actual domain behavior only. Supply only useful additional checks, not summaries replacing the original expertise.
 Actively consider useful additional specialists alongside existing agents: domain depth, independent verification, performance, accessibility, data and integration boundaries. Existing broad ownership is not a reason to reject a justified specialization. Explain each addition's distinct contribution and collaboration boundary; avoid aliases and idle roles without repository or feature evidence.
+Set reviewer to the id of one proposed role that independently reviews every finished implementation PR before a human is asked to review it and before Crewbie auto-merges it. Prefer an existing review or verification specialist; otherwise choose the role best placed to judge cross-cutting correctness.
 Return an agentDecisions entry {path,action,reason} for EVERY existing candidate: action adopt if a role has that sourceAgent, otherwise retain with a concrete reason. Retained agents remain standalone; edits require explicit instructions entries and separate guidance approval. Use agentDecisions: [] when there are no candidates.
 Existing agent candidates: ${json(assessment.inventory.files.filter((file) => isExistingAgentPath(file.path) && !file.redacted).map((file) => file.path))}
 checks, nonNegotiables and contextPaths each allow at most ten entries.
@@ -75,11 +76,17 @@ For adopted agents, express added checks on their roles; archive their original 
 Keep each active charter focused on relevant, non-obvious guidance. Preserve adopted agents' original bodies completely; never discard original details. GitHub limits a custom agent prompt to ${AGENT_PROMPT_CHARACTERS} characters, including Crewbie additions. Keep proposed guidance/constitution under ${limitsFor(assessment.config).constitution} words.
 Reuse the constitution if present. Optionally propose a short constitution if absent; the human can decline it.
 Return ONLY JSON:
-{"summary":"concise human-readable assessment and rationale","findings":[{"area":"instructions|mcp|agents|constitution","path":null,"assessment":"evidence-linked assessment","recommendation":"retain, reuse, concrete edit or explicit deferral with reason","action":"retain","editPaths":[]}],"questions":[],"roles":[{"id":"domain-specialist","sourceAgent":null,"purpose":"project-specific ownership","model":"catalog model ID when supplied","complexity":"standard","modelReason":"task-specific cost/capability rationale","checks":["observable check"],"nonNegotiables":["invariant"],"contextPaths":[]}],"agentDecisions":[],"instructions":[{"path":"AGENTS.md","content":"complete proposed text","reason":"why"}],"constitutionText":null}
+{"summary":"concise human-readable assessment and rationale","findings":[{"area":"instructions|mcp|agents|constitution","path":null,"assessment":"evidence-linked assessment","recommendation":"retain, reuse, concrete edit or explicit deferral with reason","action":"retain","editPaths":[]}],"questions":[],"roles":[{"id":"domain-specialist","sourceAgent":null,"purpose":"project-specific ownership","model":"catalog model ID when supplied","complexity":"standard","modelReason":"task-specific cost/capability rationale","checks":["observable check"],"nonNegotiables":["invariant"],"contextPaths":[]}],"reviewer":"domain-specialist","agentDecisions":[],"instructions":[{"path":"AGENTS.md","content":"complete proposed text","reason":"why"}],"constitutionText":null}
 For a deferred finding add "deferReason":"specific blocker and the decision/evidence needed".
 Project description and clarification answers: ${json(redact(description))}
 Existing policy and static detection hints (hints are NOT the team): ${json({ config: assessment.config, installedRoles: assessment.installedRoles, findings: assessment.findings, instructionQuality: assessment.instructionQuality })}
 Repository inventory and coverage: ${json(assessment.inventory)}`;
+}
+
+/** Every crew gets a PR reviewer: the proposed one, else a review/verification specialist, else the first role. */
+function proposedReviewer(value: unknown, ids: string[]): string {
+  if (typeof value === "string" && ids.includes(value)) return value;
+  return ids.find((id) => /review/.test(id)) ?? ids.find((id) => /verif|qa|test/.test(id)) ?? ids[0]!;
 }
 
 export function parseSetupReview(output: string, assessment: Assessment, description: string, model: string, models: ModelChoice[] = [], specialistModel = model): SetupProposal {
@@ -146,7 +153,7 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
       contextPaths, sourceAgent: existing?.sourceAgent ?? (role.sourceAgent === null ? undefined : role.sourceAgent) };
   });
   const config = parseConfig({
-    ...assessment.config, roles,
+    ...assessment.config, roles, review: assessment.config.review ?? { enabled: true, role: proposedReviewer(data.reviewer, roles.map((role) => role.id)) },
     nightly: assessment.configBeforeHash !== null ? assessment.config.nightly : {
       ...assessment.config.nightly,
       allowedPaths: [
