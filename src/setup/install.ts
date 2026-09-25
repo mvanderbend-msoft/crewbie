@@ -30,7 +30,7 @@ export function setupConfiguration(value: unknown): Config {
     ? { ...config, planning: { ...config.planning, executeOnMerge: true } } : config;
 }
 function memorySeed(id: string, tier: string): string {
-  return tier === "hot" ? `# ${id}: gotchas\n\nNon-obvious traps and surprising constraints only, one or two lines each with a link. No implementation summaries, scope notes or verification logs. Mark new entries proposed until reviewed; replace stale entries.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
+  return tier === "hot" ? `# ${id}: gotchas\n\nNon-obvious traps and surprising constraints only, one or two lines each with a link. No implementation summaries, scope notes or verification logs. Replace stale entries.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
 }
 async function checkedChanges(root: string, files: Record<string, string | null>, owned: Record<string, unknown>, adopted: Record<string, string> = {}, conflicts?: string[], kept?: string[]): Promise<FileChange[]> {
   const changes: FileChange[] = [];

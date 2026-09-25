@@ -928,7 +928,7 @@ of copying them. A no-update handoff needs a reason or a pointer to the exact
 existing memory section; "no new durable lesson" alone is insufficient.
 Approved memory paths can be changed on the work branch for human review;
 existing accepted policy is preserved.
-New shared decisions remain explicitly proposed until approved. Out-of-scope
+Memory entries carry no "proposed" marker; merging the PR is the review. Out-of-scope
 lessons go in one PR comment starting with `<!-- crewbie-memory-proposal -->`,
 with target path, lesson, reason and evidence. The collector includes bounded
 proposals from the Copilot bot or configured approvers in nightly input. It does

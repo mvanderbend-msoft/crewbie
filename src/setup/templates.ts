@@ -132,12 +132,11 @@ or anything discoverable from the code. Replace or remove stale entries rather
 than appending; use index/cold only for longer detail a gotcha links to.
 If nothing was surprising, leave memory unchanged and say why in Learning;
 "no new durable lesson" alone is insufficient. Shared decisions change
-only for new cross-role choices, marked proposed until human approval; preserve
-accepted decisions. For useful out-of-scope learning, post one PR comment starting
+only for new cross-role choices; preserve accepted decisions. For useful out-of-scope learning, post one PR comment starting
 with \`<!-- crewbie-memory-proposal -->\`: target, lesson, reason and source for
 nightly review. Report Handoff and Learning separately in the PR.
-Mark unmerged gotchas proposed until human review. Exclude raw transcripts.
-Humans review and merge.
+Write entries as plain lines, with no "proposed" marker: merging the PR is the
+review. Exclude raw transcripts.
 
 ${WRITING}
 `;

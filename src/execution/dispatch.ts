@@ -429,8 +429,16 @@ function featureBody(config: Config, batch: string, branch: string, items: Work[
     "", "## Tasks",
     ...sorted.map((item) => `- #${String(item.issue.number)} ${String(item.issue.title)}${item.pull ? ` (#${String(item.pull.number)})` : ""}`),
     "", ...sorted.map((item) => `Closes #${String(item.issue.number)}`),
+    ...sourceIssues(config, items).map((number) => `Closes #${String(number)}`),
     "", `${FEATURE_MARKER}${batch} -->`,
   ].join("\n");
+}
+function sourceIssues(config: Config, items: Work[]): number[] {
+  const prefix = `https://github.com/${config.repository}/issues/`;
+  const tasks = new Set(items.map((item) => integer(item.issue.number, "issue")));
+  const numbers = items.flatMap((item) => item.metadata.sources.map((source) => source.uri))
+    .filter((uri) => uri.startsWith(prefix) && /^\d+$/.test(uri.slice(prefix.length))).map((uri) => Number(uri.slice(prefix.length)));
+  return [...new Set(numbers)].filter((number) => !tasks.has(number)).sort((a, b) => a - b);
 }
 async function featureReview(client: GitHubApi, config: Config, pull: Record<string, unknown>, branch: string): Promise<string> {
   const number = integer(pull.number, "feature PR");

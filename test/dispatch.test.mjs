@@ -587,6 +587,17 @@ test("a finished task PR of a feature plan merges into the feature branch once e
   assert.equal(fixture.featurePulls.length, 0, "The feature PR waits for every task.");
   assert.equal(work.find((item) => item.issue.number === 2).reason, `Waiting for foundation to merge into ${BRANCH}.`);
 });
+test("the feature PR also closes the PRD issue the plan came from", async () => {
+  const input = { ...batch(), sources: [{ uri: "https://github.com/example/project/issues/73", revision: "r1" }] };
+  const fixture = githubFixture(input);
+  fixture.branches.add(featureBranch(parseBatch(input, config())));
+  for (const issue of [1, 2, 3]) {
+    fixture.claims.add(issue);
+    fixture.pulls.set(issue, { id: 1000 + issue, number: 100 + issue, state: "closed", merged_at: "then", user: { login: "Copilot" } });
+  }
+  await dispatch(fixture.client, config());
+  assert.match(fixture.featurePulls[0].body, /Closes #3\nCloses #73\n/);
+});
 test("once every task merged, one feature PR closes them all; the reviewer reviews each head and only a human merges it", async () => {
   const cfg = reviewing();
   const fixture = githubFixture();
