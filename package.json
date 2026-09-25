@@ -1,6 +1,6 @@
 {
   "name": "@crewbie/cli",
-  "version": "0.1.0-alpha.37",
+  "version": "0.1.0-alpha.38",
   "description": "A repository-aware AI implementation crew for existing and greenfield projects.",
   "license": "MIT",
   "repository": {
