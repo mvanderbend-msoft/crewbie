@@ -1,7 +1,7 @@
 import { parseConfig, requireExecution, type Config } from "../config.js";
 import { GitHubError, hash, integer, json, record, string, textHash } from "../core.js";
 import { approvedBatch, batchDigest, parseBatch, type Batch } from "../specification/batch.js";
-import { isApprover, type GitHubApi } from "../tracking/github.js";
+import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { verifySources } from "../tracking/sources.js";
 import { publish } from "../tracking/issues.js";
 import { withDispatchLock } from "./dispatch.js";
@@ -38,8 +38,8 @@ export async function repoText(client: GitHubApi, repo: string, path: string, re
 export async function verifyPlanningRun(client: GitHubApi, config: Config, runId: number, baseSha: string, completed = false): Promise<string> {
   const run = record(await client.request("GET", `/repos/${config.repository}/actions/runs/${integer(runId, "planning run")}`), "planning workflow run");
   if (!["issues", "issue_comment", "workflow_dispatch"].includes(String(run.event)) || run.path !== ".github/workflows/crewbie-plan.yml" || run.head_sha !== baseSha
-    || record(run.head_repository, "run repository").full_name !== config.repository || !isApprover(run.actor, config.approvers)
-    || (run.triggering_actor !== undefined && !isApprover(run.triggering_actor, config.approvers))
+    || record(run.head_repository, "run repository").full_name !== config.repository || !await isWriter(client, config.repository, run.actor)
+    || (run.triggering_actor !== undefined && !await isWriter(client, config.repository, run.triggering_actor))
     || (completed && (run.status !== "completed" || run.conclusion !== "success"))) {
     throw new Error("Planning must originate from the approved default-branch issue workflow and complete successfully before execution.");
   }
@@ -63,6 +63,11 @@ export function planningLocation(ref: string): { sourceIssue: number; keyPrefix:
   const match = /^crewbie\/plans\/((?:[a-z0-9]+(?:-[a-z0-9]+)*-)?issue-(\d+))-([a-f0-9]{16})$/.exec(ref);
   if (!match) throw new Error("Expected a generated planning branch.");
   return { sourceIssue: integer(Number(match[2]), "source issue"), keyPrefix: match[3]!, directory: `.crewbie/plans/${match[1]}` };
+}
+function nonRolePolicy(config: Config): unknown {
+  const { roles: _roles, ...policy } = config as Config & { approvers?: unknown };
+  delete policy.approvers;
+  return policy;
 }
 
 export async function approvedMergedPlan(client: GitHubApi, config: Config, number: number): Promise<{ batch: Batch; headSha: string; approver: string; merger: string }> {
@@ -90,26 +95,26 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   const original = parseConfig(JSON.parse((await repoText(client, config.repository, ".crewbie/config.json", manifest.baseSha)).content) as unknown);
   if (original.repository !== config.repository || !original.planning?.enabled || !original.planning.executeOnMerge
     || hash(json(original)) !== manifest.baseConfigHash
-    || json({ ...original, roles: [] }) !== json({ ...config, roles: [] })) {
-    throw new Error("A planning PR cannot grant itself execution permission, change approvers, or replace prior policy.");
+    || json(nonRolePolicy(original)) !== json(nonRolePolicy(config))) {
+    throw new Error("A planning PR cannot grant itself execution permission or replace prior policy.");
   }
 
   const runBranch = await verifyPlanningRun(client, original, manifest.runId, manifest.baseSha, true);
   const repository = record(await client.request("GET", prefix), "repository");
   if (base.ref !== repository.default_branch) throw new Error("Planning must be merged into the current default branch.");
   if (runBranch !== repository.default_branch) throw new Error("Planning policy must come from a default-branch workflow run.");
-  if (!isApprover(pr.merged_by, original.approvers)) throw new Error("A configured human approver must merge the planning PR.");
+  if (!await isWriter(client, original.repository, pr.merged_by)) throw new Error("A human user with write access must merge the planning PR.");
   const mergedAt = Date.parse(string(pr.merged_at, "merge time"));
   if (!Number.isFinite(mergedAt)) throw new Error("Invalid merge time.");
   const reviews = await client.list(`${prefix}/pulls/${number}/reviews`);
   const latest = new Map<string, Record<string, unknown>>();
   for (const review of [...reviews].sort((a, b) => integer(a.id, "review ID") - integer(b.id, "review ID"))) {
-    if (!isApprover(review.user, original.approvers) || !["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(String(review.state))) continue;
+    if (!await isWriter(client, original.repository, review.user) || !["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(String(review.state))) continue;
     const submitted = Date.parse(string(review.submitted_at, "review time"));
     if (!Number.isFinite(submitted)) throw new Error("Invalid review time.");
     if (submitted <= mergedAt) latest.set(string(record(review.user, "reviewer").login, "reviewer login"), review);
   }
-  if ([...latest.values()].some((review) => review.state === "CHANGES_REQUESTED")) throw new Error("A configured human reviewer still requests changes.");
+  if ([...latest.values()].some((review) => review.state === "CHANGES_REQUESTED")) throw new Error("A write-access human reviewer still requests changes.");
   const approval = [...latest.values()].find((review) => review.state === "APPROVED" && review.commit_id === headSha);
   if (!approval) throw new Error("A configured human must approve the exact final planning head before merge.");
   const current = record(await client.request("GET", `${prefix}/git/ref/heads/${encodeURIComponent(string(repository.default_branch, "default branch"))}`), "default ref");
@@ -172,7 +177,11 @@ export async function releaseMergedPlan(client: GitHubApi, config: Config, numbe
       const path = `/repos/${config.repository}/issues/${item.issue}/comments`;
       const body = `Execution authorized by ${proof.approver}'s approval and ${proof.merger}'s merge of planning PR #${number}, reviewed head \`${proof.headSha}\`.\nRecorded by the configured automation credential; no agent self-approval.\n\n<!-- crewbie-plan-approval:${number}:${proof.headSha} -->`;
       const comments = await client.list(path);
-      if (!comments.some((comment) => isApprover(comment.user, config.approvers) && comment.created_at === comment.updated_at && comment.body === body)) {
+      let exists = false;
+      for (const comment of comments) {
+        if (comment.created_at === comment.updated_at && comment.body === body && await isWriter(client, config.repository, comment.user)) exists = true;
+      }
+      if (!exists) {
         await client.request("POST", path, { body });
       }
     }

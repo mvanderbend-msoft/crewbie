@@ -23,6 +23,7 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0])), BRANCH = m
     async request(method, path, body) {
       if (method !== "GET" && path !== "/graphql") state.writes.push({ method, path, body });
       if (path === "/user") return { type: "User", login: state.user };
+      if (path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
       if (path === "/repos/example/project") return { default_branch: "main" };
       if (path.endsWith("/branches/main")) return { commit: { sha: "a".repeat(40) } };
       if (method === "POST" && path.endsWith("/git/tags")) { state.tag = body; return { sha: "b".repeat(40) }; }
@@ -59,6 +60,7 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0])), BRANCH = m
 
 test("validated optional policy preserves legacy hashes and defaults to explicit 20/3 allowances", async () => {
   assert.equal(parseConfig(config()).execution, undefined);
+  assert.equal("approvers" in parseConfig(config({ approvers: ["legacy-maintainer"] })), false);
   assert.throws(() => parseConfig(config({ modelProfile: "cheapest" })), /Model profile/);
   for (const execution of [{ maxLaunchesPerBatch: 0, maxAttemptsPerTask: 1 }, { maxLaunchesPerBatch: 20, maxAttemptsPerTask: -1 }]) assert.throws(() => parseConfig(config({ execution })));
   const f = fixture();
@@ -115,7 +117,7 @@ test("pause/resume requires a human, uses the dispatch lock and never resets lau
   assert.match(await setLaunchPause(f.client, config(), true, false), /Preview/);
   assert.equal(f.state.writes.length, 0);
   f.state.user = "outsider";
-  await assert.rejects(setLaunchPause(f.client, config(), true, true), /human approver/);
+  await assert.rejects(setLaunchPause(f.client, config(), true, true), /write access/);
   f.state.user = "maintainer";
   await setLaunchPause(f.client, config(), true, true);
   assert.match((await launchAllowance(f.client, config(), f.metadata, 1)).blocked, /paused/);
@@ -141,7 +143,7 @@ test("cancel previews only attributable cloud runs and distinguishes requested f
 
 test("unsupported cancellation and outsider credentials never claim that an agent stopped", async () => {
   const f = fixture(); f.state.user = "outsider";
-  await assert.rejects(cancelRun(f.client, config(), 1, 42, true), /human approver/);
+  await assert.rejects(cancelRun(f.client, config(), 1, 42, true), /write access/);
   assert.equal(f.state.cancelled, false);
   f.state.user = "maintainer"; f.state.denial = true;
   await assert.rejects(cancelRun(f.client, config(), 1, 42, true), /not confirmed.*Stop session/);

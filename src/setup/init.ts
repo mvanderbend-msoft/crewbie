@@ -2,7 +2,7 @@ import { json, optionalText, readJson, record, safePath, string, textHash, write
 import { modelProfile, parseConfig } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { cloudAgentAccepts } from "../execution/controls.js";
-import { requireApprover } from "../tracking/github.js";
+import { requireWriter } from "../tracking/github.js";
 import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
 import { applyInstallation, installation, setupConfiguration } from "./install.js";
@@ -14,7 +14,7 @@ import { COPILOT_VERSION_VARIABLE, copilotVersion as copilotVersionOf, copilotVe
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
-  model?: string; repo?: string; approver?: string[]; description?: string;
+  model?: string; repo?: string; description?: string;
   guidance?: string; "assessment-only"?: boolean; "skip-labels"?: boolean;
   json?: boolean; "copilot-version"?: string;
   "model-policy"?: string; "specialist-model"?: string; "model-profile"?: string;
@@ -60,9 +60,9 @@ export async function installSetup(root: string, value: unknown, options: { appl
     : renderInstallationPreview(changes, labels, config.repository, kept)
       + (planning && copilotVersion ? `\nACTIONS VARIABLE | ${COPILOT_VERSION_VARIABLE}=${copilotVersion} if unset` : "");
   if (!options.skipLabels) {
-    if (!config.repository || !config.approvers.length) throw new Error("Set repository and human approvers before creating GitHub labels, or explicitly use --skip-labels for offline setup.");
+    if (!config.repository) throw new Error("Set repository before creating GitHub labels, or explicitly use --skip-labels for offline setup.");
     if (!client) throw new Error("GitHub authentication is required to create setup labels.");
-    await requireApprover(client, config.approvers);
+    await requireWriter(client, config.repository);
   }
   await applyInstallation(root, changes);
   if (!options.skipLabels && client) {
@@ -83,6 +83,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
   const confirm = io.confirm ?? terminal?.confirm;
   try {
     if (options.guidance !== undefined && !["apply", "skip"].includes(options.guidance)) throw new Error("--guidance must be apply or skip.");
+    if ((options as { approver?: unknown }).approver !== undefined) throw new Error("--approver is no longer supported; repository write access authorizes setup.");
     if (options["model-policy"] !== undefined && !["fixed", "cost-aware"].includes(options["model-policy"])) throw new Error("--model-policy must be fixed or cost-aware.");
     if (options["model-profile"] !== undefined) modelProfile(options["model-profile"]);
     if (options["assessment-only"] && (options.proposal || options.apply || options.guidance)) throw new Error("--assessment-only cannot apply setup or guidance.");
@@ -115,7 +116,6 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     const assessment = await assess(root);
     if (options.update && assessment.configBeforeHash === null) throw new Error("No installed crew to reassess. Run init without --update first.");
     if (options.repo !== undefined) assessment.config.repository = options.repo;
-    if (options.approver !== undefined) assessment.config.approvers = options.approver;
     if (options["model-profile"] !== undefined) assessment.config.modelProfile = modelProfile(options["model-profile"]);
     assessment.config = parseConfig(assessment.config);
     if (options["assessment-only"]) {
@@ -220,9 +220,6 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       else report("Hosted planning stays disabled. The ready-for-planning label will not create a plan.");
     }
     if (!proposal.config.repository && !options["skip-labels"]) proposal.config.repository = (await ask("GitHub repository (owner/name) for workflow labels?")).trim();
-    if (!proposal.config.approvers.length && !options["skip-labels"]) {
-      proposal.config.approvers = (await ask("Human GitHub approver logins, comma-separated?")).split(",").map((login) => login.trim()).filter(Boolean);
-    }
     let copilotVersion = options["copilot-version"] === undefined ? undefined : copilotVersionOf(options["copilot-version"]);
     if (proposal.config.planning?.enabled && !options["skip-labels"] && proposal.config.repository && copilotVersion === undefined
       && await Promise.resolve().then(() => copilotVersionVariable(io.client(), proposal.config.repository)).catch(() => null) === null) {

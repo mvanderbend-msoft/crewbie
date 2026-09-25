@@ -1,7 +1,7 @@
 import { hash, integer, record, string } from "../core.js";
 import type { Config } from "../config.js";
 import type { Batch, Task } from "../specification/batch.js";
-import { isApprover, type GitHubApi } from "./github.js";
+import { isWriter, type GitHubApi } from "./github.js";
 import type { Work } from "../execution/dispatch.js";
 import { linkedPull } from "../execution/dispatch.js";
 
@@ -92,7 +92,9 @@ export async function linkAdo(github: GitHubApi, config: Config, issue: number, 
   const body = `Crewbie ADO: ${config.ado.organization}/${config.ado.project}#${workItem}`;
   const path = `/repos/${config.repository}/issues/${issue}/comments`;
   const comments = await github.list(path);
-  if (!comments.some((comment) => comment.body === body && isApprover(comment.user, config.approvers))) {
+  let exists = false;
+  for (const comment of comments) if (comment.body === body && await isWriter(github, config.repository, comment.user)) exists = true;
+  if (!exists) {
     await github.request("POST", path, { body });
   }
 }
@@ -102,8 +104,10 @@ export async function syncAdo(github: GitHubApi, ado: AdoApi, config: Config, wo
     const issue = integer(item.issue.number, "issue number");
     const comments = await github.list(`/repos/${config.repository}/issues/${issue}/comments`);
     const prefix = `Crewbie ADO: ${config.ado.organization}/${config.ado.project}#`;
-    const links = comments.filter((comment) => typeof comment.body === "string" && comment.body.startsWith(prefix)
-      && isApprover(comment.user, config.approvers));
+    const links = [];
+    for (const comment of comments) {
+      if (typeof comment.body === "string" && comment.body.startsWith(prefix) && await isWriter(github, config.repository, comment.user)) links.push(comment);
+    }
     const ids = [...new Set(links.map((comment) => integer(Number(String(comment.body).slice(prefix.length)), "linked ADO ID")))];
     if (ids.length > 1) throw new Error(`Issue #${issue} has conflicting ADO links. Reconcile them before write-back.`);
     if (!ids[0]) continue;

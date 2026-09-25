@@ -46,6 +46,7 @@ async function planningFixture(t, automatic = false) {
     async request(method, path, body) {
       if (method !== "GET") state.writes.push({ method, path, body });
       if (method === "GET" && path === "/user") return sender;
+      if (method === "GET" && path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
       if (method === "GET" && path === `${prefix}/issues/12`) return state.source;
       if (method === "GET" && /^\/repos\/example\/project\/actions\/runs\/(?:42|43|44)$/.test(path)) return state.run;
       if (method === "GET" && path === `${prefix}/pulls/13`) return state.pulls[0];
@@ -185,7 +186,7 @@ test("label provenance, source edits and repository identity are checked before 
   const f = await planningFixture(t);
   await assert.rejects(preparePlanning(f.root, f.client, f.cfg, { ...f.event, repository: { full_name: "other/project" } }), /another repository/);
   f.state.events[0].actor = { login: "outsider", type: "User" };
-  await assert.rejects(preparePlanning(f.root, f.client, f.cfg, f.event), /configured human approver/);
+  await assert.rejects(preparePlanning(f.root, f.client, f.cfg, f.event), /write-access user/);
   f.state.events[0].actor = f.event.sender;
   f.state.source.body += " New scope.";
   await assert.rejects(preparePlanning(f.root, f.client, f.cfg, f.event), /changed after the ready label/);
@@ -458,12 +459,12 @@ test("merge alone, stale or bot approval, dismissed reviews and unresolved chang
   assert.equal(f.state.writes.length, 0);
 });
 
-test("execution cannot bootstrap approvers or merge permission from the planning PR", async (t) => {
+test("execution cannot bootstrap execution or merge permission from the planning PR", async (t) => {
   const f = await mergedFixture(t);
-  await assert.rejects(releaseMergedPlan(f.client, { ...f.active, approvers: ["attacker", "maintainer"] }, 13), /cannot grant itself/);
+  await assert.rejects(releaseMergedPlan(f.client, { ...f.active, maxActive: f.active.maxActive + 1 }, 13), /cannot grant itself/);
   await assert.rejects(releaseMergedPlan(f.client, { ...f.active, planning: { ...f.active.planning, executeOnMerge: false } }, 13), /not enabled/);
   f.state.pulls[0].merged_by = { login: "outsider", type: "User" };
-  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /human approver must merge/);
+  await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /write access must merge/);
   assert.equal(f.state.writes.length, 0);
 });
 
@@ -627,7 +628,7 @@ test("clarification revisions become ready for review and report partial metadat
   }
 });
 
-test("an approver's reply to the plan's questions revises the same PR; other comments never start paid analysis", async (t) => {
+test("a write-access user's reply to the plan's questions revises the same PR; other comments never start paid analysis", async (t) => {
   const f = await planningFixture(t, true);
   await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
   await f.output({ ...f.candidate, questions: ["Which paging size should be used?"], batch: null });

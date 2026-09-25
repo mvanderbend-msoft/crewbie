@@ -3,7 +3,7 @@ import { reviewerFor, type Config } from "../config.js";
 import { agentPrompt, errorCode, integer, json, optionalText, readJson, record, safePath, string, writeAtomic } from "../core.js";
 import { memoryContext } from "../memory/context.js";
 import { taskMetadata, type TaskMetadata } from "../specification/batch.js";
-import { isApprover, type GitHubApi } from "../tracking/github.js";
+import { isWriter, type GitHubApi } from "../tracking/github.js";
 
 export const REVIEW_WORKFLOW = "crewbie-review.yml";
 const REVIEW_PATH = `.github/workflows/${REVIEW_WORKFLOW}`;
@@ -175,7 +175,7 @@ function reviewMarker(body: string): { run: number; pr: number; head: string; ve
   } catch { return null; }
 }
 
-/** The newest review comment for this head, trusted only when the default-branch review workflow, started by an approver, posted it. */
+/** The newest review comment for this head, trusted only when the default-branch review workflow, started by a write-access user, posted it. */
 export async function trustedReview(client: GitHubApi, config: Config, pr: number, head: string, comments?: Record<string, unknown>[]): Promise<TrustedReview | null> {
   const all = comments ?? await client.list(`/repos/${config.repository}/issues/${pr}/comments`);
   const repository = record(await client.request("GET", `/repos/${config.repository}`), "repository");
@@ -186,7 +186,7 @@ export async function trustedReview(client: GitHubApi, config: Config, pr: numbe
     const run = record(await client.request("GET", `/repos/${config.repository}/actions/runs/${marker.run}`), "review run");
     if (run.path !== REVIEW_PATH || run.event !== "workflow_dispatch" || run.head_branch !== repository.default_branch
       || record(run.head_repository, "run repository").full_name !== config.repository || run.display_title !== reviewRunName(pr, head)
-      || !isApprover(run.triggering_actor ?? run.actor, config.approvers)) continue;
+      || !await isWriter(client, config.repository, run.triggering_actor ?? run.actor)) continue;
     return { verdict: marker.verdict, partial: marker.partial, head, url: String(comment.html_url ?? ""), body: String(comment.body).replace(MARKER, "").trim(), createdAt: String(comment.created_at) };
   }
   return null;

@@ -3,8 +3,9 @@
 ## Human approval and credentials
 
 Commit reviewed setup files to the repository's default branch before dispatch.
-Configure `approvers` as individual human GitHub logins. Publication checks the
-authenticated user and writes exact-content approval comments; bots and edited
+Crewbie authorizes human actions from users with write access to the configured
+repository (`admin`, `maintain` or `write`). Publication checks the authenticated
+user and writes exact-content approval comments; bots, read-only users and edited
 approval comments are not accepted as human approval.
 
 Local GitHub access uses `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth login`.
@@ -212,7 +213,7 @@ an init operation, not a planning PR's authority to retire original agents.
 
 The approved configuration is the current roster, not a permanent template.
 `init` on an installed repository and `init --update --model MODEL --out team-review.json`
-reassess the current project without resetting its models, approvers, limits,
+reassess the current project without resetting its models, limits,
 constitution, integrations or learning permissions.
 
 The `review` report contains the LLM assessment; `team` contains static hints,
@@ -409,9 +410,9 @@ gh variable set CREWBIE_COPILOT_VERSION --repo OWNER/REPO --body "1.0.88"
 ```
 
 Init creates the ready-for-planning label with the other workflow labels.
-Put the user-authored PRD/spec in the issue body, then have a configured human approver apply the
+Put the user-authored PRD/spec in the issue body, then have a write-access user apply the
 label. The workflow checks the actual label-event actor and current issue
-content before analysis. Bots, unapproved actors, closed issues, generated
+content before analysis. Bots, read-only users, closed issues, generated
 execution issues and unrelated labels cannot start planning. Creating an issue
 alone is not a trigger. After source changes, review the text and remove/reapply
 the label; it does not continuously analyze every edit.
@@ -449,14 +450,14 @@ The same source/base/configuration snapshot is deduplicated, including a closed
 planning PR. Existing branches without a matching PR indicate interrupted
 publication and stop visibly; inspect them rather than deleting state or blindly
 retrying. For an open plan, reply on the PR: while it has open questions (posted
-as a Crewbie comment, PR in draft) any new approver comment is taken as the answers;
+as a Crewbie comment, PR in draft) any new write-access user comment is taken as the answers;
 otherwise a comment starting with `/crewbie revise` carries the feedback. Each such
 comment requests one paid run (the planning workflow listens to `issue_comment`).
 Locally, `crewbie revise-plan --pr N --feedback-file feedback.txt` previews the same
 revision and `--apply` requests it.
 The workflow accepts an explicit human request, reuses prior setup/plan/batch
 context, skips the full assessment and regenerates the execution manifest.
-Only configured approvers may request it. It checks source, policy and the exact prior head, and advances the branch
+Only users with write access may request it. It checks source, policy and the exact prior head, and advances the branch
 without force; a branch behind the default branch gets it merged into the revision
 commit, so no manual branch update is needed. Previous approvals are stale after
 revision; close/relabel is not needed for ordinary plan feedback. Re-running an already
@@ -479,8 +480,8 @@ For a GitHub-only per-feature handoff, `config.planning.executeOnMerge` defaults
 are not silently opted in. To enable one, explicitly set it true in the installed
 configuration and preview/apply `crewbie update`. Install the updated workflows and commit
 them to the default branch. Configure `CREWBIE_USER_TOKEN` in repository Actions
-secrets using a supported user-authorized credential belonging to a configured
-approver. It needs the documented native-assignment access, issue publication,
+secrets using a supported user-authorized credential belonging to a user with
+write access. It needs the documented native-assignment access, issue publication,
 claim-ref writes and workflow-dispatch permissions. Follow the linked GitHub
 permission guidance rather than assuming an installation token can assign agents.
 Store credentials through the approved secret store, never issues or commits.
@@ -496,7 +497,7 @@ files under `.crewbie/plans/<issue>/`:
 - A bounded execution manifest identifying the planning run and reviewed files.
 
 The planning PR never changes roles, agent charters, memory, configuration,
-approvers, workflows or secrets; any other file blocks execution. Change the team
+workflows or secrets; any other file blocks execution. Change the team
 through reviewed `crewbie init --update`. It includes no application changes. Clarification-only
 plans do not contain an executable manifest and cannot start work when merged.
 If a generated plan needs edits, regenerate it and review the new commit; changing
@@ -674,8 +675,8 @@ history or refund attempts. Repeat for each unaccounted legacy claim that
 preflight identifies. If you cannot establish its history, keep that batch
 blocked rather than inventing a count. This does not repeat paid analysis.
 
-`crewbie pause` previews a repository-wide gate; `--apply` requires a configured
-human approver and uses the same lock as dispatch/review. If dispatch holds the
+`crewbie pause` previews a repository-wide gate; `--apply` requires a user with
+write access and uses the same lock as dispatch/review. If dispatch holds the
 lock, pause fails visibly: do not assume the repository is paused; retry once the
 current operation ends. Once confirmed, no new controlled implementation/review
 launches pass the gate. Already-running sessions continue. Planning and nightly
@@ -684,15 +685,15 @@ analysis have their own opt-in controls and are not paused by this command.
 it does not itself dispatch.
 
 `crewbie reapprove --issue N[,N...]` previews moving open task issues to their
-owner's current `model` in `.crewbie/config.json`. `--apply` requires a
-configured approver, rewrites only the model in the issue's task metadata (scope,
+owner's current `model` in `.crewbie/config.json`. `--apply` requires a user with
+write access, rewrites only the model in the issue's task metadata (scope,
 owner and dependencies are unchanged) and posts an execution approval bound to
 the exact new title and body. It starts nothing; unclaimed tasks launch on the
 next dispatch, and a task that already tried to start needs `crewbie:restart`.
 
 `crewbie cancel --issue N --run-id ID` previews cancellation after verifying an
 unambiguous closing Copilot PR and matching repository, branch, PR identity and
-`dynamic` Actions run. `--apply` requires a human approver, rechecks the run and
+`dynamic` Actions run. `--apply` requires a user with write access, rechecks the run and
 requests the documented Actions cancellation operation. The result distinguishes
 an accepted request from a confirmed cancelled run. Native termination and
 capacity are not assumed from the request; saved commits and claims remain.
@@ -750,7 +751,7 @@ Corrections use the documented Agent Tasks `base_ref`/`head_ref` continuation,
 with the same approved specialist/model. State lives on the isolated
 `crewbie/review-state/<digest>` branch, not in hot memory or on the application
 default branch. Launch intent is persisted before a paid request. Unknown
-outcomes are never automatically repeated. Immutable approver-authored receipts
+outcomes are never automatically repeated. Immutable write-access-user-authored receipts
 let ordinary reconciliation recognize an explicit chain of native tasks on one
 PR; extra or concurrent unrecorded tasks remain ambiguous.
 
@@ -842,7 +843,7 @@ is verified failed, timed out or cancelled also frees capacity; while its PR is
 open the slot stays reserved for an authorized continuation. When Copilot itself
 comments that it was unable to start working on the issue, no session ran:
 capacity is freed and that sole launch does not count toward attempt or batch
-allowances. The claim remains; a configured approver relaunches it with the
+allowances. The claim remains; a user with write access relaunches it with the
 `crewbie:restart` label (see below). Closed-unmerged work stays failed,
 retains its claim, and never satisfies a prerequisite. Missing, ambiguous, active or
 inaccessible task telemetry retains capacity and reports why. A draft PR alone
@@ -862,7 +863,7 @@ Changing a task's kind invalidates its approval like other scope changes.
   and task issues stay open with `crewbie:done` until the feature PR merges. Issues
   published before feature branches carry no branch and are ignored by dispatch
   and launch allowances; finish them by hand.
-- **Restart.** A configured approver adds `crewbie:restart` to a task issue whose
+- **Restart.** A user with write access adds `crewbie:restart` to a task issue whose
   previous session verifiably ended: Copilot reported it could not start, or its
   task failed, timed out or was cancelled and its PR is closed. Dispatch, under
   the lock, reserves a new ledger entry that counts as an attempt, comments the
@@ -898,7 +899,7 @@ Changing a task's kind invalidates its approval like other scope changes.
   with the role's model, and posts one PR comment: a verdict, a summary and
   findings marked blocking or minor, in the reviewer's voice. Any blocking finding
   makes the verdict "changes". Dispatch trusts only comments posted by that
-  default-branch workflow run, started by an approver, for the PR's current head.
+  default-branch workflow run, started by a user with write access, for the PR's current head.
   On "changes", push fixes to the feature branch for a fresh review, or merge
   anyway if you disagree.
   A failed review run is reported with its link and not retried automatically;
@@ -931,7 +932,7 @@ existing accepted policy is preserved.
 Memory entries carry no "proposed" marker; merging the PR is the review. Out-of-scope
 lessons go in one PR comment starting with `<!-- crewbie-memory-proposal -->`,
 with target path, lesson, reason and evidence. The collector includes bounded
-proposals from the Copilot bot or configured approvers in nightly input. It does
+proposals from the Copilot bot or users with write access in nightly input. It does
 not promote comments to policy or force repetitive activity logs for routine work.
 
 On an implementation PR, mention `@copilot` with specific changes or a targeted
@@ -998,7 +999,7 @@ persisted PR metadata as a coordinator finalization step, not proof of what the
 specialist reported. Inspect the native session handoff (for example,
 `gh agent-task view SESSION_ID --repo owner/repo --log`) and actual CI.
 Use `publish --pr N --proposal handoff.json` to preview a concise correction;
-`--apply` requires a configured human approver and matching `headSha`/`beforeHash`.
+`--apply` requires a user with write access and matching `headSha`/`beforeHash`.
 The proposal's `body` must pass the normal format/length check. This changes only
 PR metadata, not code, approvals or merge state, and avoids another paid
 implementation run merely to repair prose.

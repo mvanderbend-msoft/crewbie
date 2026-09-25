@@ -53,6 +53,7 @@ function fixture() {
       async request(method, path, body) {
         if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (f.modelChecks ??= []).push(body.model); throw new GitHubError(f.rejectedModels?.includes(body.model) ? 400 : 412, null); }
         if (method !== "GET") writes.push({ method, path, body: structuredClone(body) });
+        if (path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
         if (path.endsWith("/git/ref/tags/crewbie/paused")) {
           if (!f.paused) throw new GitHubError(404, null);
           return {};

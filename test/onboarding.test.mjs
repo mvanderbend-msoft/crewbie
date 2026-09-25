@@ -362,7 +362,7 @@ test("reassessment preserves existing models, approvals and policy; retirement i
   assert.equal(proposal.config.roles[0].model, "approved-model");
   assert.equal(proposal.config.roles[1].model, "new-model");
   assert.equal(proposal.config.maxActive, 1);
-  assert.deepEqual(proposal.config.approvers, ["maintainer"]);
+  assert.equal("approvers" in proposal.config, false);
 });
 
 test("guidance can be skipped independently; approved changes bind to inspected content", async (t) => {
@@ -397,6 +397,7 @@ function githubLabels() {
       if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") throw new GitHubError(412, null);
       calls.push({ method, path, body });
       if (method === "GET" && path === "/user") return { login: "maintainer", type: "User" };
+      if (method === "GET" && path.includes("/collaborators/")) return { permission: "write" };
       if (method === "POST" && path.endsWith("/labels")) { labels.push(body); return body; }
       throw new Error(`Unexpected ${method} ${path}`);
     },
@@ -458,7 +459,7 @@ test("interactive init shows assessment and preview before applying team-only ch
   const prompts = [], reports = [];
   const answers = ["team", "no", "yes"];
   const remote = githubLabels();
-  await initCommand(root, { model: "chosen-model", repo: "example/project", approver: ["maintainer"] }, {
+  await initCommand(root, { model: "chosen-model", repo: "example/project" }, {
     analyze: async () => JSON.stringify(response(report, { instructions: [{ path: "AGENTS.md", content: "Proposed change.", reason: "Clarify scope." }] })),
     ask: async (question) => { prompts.push(question); return answers.shift(); },
     client: () => remote.client, report: (text) => reports.push(text),
@@ -486,7 +487,7 @@ test("interactive init with hosted planning asks for a missing Copilot CLI versi
     if (method === "POST" && path.endsWith("/actions/variables")) { variables[body.name] = body.value; return null; }
     return request(method, path, body);
   };
-  await initCommand(root, { model: "chosen-model", repo: "example/project", approver: ["maintainer"] }, {
+  await initCommand(root, { model: "chosen-model", repo: "example/project" }, {
     analyze: async () => JSON.stringify(response(report)),
     ask: async (question) => { prompts.push(question); return answers.shift(); },
     latestCopilotVersion: async () => "1.0.88",

@@ -6,7 +6,7 @@ import { cloudTasks, linkedPull, selectNativeTask, withDispatchLock } from "./di
 import { attributePull } from "./attribution.js";
 import { issueDigest, taskMetadata } from "../specification/batch.js";
 import { hasApproval, setStatus } from "../tracking/issues.js";
-import { isApprover, requireApprover, type GitHubApi } from "../tracking/github.js";
+import { isWriter, requireWriter, type GitHubApi } from "../tracking/github.js";
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { checkLaunchModels, launchAllowance, listCopilotModels, reserveLaunch, type DiscoverModels } from "./controls.js";
@@ -147,7 +147,11 @@ async function receipt(client: GitHubApi, config: Config, issue: number, job: Jo
   const body = `<!-- crewbie-continuation:${Buffer.from(JSON.stringify({ task: job.id, previous: job.previous })).toString("base64")} -->`;
   const path = `/repos/${config.repository}/issues/${issue}/comments`;
   const comments = await client.list(path);
-  if (!comments.some((comment) => isApprover(comment.user, config.approvers) && comment.body === body && comment.created_at === comment.updated_at)) await client.request("POST", path, { body });
+  let exists = false;
+  for (const comment of comments) {
+    if (comment.body === body && comment.created_at === comment.updated_at && await isWriter(client, config.repository, comment.user)) exists = true;
+  }
+  if (!exists) await client.request("POST", path, { body });
 }
 async function completedJob(client: GitHubApi, config: Config, job: Job, owner: string, model: string, issue: Record<string, unknown>) {
   if (job.launching || !job.id) throw new Error("A launch has an uncertain outcome. Inspect the native task before manually repairing its receipt; automatic retry is forbidden.");
@@ -176,7 +180,7 @@ async function checkScope(client: GitHubApi, repository: string, pr: number, pat
 }
 
 export async function reconcileReview(client: GitHubApi, config: Config, plan: ReviewPlan, ado?: AdoApi, discoverModels: DiscoverModels = listCopilotModels): Promise<{ phase: State["phase"]; round: number; reason: string }> {
-  await requireApprover(client, config.approvers);
+  await requireWriter(client, config.repository);
   return withDispatchLock(client, config, async () => {
     const digest = hash(JSON.stringify(plan)), branch = `crewbie/review-state/${digest.slice(0, 20)}`;
     const stored = await readState(client, config.repository, branch, digest);
@@ -327,7 +331,10 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
         const marker = `<!-- crewbie-review:${digest}:${state.round}:${review.pr}:${review.headSha} -->`;
         const body = `${marker}\n**Reviewer:** \`crewbie-reviewer\` | **Verdict:** ${review.verdict}\nReviewed head: \`${review.headSha}\`\nNative task: https://github.com/${config.repository}/tasks/${job.id}\n\n${review.summary}\n\n${review.findings.map((finding) => `- **${finding.path}:${finding.line}** ${finding.body}`).join("\n")}\n\nPublished from the specialist's report in #${job.pr}. This automated review is not human merge approval.`;
         const path = `/repos/${config.repository}/pulls/${review.pr}/reviews`;
-        const existing = (await client.list(path)).filter((entry) => isApprover(entry.user, config.approvers) && String(entry.body).startsWith(marker));
+        const existing = [];
+        for (const entry of await client.list(path)) {
+          if (String(entry.body).startsWith(marker) && await isWriter(client, config.repository, entry.user)) existing.push(entry);
+        }
         if (existing.some((entry) => entry.body !== body || entry.commit_id !== review.headSha)) throw new Error("Published review differs from its pinned report.");
         if (!existing.length) await client.request("POST", path, { commit_id: review.headSha, event: "COMMENT", body });
       }

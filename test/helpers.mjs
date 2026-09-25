@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 
 export const config = (overrides = {}) => ({
-  schemaVersion: 1, repository: "example/project", approvers: ["maintainer"],
+  schemaVersion: 1, repository: "example/project",
   roles: [{ id: "developer", purpose: "Implement focused changes and verify existing behavior.", model: "approved-model" }],
   constitution: null, maxActive: 2,
   nightly: { enabled: false, maxRecords: 20, allowedPaths: [".crewbie/team/", ".crewbie/decisions/", ".crewbie/decisions.md"] },

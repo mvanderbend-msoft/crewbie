@@ -5,7 +5,7 @@ import { eligible } from "../dist/execution/dispatch.js";
 import { approvalComment, approvedIn, hasApproval, publish, publishDescription, reapproveIssues, setStatus } from "../dist/tracking/issues.js";
 import { GitHubError } from "../dist/core.js";
 import { hash } from "../dist/core.js";
-import { api } from "../dist/tracking/github.js";
+import { api, isWriter, requireWriter } from "../dist/tracking/github.js";
 import { checkPrDescription } from "../dist/specification/prose.js";
 import { batch, config, task, work } from "./helpers.mjs";
 
@@ -86,7 +86,10 @@ test("approval comments require trusted human authors and unchanged exact conten
   const issue = { number: 1, title: "Task", body: "Approved content" };
   const body = approvalComment(issueDigest(issue.title, issue.body), true);
   const comment = { body, user: { type: "User", login: "maintainer" }, created_at: "same", updated_at: "same" };
-  const client = { list: async () => [comment] };
+  const client = {
+    list: async () => [comment],
+    request: async (_method, path) => ({ permission: path.includes("/maintainer/") ? "write" : "read" }),
+  };
   assert.equal(await hasApproval(client, config(), issue), true);
   assert.equal(await hasApproval(client, config(), { ...issue, body: "Tampered" }), false);
   comment.user.login = "untrusted";
@@ -95,6 +98,26 @@ test("approval comments require trusted human authors and unchanged exact conten
   assert.equal(await hasApproval(client, config(), issue), false);
   comment.user = null;
   assert.equal(await hasApproval(client, config(), issue), false, "deleted accounts cannot authorize work or break reconciliation");
+});
+
+test("repository write permission authorizes humans but not read-only users or bots", async () => {
+  const calls = [];
+  const client = {
+    async request(method, path) {
+      calls.push(`${method} ${path}`);
+      if (path === "/user") return { type: "User", login: "maintainer" };
+      const login = decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]);
+      return { permission: login === "maintainer" ? "write" : login === "admin" ? "admin" : login === "triager" ? "triage" : "read", role_name: login === "custom" ? "maintain" : undefined };
+    },
+  };
+  assert.equal(await isWriter(client, "example/project", { type: "User", login: "maintainer" }), true);
+  assert.equal(await isWriter(client, "example/project", { type: "User", login: "reader" }), false);
+  assert.equal(await isWriter(client, "example/project", { type: "User", login: "triager" }), false);
+  assert.equal(await isWriter(client, "example/project", { type: "Bot", login: "maintainer" }), false);
+  assert.equal(await isWriter(client, "example/project", { type: "User", login: "custom" }), true);
+  assert.equal(await requireWriter(client, "example/project"), "maintainer");
+  await isWriter(client, "example/project", { type: "User", login: "maintainer" });
+  assert.equal(calls.filter((call) => call.includes("/collaborators/maintainer/permission")).length, 1, "permission checks are cached per client/repository/login");
 });
 
 test("publication retries reuse issues and approvals; bot labels get an explicit dispatch", async () => {
@@ -109,6 +132,7 @@ test("publication retries reuse issues and approvals; bot labels get an explicit
     async request(method, path, body) {
       requests.push({ method, path, body });
       if (path === "/user") return { login: "maintainer", type: "User" };
+      if (path.includes("/collaborators/")) return { permission: "write" };
       if (path.endsWith("/labels")) return body;
       if (path.endsWith("/dispatches")) return null;
       if (method === "GET" && path === "/repos/example/project") return { default_branch: "main" };
@@ -207,6 +231,7 @@ test("PR handoff finalization is previewable, human-authorized and bound to curr
   let login = "maintainer";
   const client = { async request(method, path, data) {
     if (path === "/user") return { type: "User", login };
+    if (path.includes("/collaborators/")) return { permission: login === "maintainer" ? "write" : "read" };
     if (method === "GET") return pr;
     writes.push(data); return { ...pr, body: data.body };
   } };
@@ -214,7 +239,7 @@ test("PR handoff finalization is previewable, human-authorized and bound to curr
   assert.equal((await publishDescription(client, config(), 2, proposal)).after, body);
   assert.equal(writes.length, 0);
   login = "stranger";
-  await assert.rejects(publishDescription(client, config(), 2, proposal, true), /human approver/);
+  await assert.rejects(publishDescription(client, config(), 2, proposal, true), /write access/);
   login = "maintainer";
   await publishDescription(client, config(), 2, proposal, true);
   assert.deepEqual(writes, [{ body }]);
@@ -247,6 +272,7 @@ test("reapprove moves open tasks to the owner's configured model and approves th
     async list(path) { return comments[Number(path.match(/issues\/(\d+)\/comments/)[1])] ?? []; },
     async request(method, path, body) {
       if (path === "/user") return { type: "User", login };
+      if (path.includes("/collaborators/")) return { permission: login === "maintainer" ? "write" : "read" };
       if (path.includes("/git/ref/tags/crewbie/claims/1")) return { object: { sha: "x" } };
       const number = Number(path.match(/issues\/(\d+)/)?.[1]);
       if (method === "GET") return structuredClone(issues[number]);
@@ -258,13 +284,13 @@ test("reapprove moves open tasks to the owner's configured model and approves th
   };
   assert.match(await reapproveIssues(client, cfg, [1], false), /#1: model retired-model -> approved-model for crewbie-developer; add crewbie:restart/);
   assert.equal(writes.length, 0, "Preview writes nothing.");
-  await assert.rejects(reapproveIssues(client, cfg, [1], true), /configured human approver/);
+  await assert.rejects(reapproveIssues(client, cfg, [1], true), /write access/);
   assert.equal(writes.length, 0);
   login = "maintainer";
   assert.match(await reapproveIssues(client, cfg, [1], true), /Updated and re-approved/);
   assert.equal(taskMetadata(issues[1].body).task.model, "approved-model");
   assert.deepEqual({ ...taskMetadata(issues[1].body).task, model: "retired-model" }, taskMetadata(oldBody).task, "Only the model changes.");
-  assert.ok(approvedIn(comments[1], cfg, issues[1]));
+  assert.ok(await approvedIn(client, comments[1], cfg, issues[1]));
   assert.match(await reapproveIssues(client, cfg, [1], true), /already approved[\s\S]*Nothing to change/);
   await assert.rejects(reapproveIssues(client, cfg, [2], false), /closed/);
 });

@@ -1,6 +1,6 @@
 import { agentArchivePath, loadConfig } from "../config.js";
 import { GitHubError, hash, json, optionalText, readJson, record, safePath, string, textHash } from "../core.js";
-import { requireApprover, type GitHubApi } from "../tracking/github.js";
+import { requireWriter, type GitHubApi } from "../tracking/github.js";
 import { applyInstallation, installation } from "./install.js";
 import { copilotVersionCommand, copilotVersionVariable } from "./copilot-version.js";
 import { PACKAGE_PIN, PACKAGE_VERSION } from "./package.js";
@@ -45,7 +45,7 @@ export async function updateRepository(root: string, options: { apply?: boolean;
   ].join("\n");
   if (conflicts.length) throw new Error(`Update blocked; no changes applied. Preserve and reconcile these edited files, then preview again: ${conflicts.join(", ")}`);
   if (variableChange && client) {
-    await requireApprover(client, config.approvers);
+    await requireWriter(client, config.repository);
     const fresh = record(await client.request("GET", variablePath), "current package variable");
     if (fresh.value !== override) throw new Error("CREWBIE_PACKAGE changed since preview; update again.");
   }

@@ -1,7 +1,7 @@
 import { reviewerFor, type Config } from "../config.js";
 import { GitHubError, hash, integer, record, string } from "../core.js";
 import { batchDigest, issueBody, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
-import { isApprover, type GitHubApi } from "../tracking/github.js";
+import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { approvedIn, ensureLabels, hasApproval, managedIssues, setStatus } from "../tracking/issues.js";
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
@@ -47,7 +47,7 @@ export async function selectNativeTask(client: GitHubApi, config: Config, issue:
   const comments = await client.list(`/repos/${config.repository}/issues/${issue}/comments`);
   const candidates = new Set<string>();
   for (const comment of comments) {
-    if (!isApprover(comment.user, config.approvers) || comment.created_at !== comment.updated_at) continue;
+    if (!await isWriter(client, config.repository, comment.user) || comment.created_at !== comment.updated_at) continue;
     const marker = /^<!-- crewbie-continuation:([A-Za-z0-9+/=]+) -->$/.exec(String(comment.body));
     if (!marker?.[1]) continue;
     const receipt = record(JSON.parse(Buffer.from(marker[1], "base64").toString("utf8")) as unknown, "continuation receipt");
@@ -60,8 +60,8 @@ export async function selectNativeTask(client: GitHubApi, config: Config, issue:
   if (candidates.size !== 1) return undefined;
   return matches.find((task) => candidates.has(String(task.id)));
 }
-function receiptOf(comment: Record<string, unknown>, config: Config): { task: string; previous: string[] } | null {
-  if (!isApprover(comment.user, config.approvers) || comment.created_at !== comment.updated_at) return null;
+async function receiptOf(client: GitHubApi, comment: Record<string, unknown>, config: Config): Promise<{ task: string; previous: string[] } | null> {
+  if (!await isWriter(client, config.repository, comment.user) || comment.created_at !== comment.updated_at) return null;
   const marker = /^<!-- crewbie-continuation:([A-Za-z0-9+/=]+) -->$/.exec(String(comment.body));
   if (!marker?.[1]) return null;
   try {
@@ -70,8 +70,12 @@ function receiptOf(comment: Record<string, unknown>, config: Config): { task: st
   } catch { return null; }
 }
 /** A continuation whose task is not yet linked to the PR is still starting; the earlier completed task must not count as the outcome. */
-export function pendingContinuation(comments: Record<string, unknown>[], config: Config, matches: Record<string, unknown>[]): string | null {
-  const latest = [...comments].reverse().map((comment) => receiptOf(comment, config)).find((receipt) => receipt !== null);
+export async function pendingContinuation(client: GitHubApi, comments: Record<string, unknown>[], config: Config, matches: Record<string, unknown>[]): Promise<string | null> {
+  let latest: { task: string; previous: string[] } | null = null;
+  for (const comment of [...comments].reverse()) {
+    latest = await receiptOf(client, comment, config);
+    if (latest) break;
+  }
   return latest && !matches.some((task) => task.id === latest.task) ? latest.task : null;
 }
 function copilotAssigned(issue: Record<string, unknown>): boolean {
@@ -198,7 +202,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     const number = integer(issue.number, "issue number");
     const claim = claims.has(number);
     const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
-    const approved = approvedIn(comments, config, issue);
+    const approved = await approvedIn(client, comments, config, issue);
     let pr = claim ? await linkedPull(client, config.repository, number, metadata.branch) : null;
     const restart = [...comments].reverse().find((comment) => String(comment.body ?? "").includes(RESTART_MARKER));
     // After a restart, an earlier closed, unmerged PR belongs to the ended attempt.
@@ -223,7 +227,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
         return artifact.provider === "github" && artifact.type === "pull" && artifact.data !== undefined
           && typeof pr.id === "number" && record(artifact.data, "artifact data").id === pr.id;
       }));
-      nativeTask = pendingContinuation(comments, config, matches) ? undefined : await selectNativeTask(client, config, number, matches);
+      nativeTask = await pendingContinuation(client, comments, config, matches) ? undefined : await selectNativeTask(client, config, number, matches);
       sessionComplete = nativeTask?.state === "completed";
       const failed = nativeTask !== undefined && ["failed", "timed_out", "cancelled"].includes(String(nativeTask.state));
       // An open PR may still receive an authorized continuation, so only closure releases a failed session's slot.
@@ -517,9 +521,9 @@ async function restarts(client: GitHubApi, config: Config, work: Work[], sha: st
     const events = await client.list(`${prefix}/issues/${issue}/events`);
     const labeled = [...events].reverse().find((event) => event.event === "labeled" && event.label !== null && event.label !== undefined
       && record(event.label, "label").name === RESTART_LABEL);
-    if (!labeled || !isApprover(labeled.actor, config.approvers)) {
-      item.reason = "Restart refused: the label was not applied by a configured approver.";
-      await consume(`Crewbie did not restart this task: the \`${RESTART_LABEL}\` label must be applied by a configured approver.`);
+    if (!labeled || !await isWriter(client, config.repository, labeled.actor)) {
+      item.reason = "Restart refused: the label was not applied by a user with write access.";
+      await consume(`Crewbie did not restart this task: the \`${RESTART_LABEL}\` label must be applied by a user with write access.`);
       continue;
     }
     const problem = restartProblem(item);

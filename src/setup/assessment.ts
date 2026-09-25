@@ -66,11 +66,11 @@ export async function assess(root: string): Promise<Assessment> {
       "Which instruction-quality warnings reflect stale or redundant guidance, and which are justified policies to preserve?",
       "Which expertise does the project and upcoming feature need? Review the team evidence; add custom specialists or split, specialize and retire existing roles only after reviewing their open work.",
       "Approve explicit models and domain checks for added roles. Existing models, policy and memory are preserved; discovery hints are not a fixed roster.",
-      "Enable hosted planning from crewbie:ready-for-planning labels? Approve planning.model and the human approvers first; this authorizes planning, not implementation.",
+      "Enable hosted planning from crewbie:ready-for-planning labels? Approve planning.model first; users with repository write access can request planning, but this authorizes planning, not implementation.",
       "Enable planning.executeOnMerge? Then a human approval of the exact planning head plus a human merge authorizes automatic paid execution; configure the supported assignment credential once.",
     ],
     config: installed ? { ...installed, roles } : {
-      schemaVersion: 1, repository: "", approvers: [], roles, constitution: existingConstitution,
+      schemaVersion: 1, repository: "", roles, constitution: existingConstitution,
       maxActive: 2, modelProfile: "balanced", execution: { ...DEFAULT_EXECUTION_LIMITS }, nightly: {
         enabled: false, maxRecords: 20,
         allowedPaths: [

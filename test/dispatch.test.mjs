@@ -55,6 +55,7 @@ function githubFixture(input = batch()) {
         throw new Error(`Unexpected list: ${path}`);
       },
       async request(method, path, body) {
+        if (path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
         if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (fixture.modelChecks ??= []).push(body.model); throw new GitHubError(fixture.probeStatus ?? (fixture.rejectedModels?.includes(body.model) ? 400 : 412), null); }
         if (path.endsWith("/git/ref/tags/crewbie/paused")) {
           if (!fixture.paused) throw new GitHubError(404, null);
@@ -743,7 +744,7 @@ test("an open task whose prerequisite closed long ago launches once that prerequ
   }
 });
 
-test("an approver's restart label relaunches a verified non-start as a counted attempt; other requests are refused", async () => {
+test("a write-access user's restart label relaunches a verified non-start as a counted attempt; other requests are refused", async () => {
   const fixture = githubFixture();
   await dispatch(fixture.client, config());
   const launchesFor = (issue) => fixture.assignments.filter((body) => body.agent_assignment.custom_instructions.startsWith(`Implement only issue #${issue}.`)).length;
@@ -757,7 +758,7 @@ test("an approver's restart label relaunches a verified non-start as a counted a
   await dispatch(fixture.client, config());
   assert.equal(launchesFor(1), 1);
   assert.ok(!fixture.issues[0].labels.includes("crewbie:restart"), "A refused request is consumed.");
-  assert.match(fixture.posted.at(-1).comment.body, /configured approver/);
+  assert.match(fixture.posted.at(-1).comment.body, /write access/);
   request(3, "maintainer");
   await dispatch(fixture.client, config());
   assert.equal(launchesFor(3), 1, "A running session is never relaunched.");

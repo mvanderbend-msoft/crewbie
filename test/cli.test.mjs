@@ -14,7 +14,6 @@ test("CLI supports assessment -> reviewed installation -> specification approval
   run(root, "init", "--assessment-only", "--out", "setup.json");
   const proposal = JSON.parse(await readFile(join(root, "setup.json"), "utf8"));
   proposal.config.repository = "example/project";
-  proposal.config.approvers = ["maintainer"];
   for (const role of proposal.config.roles) role.model = "approved-model";
   proposal.config.constitution = ".crewbie/constitution.md";
   proposal.constitutionText = "# Project principles\n\nPreserve documented behavior. Check changed behavior with focused tests; report existing failures separately.";

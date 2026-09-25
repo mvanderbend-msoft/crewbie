@@ -1,7 +1,7 @@
 import { DEFAULT_EXECUTION_LIMITS, requireExecution, type Config } from "../config.js";
 import { GitHubError, integer, record, slug, string } from "../core.js";
 import { taskMetadata } from "../specification/batch.js";
-import { requireApprover, type GitHubApi } from "../tracking/github.js";
+import { requireWriter, type GitHubApi } from "../tracking/github.js";
 import { listCopilotModels, type ModelChoice } from "../setup/copilot.js";
 
 type Metadata = NonNullable<ReturnType<typeof taskMetadata>>;
@@ -64,7 +64,7 @@ export async function launchesPaused(client: GitHubApi, config: Config): Promise
 }
 export async function setLaunchPause(client: GitHubApi, config: Config, paused: boolean, apply: boolean): Promise<string> {
   if (!apply) return `Preview: ${paused ? "pause" : "resume"} future Crewbie implementation/review launches repository-wide. Running sessions are not stopped; allowances and approvals are not reset. Repeat with --apply.`;
-  await requireApprover(client, config.approvers);
+  await requireWriter(client, config.repository);
   return withDispatchLock(client, config, async () => {
     if (await launchesPaused(client, config) !== paused) {
       if (paused) await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/${PAUSE}`, sha: await defaultHead(client, config) });
@@ -151,7 +151,7 @@ export async function baselineLaunches(client: GitHubApi, config: Config, issue:
   };
   const prior = await inspect();
   if (!apply) return `Preview: record ${attempts} historical attempts for #${issue} in batch ${prior.metadata.batch}. This is YOUR attestation after reviewing prior initial, continuation and uncertain launches, not measured telemetry. It consumes allowance and cannot be reset. Repeat with --apply; no agents will start.`;
-  await requireApprover(client, config.approvers);
+  await requireWriter(client, config.repository);
   return withDispatchLock(client, config, async () => {
     const fresh = await inspect();
     if (fresh.path !== prior.path) throw new Error("Historical task identity changed; preview again.");

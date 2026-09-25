@@ -3,7 +3,7 @@ import { limitsFor, PLANNING_LABEL, RESTART_LABEL, requireExecution } from "../c
 import { GitHubError, hash, integer, record, string } from "../core.js";
 import { checkPrDescription } from "../specification/prose.js";
 import { batchDigest, issueBody, issueDigest, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
-import { isApprover, requireApprover, type GitHubApi } from "./github.js";
+import { isWriter, requireWriter, type GitHubApi } from "./github.js";
 import { verifySources } from "./sources.js";
 import type { AdoApi } from "./ado.js";
 
@@ -12,7 +12,7 @@ export function setupLabels(config: Config): string[] {
   return ["crewbie:managed", PLANNING_LABEL, RESTART_LABEL, ...STATUSES.map((status) => `crewbie:${status}`), ...config.roles.map((role) => `crewbie:owner:${role.id}`)];
 }
 const LABEL_PURPOSES: Record<string, string> = {
-  [RESTART_LABEL]: "Approver request: relaunch a task whose previous session ended; counts as an attempt.",
+  [RESTART_LABEL]: "Write-access request: relaunch a task whose previous session ended; counts as an attempt.",
 };
 export function labelDescription(name: string): string {
   return LABEL_PURPOSES[name] ?? "Crewbie workflow metadata; approval and prerequisites are checked separately.";
@@ -35,7 +35,7 @@ export function approvalComment(digest: string, execute: boolean): string {
 export async function hasApproval(client: GitHubApi, config: Config, issue: Record<string, unknown>, execute = true): Promise<boolean> {
   string(issue.body, "issue body");
   const comments = await client.list(`/repos/${config.repository}/issues/${integer(issue.number, "issue number")}/comments`);
-  return approvedIn(comments, config, issue, execute);
+  return approvedIn(client, comments, config, issue, execute);
 }
 /**
  * Moves approved task issues to their owner's current configured model and re-approves the exact new title and body.
@@ -56,7 +56,7 @@ export async function reapproveIssues(client: GitHubApi, config: Config, issues:
     const payload = { ...metadata, task: { ...metadata.task, model: role.model } };
     const next = body.replace(/<!-- crewbie-task:[A-Za-z0-9+/=]+ -->/, `<!-- crewbie-task:${Buffer.from(JSON.stringify(payload)).toString("base64")} -->`);
     const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
-    if (next === body && approvedIn(comments, config, issue)) { lines.push(`#${number}: already approved for crewbie-${role.id} on ${role.model}; nothing to change.`); continue; }
+    if (next === body && await approvedIn(client, comments, config, issue)) { lines.push(`#${number}: already approved for crewbie-${role.id} on ${role.model}; nothing to change.`); continue; }
     let claimed = true;
     try { await client.request("GET", `/repos/${config.repository}/git/ref/tags/crewbie/claims/${number}`); }
     catch (error) { if (error instanceof GitHubError && error.status === 404) claimed = false; else throw error; }
@@ -64,7 +64,7 @@ export async function reapproveIssues(client: GitHubApi, config: Config, issues:
     lines.push(`#${number}: ${next === body ? "re-approve" : `model ${metadata.task.model} -> ${role.model}`} for crewbie-${role.id}${claimed ? `; add ${RESTART_LABEL} afterwards to relaunch it` : ""}.`);
   }
   if (!apply) return `Preview:\n${lines.join("\n")}\nRepeat with --apply to update the issues and post your execution approval. No agents are started.`;
-  if (changes.length) await requireApprover(client, config.approvers);
+  if (changes.length) await requireWriter(client, config.repository);
   for (const change of changes) {
     await client.request("PATCH", `/repos/${config.repository}/issues/${change.number}`, { body: change.body });
     await client.request("POST", `/repos/${config.repository}/issues/${change.number}/comments`, { body: approvalComment(issueDigest(change.title, change.body), true) });
@@ -72,14 +72,17 @@ export async function reapproveIssues(client: GitHubApi, config: Config, issues:
   return `${lines.join("\n")}\n${changes.length ? "Updated and re-approved. No agents were started; dispatch launches unclaimed tasks on its next run." : "Nothing to change."}`;
 }
 /** hasApproval over comments the caller already fetched. */
-export function approvedIn(comments: Record<string, unknown>[], config: Config, issue: Record<string, unknown>, execute = true): boolean {
+export async function approvedIn(client: GitHubApi, comments: Record<string, unknown>[], config: Config, issue: Record<string, unknown>, execute = true): Promise<boolean> {
   const expected = approvalComment(issueDigest(string(issue.title, "issue title"), string(issue.body, "issue body")), execute);
-  return comments.some((comment) => isApprover(comment.user, config.approvers) && comment.body === expected && comment.created_at === comment.updated_at);
+  for (const comment of comments) {
+    if (comment.body === expected && comment.created_at === comment.updated_at && await isWriter(client, config.repository, comment.user)) return true;
+  }
+  return false;
 }
 export async function publish(client: GitHubApi, config: Config, batch: Batch, ado?: AdoApi, dispatchWorkflow = true): Promise<{ task: string; issue: number }[]> {
   requireExecution(config);
   requireApproval(batch);
-  await requireApprover(client, config.approvers);
+  await requireWriter(client, config.repository);
   await verifySources(batch.sources, client, config, ado);
   await ensureLabels(client, config);
   const existing = await managedIssues(client, config.repository);
@@ -150,7 +153,7 @@ export async function publishDescription(client: GitHubApi, config: Config, numb
     throw new Error("PR head or description changed. Review a fresh proposal; nothing was overwritten.");
   }
   if (apply) {
-    await requireApprover(client, config.approvers);
+    await requireWriter(client, config.repository);
     const updated = record(await client.request("PATCH", path, { body: after }), "updated PR");
     if (updated.body !== after) throw new Error("GitHub did not confirm the proposed description. Inspect the PR before retrying.");
   }

@@ -21,7 +21,7 @@ import { preparePlanning, publishPlanning, requestPlanningRevision } from "./spe
 import { prepareReview, publishReview } from "./execution/pr-review.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
 import { checkPrDescription } from "./specification/prose.js";
-import { api, requireApprover } from "./tracking/github.js";
+import { api, requireWriter } from "./tracking/github.js";
 import { publish, publishDescription, reapproveIssues } from "./tracking/issues.js";
 import { adoApi, createWorkItem, importWorkItem, linkAdo, syncAdo, writeBack } from "./tracking/ado.js";
 import { verifySources } from "./tracking/sources.js";
@@ -43,7 +43,7 @@ SETUP AND GUIDANCE
     --specialist-model MODEL                      Explicit new-specialist model override
     --model-profile economy|balanced|quality      Capability-aware selection (default balanced)
     --description "project intent"                Greenfield context; asks again when unclear
-    --repo owner/name --approver LOGIN             Setup repository and human approvers
+    --repo owner/name                             Setup repository for labels and workflows
   init --assessment-only [--out setup.json]        Offline inventory; no LLM
   init --update --out team.json                   Reassess an installed crew without resetting policy
   init --proposal setup.json --apply --guidance apply|skip
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
       "historical-attempts": { type: "string" },
       out: { type: "string" }, proposal: { type: "string" }, apply: { type: "boolean" },
       update: { type: "boolean" }, batch: { type: "string" }, yes: { type: "boolean" },
-      description: { type: "string" }, approver: { type: "string", multiple: true },
+      description: { type: "string" },
       guidance: { type: "string" }, "assessment-only": { type: "boolean" }, "skip-labels": { type: "boolean" },
       "copilot-version": { type: "string" },
       execute: { type: "boolean" }, source: { type: "string" }, issue: { type: "string" },
@@ -237,7 +237,7 @@ async function main(): Promise<void> {
       output.data({ batch: batch.id, repository: config.repository, tasks: batch.tasks, createAdoWorkItems: values["ado-create"] === true, executionApproved: batch.approval?.execute, dispatch: values["dispatch-local"] ? "local" : "workflow" });
       if (!values.apply) { output.text("Preview only. Add --apply to publish the approved work."); return; }
       const github = api(token());
-      await requireApprover(github, config.approvers);
+      await requireWriter(github, config.repository);
       const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
       await verifySources(batch.sources, github, config, ado);
       const adoMapping = new Map<string, number>();

@@ -82,6 +82,7 @@ test("repository update previews and synchronizes an old Actions package overrid
   const client = {
     async request(method, path, body) {
       if (path === "/user") return { login: "maintainer", type: "User" };
+      if (path.includes("/collaborators/")) return { permission: "write" };
       assert.equal(path, "/repos/example/project/actions/variables/CREWBIE_PACKAGE");
       if (method === "GET") return { value };
       assert.equal(method, "PATCH");

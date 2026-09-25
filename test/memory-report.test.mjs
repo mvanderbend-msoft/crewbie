@@ -45,6 +45,7 @@ test("deferred memory proposals reach nightly evidence without accepting arbitra
         nodes: [{ number: 2, repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false, endCursor: null },
       } } } } };
       if (path.endsWith("/pulls/2")) return { number: 2, body: "Focused change.", state: "open", user: { login: "Copilot" }, updated_at: "2026-09-22T07:00:00Z", head: { sha: "head" }, base: { ref: BRANCH } };
+      if (path.includes("/collaborators/")) return { permission: "read" };
       if (path.includes("/check-runs")) return { check_runs: [] };
       throw new Error(`Unexpected ${path}`);
     },

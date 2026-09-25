@@ -20,7 +20,6 @@ export function modelProfile(value: unknown): ModelProfile {
 export interface Config {
   schemaVersion: 1;
   repository: string;
-  approvers: string[];
   roles: Role[];
   constitution: string | null;
   maxActive: number;
@@ -56,8 +55,10 @@ export function parseConfig(value: unknown): Config {
   if (data.schemaVersion !== 1) throw new Error("Unsupported configuration version.");
   const repository = string(data.repository, "repository", true);
   if (repository && !/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("repository must be owner/name.");
-  const approvers = strings(data.approvers, "approvers");
-  if (approvers.some((login) => !/^[A-Za-z0-9-]+$/.test(login))) throw new Error("Approvers must be GitHub user logins.");
+  if (data.approvers !== undefined) {
+    const approvers = strings(data.approvers, "approvers");
+    if (approvers.some((login) => !/^[A-Za-z0-9-]+$/.test(login))) throw new Error("Approvers must be GitHub user logins.");
+  }
   if (!Array.isArray(data.roles) || !data.roles.length) throw new Error("Define at least one role.");
   const roles = data.roles.map((value): Role => {
     const role = record(value, "role");
@@ -138,7 +139,7 @@ export function parseConfig(value: unknown): Config {
     review = { enabled: value.enabled, role, ...(model === undefined ? {} : { model }) };
   }
   return {
-    schemaVersion: 1, repository, approvers, roles, constitution,
+    schemaVersion: 1, repository, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),
     nightly: { enabled: nightly.enabled, maxRecords: integer(nightly.maxRecords, "maxRecords", 1, 100), allowedPaths },
     ado, limits, ...(planning ? { planning } : {}),
@@ -157,6 +158,6 @@ export async function loadConfig(root: string): Promise<Config> {
   return config;
 }
 export function requireExecution(config: Config): void {
-  if (!config.repository || !config.approvers.length) throw new Error("Configure a repository and human approvers before remote writes.");
+  if (!config.repository) throw new Error("Configure a repository before remote writes.");
   if (config.roles.some((role) => !role.model.trim())) throw new Error("Approve an explicit model for every specialist before execution.");
 }

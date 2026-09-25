@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { unlink } from "node:fs/promises";
 import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, optionalText, readJson, record, safePath, string, strings, textHash, writeAtomic } from "../core.js";
 import { limitsFor, parseConfig, PLANNING_LABEL, reviewerFor, type Config } from "../config.js";
-import { isApprover, requireApprover, type GitHubApi } from "../tracking/github.js";
+import { isWriter, requireWriter, type GitHubApi } from "../tracking/github.js";
 import { memoryContext, relevantTopics } from "../memory/context.js";
 import { assess } from "../setup/assessment.js";
 import { batchDigest, featureBranch, issueDigest, parseBatch, type Batch } from "./batch.js";
@@ -32,8 +32,8 @@ async function sourceIssue(client: GitHubApi, config: Config, number: number, ac
   const events = (await client.list(`${prefix}/events`)).filter((event) =>
     ["labeled", "unlabeled"].includes(String(event.event)) && record(event.label, "event label").name === PLANNING_LABEL);
   const latest = events.sort((a, b) => integer(a.id, "label event") - integer(b.id, "label event")).at(-1);
-  if (!latest || latest.event !== "labeled" || !isApprover(latest.actor, config.approvers) || (actor !== undefined && record(latest.actor, "label actor").login !== actor)) {
-    throw new Error("The current planning label must have been applied by the configured human approver who triggered this run.");
+  if (!latest || latest.event !== "labeled" || !await isWriter(client, config.repository, latest.actor) || (actor !== undefined && record(latest.actor, "label actor").login !== actor)) {
+    throw new Error("The current planning label must have been applied by the write-access user who triggered this run.");
   }
   return { number, title: string(issue.title, "issue title"), body, revision: string(issue.updated_at, "issue revision"), labelEvent: integer(latest.id, "label event") };
 }
@@ -80,7 +80,7 @@ export async function requestPlanningRevision(client: GitHubApi, config: Config,
   const base = string(repository.default_branch, "default branch");
   if (record(prior.pr.base, "planning base").ref !== base) throw new Error("The planning PR must target the default branch.");
   if (!apply) return `Preview: one potentially billable ${config.planning.model} revision of PR #${number}, head ${prior.headSha}. Reuses the plan without init or a full assessment. Feedback:\n${feedback}\nRepeat with --apply to request it; approval of the new final head is still required.`;
-  await requireApprover(client, config.approvers);
+  await requireWriter(client, config.repository);
   await client.request("POST", `/repos/${config.repository}/actions/workflows/crewbie-plan.yml/dispatches`, {
     ref: base, inputs: { pr: String(number), feedback, head: prior.headSha, source: issueDigest(source.title, source.body) },
   });
@@ -88,7 +88,7 @@ export async function requestPlanningRevision(client: GitHubApi, config: Config,
 }
 const REVISE_COMMAND = /^\s*\/crewbie\s+revise\b[:\s]*/i;
 const QUESTIONS_MARKER = "<!-- crewbie-plan-questions -->";
-/** Turns an approver's reply on a planning PR into revision inputs, or explains why it does not revise. */
+/** Turns a write-access user's reply on a planning PR into revision inputs, or explains why it does not revise. */
 async function commentRevision(client: GitHubApi, config: Config, event: Record<string, unknown>): Promise<Record<string, string> | string> {
   if (event.action !== "created") return "Only new comments revise a plan.";
   const issue = record(event.issue, "comment issue");
@@ -135,7 +135,7 @@ export async function preparePlanning(root: string, client: GitHubApi, config: C
   let inputs = event.inputs === undefined ? null : record(event.inputs, "planning revision inputs");
   if (event.comment !== undefined) {
     if (record(event.repository, "event repository").full_name !== config.repository) throw new Error("Planning event targets another repository.");
-    if (!isApprover(event.sender, config.approvers)) return skipped("Only configured human approvers' comments revise a plan.");
+    if (!await isWriter(client, config.repository, event.sender)) return skipped("Only write-access users' comments revise a plan.");
     const answer = await commentRevision(client, config, event);
     if (typeof answer === "string") return skipped(answer);
     inputs = answer;
@@ -143,7 +143,7 @@ export async function preparePlanning(root: string, client: GitHubApi, config: C
   const revising = inputs !== null && typeof inputs.pr === "string" && !!inputs.pr.trim();
   if (!revising && (event.action !== "labeled" || record(event.label, "trigger label").name !== PLANNING_LABEL)) return skipped("Not a ready-for-planning label event.");
   if (record(event.repository, "event repository").full_name !== config.repository) throw new Error("Planning event targets another repository.");
-  if (!isApprover(event.sender, config.approvers)) return skipped("The label actor is not a configured human approver.");
+  if (!await isWriter(client, config.repository, event.sender)) return skipped("The label actor is not a write-access user.");
   const actor = string(record(event.sender, "sender").login, "sender login");
   const prior = revising ? await revisionContext(client, config, integer(Number(inputs!.pr), "planning PR")) : null;
   if (prior && runId !== undefined && (prior.publishedRun === runId || String(prior.pr.body).includes(`<!-- crewbie-plan-run:${runId} -->`))) {
@@ -315,7 +315,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
     };
     files[`${directory}/execution.json`] = json(execution);
   }
-  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from an approver runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
+  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from a user with write access runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
   const prLimit = limitsFor(config).pr;
   if (prLimit !== undefined) bounded(body.replace(/<!--[\s\S]*?-->/g, ""), prLimit, "Planning PR description");
   const commit = record(await client.request("GET", `${prefix}/git/commits/${snapshot.baseSha}`), "base commit");

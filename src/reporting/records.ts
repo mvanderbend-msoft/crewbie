@@ -1,6 +1,6 @@
 import { hash, integer, record, string } from "../core.js";
 import type { Config } from "../config.js";
-import { isApprover, type GitHubApi } from "../tracking/github.js";
+import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { managedIssues } from "../tracking/issues.js";
 import { taskMetadata } from "../specification/batch.js";
 import { linkedPull } from "../execution/dispatch.js";
@@ -68,7 +68,7 @@ export async function collectRecords(client: GitHubApi, config: Config): Promise
       const comments = await client.list(`/repos/${config.repository}/issues/${integer(pr.number, "PR number")}/comments`);
       for (const comment of comments) {
         const user = comment.user === null || comment.user === undefined ? null : record(comment.user, "comment author");
-        const trusted = isApprover(user, config.approvers) || (user?.type === "Bot" && ["Copilot", "copilot-swe-agent[bot]"].includes(String(user.login)));
+        const trusted = await isWriter(client, config.repository, user) || (user?.type === "Bot" && ["Copilot", "copilot-swe-agent[bot]"].includes(String(user.login)));
         const body = typeof comment.body === "string" ? comment.body : "";
         if (!trusted || !body.trimStart().startsWith("<!-- crewbie-memory-proposal -->")) continue;
         if (typeof comment.updated_at === "string" && comment.updated_at > date) date = comment.updated_at;
@@ -110,8 +110,9 @@ export async function collectRecords(client: GitHubApi, config: Config): Promise
   for (const pull of improvements) {
     const number = integer(pull.number, "improvement PR");
     const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
-    const feedback = comments.filter((comment) => isApprover(comment.user, config.approvers))
-      .map((comment) => typeof comment.body === "string" ? comment.body : "").filter(Boolean).join("\n");
+    const trusted = [];
+    for (const comment of comments) if (await isWriter(client, config.repository, comment.user)) trusted.push(comment);
+    const feedback = trusted.map((comment) => typeof comment.body === "string" ? comment.body : "").filter(Boolean).join("\n");
     records.push(runRecord({
       id: `${config.repository}:improvement#${number}`, kind: "improvement-review", specialist: "improver",
       requestedModel: "Unrecorded", date: string(pull.closed_at, "closed timestamp"),

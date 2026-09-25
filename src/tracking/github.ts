@@ -6,10 +6,32 @@ export interface GitHubApi {
   request(method: string, path: string, body?: unknown): Promise<unknown>;
   list(path: string): Promise<Record<string, unknown>[]>;
 }
-export function isApprover(value: unknown, approvers: string[]): boolean {
+const WRITER_PERMISSIONS = new Set(["admin", "maintain", "write"]);
+const writerCache = new WeakMap<GitHubApi, Map<string, boolean>>();
+export function isUser(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   const user = record(value, "GitHub author");
-  return user.type === "User" && typeof user.login === "string" && approvers.includes(user.login);
+  return user.type === "User" && typeof user.login === "string";
+}
+export async function isWriter(client: GitHubApi, repository: string, value: unknown): Promise<boolean> {
+  if (!isUser(value)) return false;
+  const login = String(record(value, "GitHub author").login);
+  const key = `${repository.toLowerCase()}:${login.toLowerCase()}`;
+  let cache = writerCache.get(client);
+  if (!cache) { cache = new Map(); writerCache.set(client, cache); }
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+  let authorized = false;
+  try {
+    const result = record(await client.request("GET", `/repos/${repository}/collaborators/${encodeURIComponent(login)}/permission`), "repository permission");
+    const permission = typeof result.permission === "string" ? result.permission.toLowerCase() : "";
+    const role = typeof result.role_name === "string" ? result.role_name.toLowerCase() : "";
+    authorized = WRITER_PERMISSIONS.has(permission) || WRITER_PERMISSIONS.has(role);
+  } catch (error) {
+    if (!(error instanceof GitHubError && error.status === 404)) throw error;
+  }
+  cache.set(key, authorized);
+  return authorized;
 }
 export function api(token: string, fetcher: typeof fetch = fetch): GitHubApi {
   if (!token.trim()) throw new Error("A GitHub user-authorized credential is required.");
@@ -66,10 +88,10 @@ export function api(token: string, fetcher: typeof fetch = fetch): GitHubApi {
     },
   };
 }
-export async function requireApprover(client: GitHubApi, approvers: string[]): Promise<string> {
+export async function requireWriter(client: GitHubApi, repository: string): Promise<string> {
   const user = record(await client.request("GET", "/user"), "authenticated user");
-  if (!isApprover(user, approvers) || typeof user.login !== "string") {
-    throw new Error("This credential must belong to a configured human approver.");
+  if (!await isWriter(client, repository, user) || typeof user.login !== "string") {
+    throw new Error(`The authenticated GitHub user needs write access to ${repository}.`);
   }
   return user.login;
 }

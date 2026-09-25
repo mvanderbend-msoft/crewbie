@@ -1,7 +1,7 @@
 import type { Config } from "../config.js";
 import { GitHubError, integer, record, string } from "../core.js";
 import { taskMetadata } from "../specification/batch.js";
-import { requireApprover, type GitHubApi } from "../tracking/github.js";
+import { requireWriter, type GitHubApi } from "../tracking/github.js";
 import { linkedPull } from "./dispatch.js";
 import { withDispatchLock } from "./controls.js";
 
@@ -27,7 +27,7 @@ export async function cancelRun(client: GitHubApi, config: Config, issueNumber: 
   const url = `https://github.com/${config.repository}/actions/runs/${runId}`;
   if (run.status === "completed") return `Run already completed (${String(run.conclusion)}). Nothing cancelled; inspect preserved work. ${url}`;
   if (!apply) return `Preview: request cancellation of cloud-agent run ${runId} for issue #${issueNumber}. Commits, approvals and consumed launch allowances remain. This does not pause future launches. ${url}\nRepeat with --apply.`;
-  await requireApprover(client, config.approvers);
+  await requireWriter(client, config.repository);
   return withDispatchLock(client, config, async () => {
     const fresh = await inspect();
     if (fresh.status === "completed") return "Run completed before cancellation; nothing cancelled.";

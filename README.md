@@ -202,7 +202,7 @@ inventory instead; it does not discover models or contact Copilot.
 ### 3. Scripted preview and installation
 
 ```powershell
-crewbie init --model MODEL --repo OWNER/REPO --approver LOGIN --out crewbie-setup.json
+crewbie init --model MODEL --repo OWNER/REPO --out crewbie-setup.json
 crewbie init --proposal crewbie-setup.json
 crewbie init --proposal crewbie-setup.json --apply --guidance skip
 ```
@@ -294,7 +294,7 @@ before resuming dispatch; no reinitialization is required.
 With [hosted planning enabled](docs/operations.md#ready-label-issue-intake):
 
 1. Put the spec/PRD text in a GitHub issue.
-2. A configured human approver adds **`crewbie:ready-for-planning`**.
+2. A human user with write access adds **`crewbie:ready-for-planning`**.
 3. The hosted coordinator reads its charter/history and repository assessment
    and decomposes the work into tasks owned by the existing specialists.
 4. A ready-for-review, **non-draft** planning PR presents specialist-owned tasks and
@@ -309,9 +309,9 @@ With [hosted planning enabled](docs/operations.md#ready-label-issue-intake):
 
 **The ready label authorizes planning; approval plus merge authorizes execution.**
 This needs one-time setup of a supported user-authorized assignment credential.
-Both the reviewer and merger must be configured human approvers. Stale approvals,
+Both the reviewer and merger must be human users with write access. Stale approvals,
 changed source requirements and clarification-only plans cannot start coding.
-Unlabeled issues and labels applied by unapproved actors do not trigger analysis.
+Unlabeled issues and labels applied by read-only users or bots do not trigger analysis.
 Planning uses the named coordinator's supplied context in a tool-free Copilot CLI
 job, not a native cloud implementation session. Each plan is delivered on its
 own feature branch, `crewbie/<plan>-<revision>`: tasks start from it, and their finished PRs
@@ -339,10 +339,10 @@ for credentials, workflow recovery and approval boundaries.
 ### Answer questions or disagree with the plan
 
 When the plan needs clarification, Crewbie opens it as a draft and posts the
-questions as a PR comment. **Reply on the PR** with your answers; an approver's
+questions as a PR comment. **Reply on the PR** with your answers; a write-access user's
 reply runs one paid revision of the same PR. When the plan has no open questions,
 start a comment with `/crewbie revise` followed by your feedback. Other comments,
-edited comments, bots and non-approvers never start a run.
+edited comments, bots and read-only users never start a run.
 
 From a terminal, the same revision is available locally:
 
