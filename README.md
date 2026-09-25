@@ -343,7 +343,7 @@ Preview is read-only. Apply explicitly requests **one potentially billable revis
 on the same PR, reusing the previous plan instead of rerunning init or the full
 assessment. Stale heads, changed requirements during analysis and unrelated PR
 edits stop publication; Crewbie never force-pushes. If the default branch moved,
-update the planning branch first. Review and approve the **new final commit**;
+the revision merges it into the planning branch automatically. Review and approve the **new final commit**;
 earlier approvals do not authorize it. There is no automatic paid retry loop.
 Use this command for planning revisions so the execution manifest is regenerated,
 rather than asking an unstructured comment to edit only `plan.md`.

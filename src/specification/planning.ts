@@ -161,10 +161,6 @@ export async function preparePlanning(root: string, client: GitHubApi, config: C
   const base = string(repository.default_branch, "default branch");
   const ref = record(await client.request("GET", `/repos/${config.repository}/git/ref/heads/${encodeURIComponent(base)}`), "default ref");
   const baseSha = string(record(ref.object, "ref object").sha, "base SHA");
-  if (prior) {
-    const ancestry = record(await client.request("GET", `/repos/${config.repository}/compare/${baseSha}...${prior.headSha}`), "revision ancestry");
-    if (record(ancestry.merge_base_commit, "revision merge base").sha !== baseSha) throw new Error("Update the planning branch against the current default branch before requesting a revision; no analysis started.");
-  }
   const checkout = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   if (checkout !== baseSha) throw new Error("The checked-out default branch changed. Rerun from the current default branch.");
   const configHash = hash(json(config));
@@ -335,7 +331,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
   }), "planning tree");
   const created = record(await client.request("POST", `${prefix}/git/commits`, {
     message: `Propose Crewbie plan for issue #${source.number}\n\nCo-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`,
-    parents: [prior?.headSha ?? snapshot.baseSha], tree: string(tree.sha, "planning tree SHA"),
+    parents: prior ? await revisionParents(client, config, prior.headSha, snapshot.baseSha) : [snapshot.baseSha], tree: string(tree.sha, "planning tree SHA"),
   }), "planning commit");
   if (prior && snapshot.revision) {
     const fresh = record(await client.request("GET", `${prefix}/pulls/${snapshot.revision.pr}`), "current planning PR");
@@ -367,6 +363,11 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
   }), "planning pull request");
   await askQuestions(client, config, integer(pull.number, "planning PR"), plan.questions);
   return `Coordinator proposal ready for human review: ${string(pull.html_url, "planning PR URL")}`;
+}
+/** A revision behind the default branch merges it in (two parents), so the PR diff stays plan files only without a force-push. */
+async function revisionParents(client: GitHubApi, config: Config, headSha: string, baseSha: string): Promise<string[]> {
+  const ancestry = record(await client.request("GET", `/repos/${config.repository}/compare/${baseSha}...${headSha}`), "revision ancestry");
+  return record(ancestry.merge_base_commit, "revision merge base").sha === baseSha ? [headSha] : [headSha, baseSha];
 }
 async function askQuestions(client: GitHubApi, config: Config, number: number, questions: string[]): Promise<void> {
   if (!questions.length) return;

@@ -50,7 +50,7 @@ async function planningFixture(t, automatic = false) {
       if (method === "GET" && /^\/repos\/example\/project\/actions\/runs\/(?:42|43|44)$/.test(path)) return state.run;
       if (method === "GET" && path === `${prefix}/pulls/13`) return state.pulls[0];
       if (method === "GET" && path === `${prefix}/branches/main`) return { commit: { sha: state.sha } };
-      if (method === "GET" && path.startsWith(`${prefix}/compare/`)) return { status: "identical", merge_base_commit: { sha: state.pulls[0]?.state === "open" ? sha : "c".repeat(40) } };
+      if (method === "GET" && path.startsWith(`${prefix}/compare/`)) return { status: "identical", merge_base_commit: { sha: state.mergeBase ?? (state.pulls[0]?.state === "open" ? sha : "c".repeat(40)) } };
       const file = /^\/repos\/example\/project\/contents\/(.+)\?ref=([a-f0-9]{40})$/.exec(path);
       if (method === "GET" && file) {
         const content = state.snapshots.get(file[2])?.[file[1]];
@@ -652,6 +652,25 @@ test("an approver's reply to the plan's questions revises the same PR; other com
   assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply("Looks good."), 44)).ready, false, "Without open questions a plain comment is not a revision.");
   assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply("/crewbie revise Split retries into their own task."), 44)).ready, true);
   assert.match(await readFile(join(f.root, ".crewbie-planning-prompt.txt"), "utf8"), /Feedback: "Split retries into their own task\."/);
+});
+
+test("a revision of a plan behind the default branch merges it in instead of asking for a manual branch update", async (t) => {
+  const f = await planningFixture(t, true);
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  await f.output();
+  await publishPlanning(f.root, f.client, f.cfg);
+  f.state.mergeBase = "e".repeat(40);
+  await requestPlanningRevision(f.client, f.cfg, 13, "Split retries.", true);
+  f.state.run.event = "workflow_dispatch";
+  const event = { repository: f.event.repository, sender: f.event.sender, inputs: f.state.writes.at(-1).body.inputs };
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, event, 43)).ready, true);
+  await f.output();
+  f.state.nextCommit = "d".repeat(40);
+  f.state.writes = [];
+  await publishPlanning(f.root, f.client, f.cfg);
+  const commit = f.state.writes.find((write) => write.path.endsWith("/git/commits"));
+  assert.deepEqual(commit.body.parents, ["b".repeat(40), f.state.sha]);
+  assert.ok(f.state.writes.every((write) => write.body?.force !== true));
 });
 
 test("a planning PR edited during publication is never overwritten", async (t) => {

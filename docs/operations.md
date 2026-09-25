@@ -450,10 +450,10 @@ Locally, `crewbie revise-plan --pr N --feedback-file feedback.txt` previews the 
 revision and `--apply` requests it.
 The workflow accepts an explicit human request, reuses prior setup/plan/batch
 context, skips the full assessment and regenerates the execution manifest.
-Only configured approvers may request it. It checks source, policy, base ancestry
-and the exact prior head, and advances the branch without force. Previous approvals
-are stale after revision. Update a behind planning branch before requesting work;
-close/relabel is not needed for ordinary plan feedback. Re-running an already
+Only configured approvers may request it. It checks source, policy and the exact prior head, and advances the branch
+without force; a branch behind the default branch gets it merged into the revision
+commit, so no manual branch update is needed. Previous approvals are stale after
+revision; close/relabel is not needed for ordinary plan feedback. Re-running an already
 published revision skips further analysis. If publication is interrupted, inspect
 the existing branch and metadata before another paid request.
 Planning never merges PRs.
