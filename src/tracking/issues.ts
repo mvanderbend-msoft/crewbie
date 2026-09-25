@@ -1,6 +1,6 @@
 import type { Config } from "../config.js";
 import { ADDRESS_REVIEW_LABEL, limitsFor, PLANNING_LABEL, RESTART_LABEL, requireExecution } from "../config.js";
-import { hash, integer, record, string } from "../core.js";
+import { GitHubError, hash, integer, record, string } from "../core.js";
 import { checkPrDescription } from "../specification/prose.js";
 import { batchDigest, issueBody, issueDigest, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
 import { isApprover, requireApprover, type GitHubApi } from "./github.js";
@@ -37,6 +37,40 @@ export async function hasApproval(client: GitHubApi, config: Config, issue: Reco
   string(issue.body, "issue body");
   const comments = await client.list(`/repos/${config.repository}/issues/${integer(issue.number, "issue number")}/comments`);
   return approvedIn(comments, config, issue, execute);
+}
+/**
+ * Moves approved task issues to their owner's current configured model and re-approves the exact new title and body.
+ * Only the model in the task metadata changes; scope, owner and dependencies stay bound to the original approval.
+ */
+export async function reapproveIssues(client: GitHubApi, config: Config, issues: number[], apply: boolean): Promise<string> {
+  const lines: string[] = [];
+  const changes: { number: number; body: string; title: string; claimed: boolean }[] = [];
+  for (const number of issues) {
+    const issue = record(await client.request("GET", `/repos/${config.repository}/issues/${number}`), "task issue");
+    if (issue.state !== "open") throw new Error(`Issue #${number} is closed; only open tasks can be re-approved.`);
+    const body = string(issue.body, "issue body");
+    const title = string(issue.title, "issue title");
+    const metadata = taskMetadata(body);
+    if (!metadata) throw new Error(`Issue #${number} is not a Crewbie task.`);
+    const role = config.roles.find((role) => role.id === metadata.task.owner);
+    if (!role) throw new Error(`Issue #${number}'s owner ${metadata.task.owner} is not a configured role. Replan it instead.`);
+    const payload = { batch: metadata.batch, batchDigest: metadata.batchDigest, sources: metadata.sources, task: { ...metadata.task, model: role.model } };
+    const next = body.replace(/<!-- crewbie-task:[A-Za-z0-9+/=]+ -->/, `<!-- crewbie-task:${Buffer.from(JSON.stringify(payload)).toString("base64")} -->`);
+    const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
+    if (next === body && approvedIn(comments, config, issue)) { lines.push(`#${number}: already approved for crewbie-${role.id} on ${role.model}; nothing to change.`); continue; }
+    let claimed = true;
+    try { await client.request("GET", `/repos/${config.repository}/git/ref/tags/crewbie/claims/${number}`); }
+    catch (error) { if (error instanceof GitHubError && error.status === 404) claimed = false; else throw error; }
+    changes.push({ number, body: next, title, claimed });
+    lines.push(`#${number}: ${next === body ? "re-approve" : `model ${metadata.task.model} -> ${role.model}`} for crewbie-${role.id}${claimed ? `; add ${RESTART_LABEL} afterwards to relaunch it` : ""}.`);
+  }
+  if (!apply) return `Preview:\n${lines.join("\n")}\nRepeat with --apply to update the issues and post your execution approval. No agents are started.`;
+  if (changes.length) await requireApprover(client, config.approvers);
+  for (const change of changes) {
+    await client.request("PATCH", `/repos/${config.repository}/issues/${change.number}`, { body: change.body });
+    await client.request("POST", `/repos/${config.repository}/issues/${change.number}/comments`, { body: approvalComment(issueDigest(change.title, change.body), true) });
+  }
+  return `${lines.join("\n")}\n${changes.length ? "Updated and re-approved. No agents were started; dispatch launches unclaimed tasks on its next run." : "Nothing to change."}`;
 }
 /** hasApproval over comments the caller already fetched. */
 export function approvedIn(comments: Record<string, unknown>[], config: Config, issue: Record<string, unknown>, execute = true): boolean {

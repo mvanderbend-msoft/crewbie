@@ -411,7 +411,15 @@ crewbie pause --apply
 crewbie resume --apply
 crewbie cancel --issue 42 --run-id 123456789
 crewbie cancel --issue 42 --run-id 123456789 --apply
+crewbie reapprove --issue 42,43
+crewbie reapprove --issue 42,43 --apply
 ```
+
+To change a model after approval, edit the role's `model` in
+`.crewbie/config.json`, run `crewbie update --apply` and push. Then
+`crewbie reapprove --issue N` moves those open tasks to the new model and posts
+your approval of the exact updated issue; add `crewbie:restart` to a task that
+already tried to start.
 
 Preflight is read-only: it shows approvals, dependencies, selected specialist/model,
 profile revision and remaining launch allowances. Execution repeats its guards

@@ -684,6 +684,13 @@ analysis have their own opt-in controls and are not paused by this command.
 `crewbie resume --apply` removes only the gate, preserving claims and counters;
 it does not itself dispatch.
 
+`crewbie reapprove --issue N[,N...]` previews moving open task issues to their
+owner's current `model` in `.crewbie/config.json`. `--apply` requires a
+configured approver, rewrites only the model in the issue's task metadata (scope,
+owner and dependencies are unchanged) and posts an execution approval bound to
+the exact new title and body. It starts nothing; unclaimed tasks launch on the
+next dispatch, and a task that already tried to start needs `crewbie:restart`.
+
 `crewbie cancel --issue N --run-id ID` previews cancellation after verifying an
 unambiguous closing Copilot PR and matching repository, branch, PR identity and
 `dynamic` Actions run. `--apply` requires a human approver, rechecks the run and

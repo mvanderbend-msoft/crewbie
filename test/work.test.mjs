@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { approvedBatch, batchDigest, parseBatch, requireApproval, issueBody, issueDigest, taskMetadata } from "../dist/specification/batch.js";
 import { eligible } from "../dist/execution/dispatch.js";
-import { approvalComment, hasApproval, publish, publishDescription } from "../dist/tracking/issues.js";
+import { approvalComment, approvedIn, hasApproval, publish, publishDescription, reapproveIssues } from "../dist/tracking/issues.js";
 import { hash } from "../dist/core.js";
 import { api } from "../dist/tracking/github.js";
 import { checkPrDescription } from "../dist/specification/prose.js";
@@ -222,4 +222,37 @@ test("GitHub API errors include GitHub's message field, never the raw body", asy
   });
   const plain = api("test", async () => new Response("not json", { status: 500 }));
   await assert.rejects(plain.request("POST", "/x", {}), (error) => !/GitHub said|not json/.test(error.message));
+});
+
+test("reapprove moves open tasks to the owner's configured model and approves the exact new issue", async () => {
+  const cfg = config();
+  const b = parseBatch(batch(), cfg);
+  const oldBody = issueBody(b, { ...b.tasks[0], model: "retired-model" });
+  const issues = { 1: { number: 1, state: "open", title: b.tasks[0].title, body: oldBody }, 2: { number: 2, state: "closed", title: "x", body: oldBody } };
+  const comments = { 1: [] }, writes = [];
+  let login = "someone";
+  const client = {
+    async list(path) { return comments[Number(path.match(/issues\/(\d+)\/comments/)[1])] ?? []; },
+    async request(method, path, body) {
+      if (path === "/user") return { type: "User", login };
+      if (path.includes("/git/ref/tags/crewbie/claims/1")) return { object: { sha: "x" } };
+      const number = Number(path.match(/issues\/(\d+)/)?.[1]);
+      if (method === "GET") return structuredClone(issues[number]);
+      writes.push({ method, path });
+      if (method === "PATCH") { issues[number].body = body.body; return {}; }
+      if (method === "POST") { comments[number].push({ user: { type: "User", login }, body: body.body, created_at: "t", updated_at: "t" }); return {}; }
+      throw new Error(`Unexpected ${method} ${path}`);
+    },
+  };
+  assert.match(await reapproveIssues(client, cfg, [1], false), /#1: model retired-model -> approved-model for crewbie-developer; add crewbie:restart/);
+  assert.equal(writes.length, 0, "Preview writes nothing.");
+  await assert.rejects(reapproveIssues(client, cfg, [1], true), /configured human approver/);
+  assert.equal(writes.length, 0);
+  login = "maintainer";
+  assert.match(await reapproveIssues(client, cfg, [1], true), /Updated and re-approved/);
+  assert.equal(taskMetadata(issues[1].body).task.model, "approved-model");
+  assert.deepEqual({ ...taskMetadata(issues[1].body).task, model: "retired-model" }, taskMetadata(oldBody).task, "Only the model changes.");
+  assert.ok(approvedIn(comments[1], cfg, issues[1]));
+  assert.match(await reapproveIssues(client, cfg, [1], true), /already approved[\s\S]*Nothing to change/);
+  await assert.rejects(reapproveIssues(client, cfg, [2], false), /closed/);
 });

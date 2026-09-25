@@ -22,7 +22,7 @@ import { prepareReview, publishReview } from "./execution/pr-review.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
 import { checkPrDescription } from "./specification/prose.js";
 import { api, requireApprover } from "./tracking/github.js";
-import { publish, publishDescription } from "./tracking/issues.js";
+import { publish, publishDescription, reapproveIssues } from "./tracking/issues.js";
 import { adoApi, createWorkItem, importWorkItem, linkAdo, syncAdo, writeBack } from "./tracking/ado.js";
 import { verifySources } from "./tracking/sources.js";
 import { memoryContext } from "./memory/context.js";
@@ -60,6 +60,7 @@ PLANNING AND EXECUTION
   preflight [--batch-id ID] [--json]              Preview approvals, specialist/model and remaining launch limits
   pause | resume [--apply]                        Control future implementation/review launches, not running sessions
   cancel --issue N --run-id ID [--apply]           Preview/cancel an attributable cloud-agent Actions run
+  reapprove --issue N[,N...] [--apply]            Move open tasks to their owner's configured model and re-approve
   budget --issue N --historical-attempts N [--apply]  Adopt reviewed pre-upgrade launch counts; never reset them
   approve --batch batch.json --yes [--execute]     Approve exact local scope
   publish --batch batch.json [--apply] [--ado-create] [--dispatch-local] [--watch]
@@ -182,6 +183,12 @@ async function main(): Promise<void> {
   }
   if (command === "pause" || command === "resume") {
     output.text(await setLaunchPause(api(token()), config, command === "pause", values.apply === true));
+    return;
+  }
+  if (command === "reapprove") {
+    if (!values.issue) throw new Error("Use reapprove --issue N[,N...]; preview first, then --apply.");
+    const issues = values.issue.split(",").map((value) => integer(Number(value.trim().replace(/^#/, "")), "issue"));
+    output.text(await reapproveIssues(api(token()), config, issues, values.apply === true));
     return;
   }
   if (command === "cancel") {
