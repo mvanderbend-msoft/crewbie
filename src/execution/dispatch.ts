@@ -452,6 +452,9 @@ const activeSessions = (work: Work[]) => work.filter((other) => other.claimed &&
 async function afterSession(client: GitHubApi, config: Config, item: Work): Promise<string> {
   const pull = item.pull!;
   const lead = await markReady(client, pull) ? "Crewbie marked the PR ready for review. " : "";
+  // Copilot asks the assigning person to review every finished PR; task PRs merge without one, so only the feature PR asks.
+  const people = (Array.isArray(pull.requested_reviewers) ? pull.requested_reviewers : []).map((user) => String(record(user, "requested reviewer").login));
+  if (people.length) await client.request("DELETE", `/repos/${config.repository}/pulls/${integer(pull.number, "PR number")}/requested_reviewers`, { reviewers: people });
   const outcome = await autoMerge(client, config, integer(pull.number, "PR number"), string(record(pull.head, "PR head").sha, "PR head SHA"));
   if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }
   return lead + outcome.reason;

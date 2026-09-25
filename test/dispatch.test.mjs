@@ -60,6 +60,7 @@ function githubFixture(input = batch()) {
           if (!fixture.paused) throw new GitHubError(404, null);
           return {};
         }
+        if (method === "DELETE" && path.endsWith("/requested_reviewers")) { (fixture.withdrawn ??= []).push(...body.reviewers); return {}; }
         if (path === "/graphql" && body.query.includes("markPullRequestReadyForReview")) {
           const pr = [...pulls.values()].find((item) => item.node_id === body.variables.id);
           fixture.readied.push(pr.number); pr.draft = false;
@@ -569,9 +570,11 @@ test("a finished task PR of a feature plan merges into the feature branch once e
   assert.equal(fixture.assignments[0].agent_assignment.base_branch, BRANCH, "Tasks launch from the plan's feature branch.");
   assert.ok(fixture.branches.has(BRANCH), "The first launch creates the feature branch.");
   finishedPull(fixture);
+  fixture.pulls.get(1).requested_reviewers = [{ login: "maintainer", type: "User" }];
   fixture.checkRuns.push({ id: 4, name: "build", status: "in_progress", conclusion: null, app: { slug: "github-actions" } });
   let work = await dispatch(fixture.client, cfg);
   assert.deepEqual(fixture.readied, [101]);
+  assert.deepEqual(fixture.withdrawn, ["maintainer"], "Copilot's review request on a task PR is withdrawn; only the feature PR asks for a person.");
   assert.match(work[0].reason, /Session completed on aaaaaaa\. Waiting for check build/);
   assert.equal(fixture.merges.length, 0);
   fixture.checkRuns[0] = { ...fixture.checkRuns[0], status: "completed", conclusion: "success" };

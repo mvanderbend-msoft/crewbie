@@ -872,7 +872,8 @@ Changing a task's kind invalidates its approval like other scope changes.
   not verified as ended and exhausted allowances. Without a free slot it waits.
 - **Ready for review.** Copilot requests your review when its session finishes;
   that triggers dispatch, which restores the specialist's description and then
-  marks the draft PR ready, so the description check runs on the final body. If
+  marks the draft PR ready, so the description check runs on the final body, and
+  withdraws Copilot's review request because task PRs merge without one. If
   that trigger waits for workflow approval (Copilot-actor runs can require it; see
   *Settings → Copilot → Cloud agent → Actions workflow approval*), the hourly
   reconcile does it instead.
