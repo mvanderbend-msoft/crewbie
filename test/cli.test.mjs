@@ -112,3 +112,15 @@ test("CLI formats real terminal status while JSON and redirected status remain p
   for (const section of ["SETUP AND GUIDANCE", "PLANNING AND EXECUTION", "STATUS AND REPORTS", "OUTPUT AND AUTHENTICATION"]) assert.ok(help.includes(section));
   assert.doesNotMatch(help, /\x1b/);
 });
+
+test("hosted planning preparation accepts label, PR-comment and revision-dispatch events only", async (t) => {
+  const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config()), "event.json": "{}" });
+  const prepare = (event) => spawnSync(process.execPath, [cli, "--path", root, "internal-plan", "--prepare"], {
+    encoding: "utf8", env: { ...process.env, GH_TOKEN: "test-token", GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: join(root, "event.json"), GITHUB_OUTPUT: "" },
+  });
+  for (const event of ["issues", "issue_comment", "workflow_dispatch"]) {
+    const result = prepare(event);
+    assert.equal(result.status, 0, `${event}: ${result.stderr}`);
+  }
+  assert.match(prepare("pull_request").stderr, /requires a GitHub issues, issue_comment or workflow_dispatch event/);
+});

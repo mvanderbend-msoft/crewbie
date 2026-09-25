@@ -329,7 +329,7 @@ async function main(): Promise<void> {
   } else if (command === "internal-plan") {
     if (values.prepare === values.apply) throw new Error("Choose --prepare or --apply for planning.");
     if (values.prepare) {
-      if (!process.env.GITHUB_EVENT_PATH || process.env.GITHUB_EVENT_NAME !== "issues") throw new Error("Planning preparation requires a GitHub issues event.");
+      if (!process.env.GITHUB_EVENT_PATH || !["issues", "issue_comment", "workflow_dispatch"].includes(process.env.GITHUB_EVENT_NAME ?? "")) throw new Error("Planning preparation requires a GitHub issues, issue_comment or workflow_dispatch event.");
       const result = await preparePlanning(root, github, config, await readJson(process.env.GITHUB_EVENT_PATH),
         process.env.GITHUB_RUN_ID ? integer(Number(process.env.GITHUB_RUN_ID), "workflow run ID") : undefined);
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
