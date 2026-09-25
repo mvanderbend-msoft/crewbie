@@ -212,3 +212,14 @@ test("PR handoff finalization is previewable, human-authorized and bound to curr
   await assert.rejects(publishDescription(client, config(), 2, proposal, true), /changed/);
   assert.equal(writes.length, 1);
 });
+
+test("GitHub API errors include GitHub's message field, never the raw body", async () => {
+  const client = api("test-secret", async () => new Response(JSON.stringify({ message: "Resource not accessible by personal access token", extra: "raw body detail" }), { status: 403 }));
+  await assert.rejects(client.request("POST", "/agents/repos/example/project/tasks", {}), (error) => {
+    assert.match(error.message, /HTTP 403.*Operation: POST \/agents\/repos\/example\/project\/tasks\. GitHub said: Resource not accessible by personal access token/);
+    assert.doesNotMatch(error.message, /test-secret|raw body detail/);
+    return true;
+  });
+  const plain = api("test", async () => new Response("not json", { status: 500 }));
+  await assert.rejects(plain.request("POST", "/x", {}), (error) => !/GitHub said|not json/.test(error.message));
+});

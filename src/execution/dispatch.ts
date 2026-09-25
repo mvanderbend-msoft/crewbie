@@ -7,7 +7,7 @@ import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { attributePull } from "./attribution.js";
 import { cloudTasks } from "../tracking/native.js";
-import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, reserveLaunch, RESTART_LABEL, RESTART_MARKER, withDispatchLock, type DiscoverModels } from "./controls.js";
+import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, modelRejection, rejectedLaunchModels, reserveLaunch, RESTART_LABEL, RESTART_MARKER, withDispatchLock, type DiscoverModels } from "./controls.js";
 import { autoMerge, markReady } from "./merge.js";
 import { ADDRESS_MARKER, requestReview, reviewFeedback, trustedReview } from "./pr-review.js";
 export { withDispatchLock } from "./controls.js";
@@ -293,8 +293,11 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
     const blocked = allowance.blocked ?? (allowance.issueUsed > 0 ? "Initial launch already reserved; inspect its outcome instead of retrying." : null);
     if (blocked) { item.state = "blocked"; item.reason = blocked; }
   }
-  const launchable = selected.filter((item) => item.state === "ready");
-  if (launchable.length) await checkLaunchModels(await discoverModels(), launchable.map((item) => item.metadata.task), config, client);
+  const candidates = selected.filter((item) => item.state === "ready");
+  // A model the cloud agent rejects blocks only its own tasks; the rest of the batch still launches.
+  const rejected = candidates.length ? await rejectedLaunchModels(await discoverModels(), candidates.map((item) => item.metadata.task), config, client) : new Set<string>();
+  for (const item of candidates) if (rejected.has(item.metadata.task.model)) { item.state = "blocked"; item.reason = modelRejection(item.metadata.task.model, item.metadata.task.owner); }
+  const launchable = candidates.filter((item) => item.state === "ready");
   for (const item of scoped) {
     await setStatus(client, config.repository, item.issue, item.state);
     if (item.state === "review" && item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {

@@ -1,4 +1,5 @@
 import { GitHubError, record } from "../core.js";
+import { redact } from "../setup/inventory.js";
 import { setTimeout } from "node:timers/promises";
 
 export interface GitHubApi {
@@ -38,6 +39,9 @@ export function api(token: string, fetcher: typeof fetch = fetch): GitHubApi {
       }
       const error = new GitHubError(response.status, response.headers.get("x-github-request-id"));
       error.message += ` Operation: ${method} ${path}.`;
+      // GitHub's own message (for example which permission or policy refused) is the actionable part of a 4xx.
+      const said = await response.text().then((text) => { try { return (JSON.parse(text) as { message?: unknown }).message; } catch { return undefined; } }, () => undefined);
+      if (typeof said === "string" && said.trim()) error.message += ` GitHub said: ${redact(said.trim().replace(/\s+/g, " ").slice(0, 300))}`;
       throw error;
     }
     if (response.status === 204) return null;

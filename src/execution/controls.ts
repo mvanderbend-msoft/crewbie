@@ -186,9 +186,24 @@ export async function cloudAgentAccepts(client: GitHubApi, repository: string, m
   } catch (error) {
     if (error instanceof GitHubError && error.status === 400) return false;
     if (error instanceof GitHubError && error.status === 412) return true;
+    // Assignment-only credentials cannot create tasks; an unverifiable model must not block launches that would work.
+    if (error instanceof GitHubError && error.status === 403) {
+      console.warn(`Crewbie: could not verify that the cloud agent accepts ${model} (the credential cannot create agent tasks; grant Agent tasks read and write to enable the check). Launching without the check. ${error.message}`);
+      return true;
+    }
     throw error;
   }
   throw new Error(`The cloud-agent model check for ${model} unexpectedly created a task; inspect the Agents tab.`);
+}
+export function modelRejection(model: string, owners: string): string {
+  return `The Copilot cloud agent does not accept model ${model} for this account (specialist ${owners}), although the CLI lists it. Choose another model for that role in .crewbie/config.json; approved tasks using ${model} need replanning or reapproval.`;
+}
+/** Validates launch models against policy and the catalog, and returns the ones the cloud agent rejects. */
+export async function rejectedLaunchModels(models: ModelChoice[], tasks: { owner: string; model: string }[], config: Config, client: GitHubApi): Promise<Set<string>> {
+  await checkLaunchModels(models, tasks, config);
+  const rejected = new Set<string>();
+  for (const model of new Set(tasks.map((task) => task.model))) if (!await cloudAgentAccepts(client, config.repository, model)) rejected.add(model);
+  return rejected;
 }
 export async function checkLaunchModels(models: ModelChoice[], tasks: { owner: string; model: string }[], config: Config, client?: GitHubApi): Promise<void> {
   if (!models.length) throw new Error("Launch preflight returned no enabled account models; nothing was launched.");
@@ -200,7 +215,7 @@ export async function checkLaunchModels(models: ModelChoice[], tasks: { owner: s
   for (const model of client ? new Set(tasks.map((task) => task.model)) : []) {
     if (!await cloudAgentAccepts(client!, config.repository, model)) {
       const owners = [...new Set(tasks.filter((task) => task.model === model).map((task) => task.owner))].join(", ");
-      throw new Error(`The Copilot cloud agent does not accept model ${model} for this account (specialist ${owners}), although the CLI lists it. Choose another model for that role in .crewbie/config.json; approved tasks using ${model} need replanning or reapproval. Nothing was launched.`);
+      throw new Error(`${modelRejection(model, owners)} Nothing was launched.`);
     }
   }
 }

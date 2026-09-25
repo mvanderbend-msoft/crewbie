@@ -285,7 +285,11 @@ then fails with a misleading "repository ruleset violation" comment. After the
 assessment, init checks each chosen model with the cloud-agent tasks API. A new
 role whose model is rejected triggers one reassessment without that model. An
 installed role gets a warning. Before any launch, dispatch checks each model the
-same way and stops without a claim or attempt if it is rejected. The check uses a
+same way; tasks using a rejected model stay `crewbie:blocked` without a claim or
+attempt, while the rest of the batch launches. The check needs Agent tasks **read
+and write** on `CREWBIE_USER_TOKEN`; with read-only access GitHub answers 403, and
+dispatch warns and launches without the check (the address-review continuation
+also creates tasks and needs write). The check uses a
 branch that never exists, so no session starts. GitHub still lists a failed task
 in the Agents tab for each check. Preflight skips it to stay read-only.
 

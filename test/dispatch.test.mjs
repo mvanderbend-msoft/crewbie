@@ -48,7 +48,7 @@ function githubFixture(input = batch()) {
         throw new Error(`Unexpected list: ${path}`);
       },
       async request(method, path, body) {
-        if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (fixture.modelChecks ??= []).push(body.model); throw new GitHubError(fixture.rejectedModels?.includes(body.model) ? 400 : 412, null); }
+        if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (fixture.modelChecks ??= []).push(body.model); throw new GitHubError(fixture.probeStatus ?? (fixture.rejectedModels?.includes(body.model) ? 400 : 412), null); }
         if (path.endsWith("/git/ref/tags/crewbie/paused")) {
           if (!fixture.paused) throw new GitHubError(404, null);
           return {};
@@ -268,16 +268,24 @@ test("a successful HTTP response with an ignored assignee is not reported as a s
   assert.ok(!fixture.issues[0].labels.includes("crewbie:running"));
 });
 
-test("a model the cloud agent rejects blocks the launch before any claim or reservation", async () => {
+test("a model the cloud agent rejects blocks only its tasks, before any claim or reservation", async () => {
   const fixture = githubFixture();
   fixture.rejectedModels = ["approved-model"];
-  await assert.rejects(dispatch(fixture.client, config()), /cloud agent does not accept model approved-model/);
+  const blocked = await dispatch(fixture.client, config());
+  assert.ok(blocked.some((item) => item.state === "blocked" && /cloud agent does not accept model approved-model/.test(item.reason)));
   assert.deepEqual(fixture.modelChecks, ["approved-model"], "Each distinct model is checked once.");
   assert.equal(fixture.assignments.length, 0);
   assert.equal(fixture.claims.size, 0);
   assert.equal(fixture.launches.size, 0);
   assert.equal(fixture.locked, false);
   fixture.rejectedModels = [];
+  await dispatch(fixture.client, config());
+  assert.ok(fixture.assignments.length > 0);
+});
+
+test("a credential that cannot create agent tasks skips the model check instead of blocking dispatch", async () => {
+  const fixture = githubFixture();
+  fixture.probeStatus = 403;
   await dispatch(fixture.client, config());
   assert.ok(fixture.assignments.length > 0);
 });
