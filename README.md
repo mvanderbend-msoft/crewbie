@@ -67,7 +67,7 @@ a separate Copilot CLI installation is not required for init. Cloud execution al
 needs repository access; check the [capability matrix](docs/operations.md#account-and-runtime-capability-matrix).
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.36/crewbie-cli-0.1.0-alpha.36.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.37/crewbie-cli-0.1.0-alpha.37.tgz
 gh auth login
 ```
 
@@ -80,7 +80,7 @@ gh auth login
 > ```powershell
 > npm ci --ignore-scripts
 > npm pack
-> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.36.tgz
+> npm install --global --ignore-scripts .\crewbie-cli-0.1.0-alpha.37.tgz
 > ```
 >
 > Installing Crewbie does not start agents.
@@ -324,6 +324,13 @@ never merges it. A task PR that changes `.github/workflows/` is left for you to
 merge. A failed start or session is relaunched by adding `crewbie:restart`.
 Issues published before feature branches are no longer dispatched; finish them
 by hand.
+
+> **Recommended:** in the repository, open *Settings → Copilot → Cloud agent* and
+> turn off **Require approval for workflow runs**. GitHub otherwise holds the
+> dispatch run that Copilot's finished session triggers, and Crewbie only
+> notices on its hourly schedule (which GitHub can delay), so each task PR can
+> wait an hour or more before it merges and the next task starts. Crewbie cannot
+> approve those runs for you.
 
 Without `executeOnMerge`, the manual team-installation and batch-approval path
 below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)
