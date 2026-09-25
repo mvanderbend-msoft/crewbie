@@ -127,7 +127,13 @@ export async function setStatus(client: GitHubApi, repo: string, issue: Record<s
   const obsolete = old.filter((label) => STATUSES.some((state) => label === `crewbie:${state}`) && label !== `crewbie:${status}`);
   const path = `/repos/${repo}/issues/${integer(issue.number, "issue number")}/labels`;
   if (!old.includes(`crewbie:${status}`)) await client.request("POST", path, { labels: [`crewbie:${status}`] });
-  for (const label of obsolete) await client.request("DELETE", `${path}/${encodeURIComponent(label)}`);
+  for (const label of obsolete) {
+    // An earlier step of the same run, or a person, may already have removed it.
+    try { await client.request("DELETE", `${path}/${encodeURIComponent(label)}`); }
+    catch (error) { if (!(error instanceof GitHubError && error.status === 404)) throw error; }
+  }
+  // Later status changes in this run start from the labels just written.
+  issue.labels = [...old.filter((label) => !obsolete.includes(label) && label !== `crewbie:${status}`), `crewbie:${status}`];
 }
 
 export async function publishDescription(client: GitHubApi, config: Config, number: number, proposal: unknown, apply = false): Promise<{ before: string; after: string; headSha: string }> {

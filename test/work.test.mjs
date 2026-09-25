@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { approvedBatch, batchDigest, parseBatch, requireApproval, issueBody, issueDigest, taskMetadata } from "../dist/specification/batch.js";
 import { eligible } from "../dist/execution/dispatch.js";
-import { approvalComment, approvedIn, hasApproval, publish, publishDescription, reapproveIssues } from "../dist/tracking/issues.js";
+import { approvalComment, approvedIn, hasApproval, publish, publishDescription, reapproveIssues, setStatus } from "../dist/tracking/issues.js";
+import { GitHubError } from "../dist/core.js";
 import { hash } from "../dist/core.js";
 import { api } from "../dist/tracking/github.js";
 import { checkPrDescription } from "../dist/specification/prose.js";
@@ -55,6 +56,16 @@ test("review tasks, like implementation, wait until their prerequisites merged i
   const b = parseBatch({ ...batch(), tasks: [{ ...task("inspect"), kind: "review" }] }, config());
   assert.equal(taskMetadata(issueBody(b, b.tasks[0])).task.kind, "review");
   assert.throws(() => parseBatch({ ...batch(), tasks: [{ ...task("inspect"), kind: "bypass" }] }), /kind/);
+});
+
+test("consecutive status changes in one run never remove a label twice, and an already-removed label is fine", async () => {
+  const calls = [];
+  const client = { async request(method, path) { calls.push(`${method} ${decodeURIComponent(path.split("/labels")[1] ?? "")}`); if (method === "DELETE" && path.endsWith("crewbie%3Ablocked")) throw new GitHubError(404, null); return {}; } };
+  const issue = { number: 75, labels: [{ name: "crewbie:managed" }, { name: "crewbie:running" }, { name: "crewbie:blocked" }] };
+  await setStatus(client, "example/project", issue, "review");
+  await setStatus(client, "example/project", issue, "done");
+  assert.deepEqual(calls, ["POST ", "DELETE /crewbie:running", "DELETE /crewbie:blocked", "POST ", "DELETE /crewbie:review"]);
+  assert.deepEqual(issue.labels, ["crewbie:managed", "crewbie:done"]);
 });
 
 test("ready labels cannot bypass approval, capacity or explicit dependencies", () => {
