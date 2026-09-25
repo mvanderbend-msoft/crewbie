@@ -24,6 +24,10 @@ export const PR_TEMPLATE = `## What changed
 <!-- Handoff: updated files, a deferred proposal, or why existing memory suffices (cite it). Learning: reusable lesson or none. -->
 `;
 
+/** Crewbie refreshes only this block of a charter a human has edited; everything outside it is theirs. */
+export const MANAGED_START = "<!-- crewbie:managed:start (Crewbie refreshes this block on update; your text outside it is kept) -->";
+export const MANAGED_END = "<!-- crewbie:managed:end -->";
+
 export function profile(role: Role, config: Config): string {
   // Copilot attaches these itself; listing them again only repeats context.
   const guidance = (role.contextPaths ?? []).filter((path) => !autoLoadedGuidance(path));
@@ -90,6 +94,7 @@ ${role.checks?.length && !["coordinator", "improver"].includes(role.id) ? "" : O
 
 ${role.checks?.length ? `## Repository checks\n${role.checks.map((check) => `- ${check}`).join("\n")}\n` : ""}${role.nonNegotiables?.length ? `## Repository non-negotiables\n${role.nonNegotiables.map((rule) => `- ${rule}`).join("\n")}\n` : ""}
 
+${MANAGED_START}
 ## Context and handoff
 ${role.sourceAgent ? `The original instructions are included above. Backup provenance: \`${agentArchivePath(role.sourceAgent)}\`. Resolve adopted-agent references through \`.crewbie/config.json\`; surface conflicting guidance for human direction.\n` : ""}Before work, read \`.crewbie/instructions.md\` for shared scope, learning and handoff rules,
 ${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions.md\`,
@@ -98,7 +103,8 @@ Read linked cold/archive detail only when relevant. Follow applicable repository
 ${guidance.length ? `Reuse existing guidance: ${guidance.map((path) => `\`${path}\``).join(", ")}.\n` : ""}Work from the supplied requirements and approved acceptance criteria.
 Identify yourself as \`crewbie-${role.id}\` in the PR description; distinguish implementation from review.
 Use \`## What changed\`, \`## Why\`, and \`## Checks\`; name real outcomes and remaining risks.
-${role.sourceAgent ? "If the original instructions define a persona or voice, write every PR description, comment, Learning note and final summary in it; the headings set structure, not tone. Keep memory files neutral.\n" : ""}`;
+${role.sourceAgent ? "If the original instructions define a persona or voice, write every PR description, comment, Learning note and final summary in it; the headings set structure, not tone. Keep memory files neutral.\n" : ""}${MANAGED_END}
+`;
 }
 
 export const SHARED_INSTRUCTIONS = `# Crewbie shared working rules

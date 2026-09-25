@@ -121,7 +121,9 @@ test("installer previews, applies idempotently, and preserves edits on upgrade",
   assert.deepEqual(await installation(root, proposal), []);
   const agent = join(root, ".github/agents/crewbie-developer.agent.md");
   await writeFile(agent, "Human change.");
-  await assert.rejects(installation(root, proposal), /Preserving user-owned or edited/);
+  const kept = [];
+  assert.deepEqual(await installation(root, proposal, undefined, kept), []);
+  assert.deepEqual(kept, [".github/agents/crewbie-developer.agent.md"]);
   assert.equal(await readFile(agent, "utf8"), "Human change.");
 });
 
@@ -248,7 +250,8 @@ test("Git-style CRLF checkouts do not look like edits to managed text", async (t
   await applyInstallation(root, upgrade);
   const agent = join(root, ".github/agents/crewbie-developer.agent.md");
   await writeFile(agent, (await readFile(agent, "utf8")) + "A real edit.\r\n");
-  await assert.rejects(installation(root, proposal), /Preserving user-owned or edited/);
+  assert.ok(!(await installation(root, proposal)).some((change) => change.path === ".github/agents/crewbie-developer.agent.md"));
+  assert.match(await readFile(agent, "utf8"), /A real edit\.\r\n$/);
 });
 
 test("new installations provide the required PR structure without replacing an existing template", async (t) => {

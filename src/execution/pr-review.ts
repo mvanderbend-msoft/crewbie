@@ -1,5 +1,5 @@
 import { unlink } from "node:fs/promises";
-import { ADDRESS_REVIEW_LABEL, mergeFor, reviewerFor, type Config } from "../config.js";
+import { ADDRESS_REVIEW_LABEL, autoMergeFor, mergeFor, reviewerFor, type Config } from "../config.js";
 import { agentPrompt, errorCode, integer, json, optionalText, readJson, record, safePath, string, writeAtomic } from "../core.js";
 import { memoryContext } from "../memory/context.js";
 import { taskMetadata } from "../specification/batch.js";
@@ -20,7 +20,7 @@ const ACTIONS_BOT = "github-actions[bot]";
 export type Verdict = "pass" | "changes";
 export interface Finding { severity: "blocking" | "minor"; path: string; line: number | null; body: string }
 export interface TrustedReview { verdict: Verdict; partial: boolean; head: string; url: string; body: string; createdAt: string }
-interface Snapshot { schemaVersion: 1; pr: number; head: string; issue: number; owner: string; role: string; runId: number; omitted: string[] }
+interface Snapshot { schemaVersion: 1; pr: number; head: string; issue: number; owner: string; role: string; runId: number; omitted: string[]; confidence?: number }
 
 export function reviewRunName(pr: number, head: string): string { return `Crewbie review PR #${pr} at ${head}`; }
 const sha = (value: unknown, label: string) => {
@@ -85,7 +85,8 @@ Diff (API patches; files marked omitted did not fit this review):
   }
   const prompt = header + diff;
   if (Buffer.byteLength(prompt) > PROMPT_BUDGET) throw new Error("Reviewer context exceeds the Copilot CLI prompt budget even without patches; nothing was reviewed.");
-  const snapshot: Snapshot = { schemaVersion: 1, pr, head, issue: integer(issue.number, "task issue"), owner: metadata.task.owner, role: reviewer.role, runId, omitted };
+  const snapshot: Snapshot = { schemaVersion: 1, pr, head, issue: integer(issue.number, "task issue"), owner: metadata.task.owner, role: reviewer.role, runId, omitted,
+    ...(metadata.task.confidence === undefined ? {} : { confidence: metadata.task.confidence }) };
   await writeAtomic(root, INPUT, json(snapshot));
   await writeAtomic(root, PROMPT, prompt);
   return { ready: true, reason: `Reviewer context prepared for PR #${pr} at ${head.slice(0, 7)}${omitted.length ? `; ${omitted.length} patch(es) did not fit` : ""}.`, model: reviewer.model };
@@ -110,11 +111,13 @@ export function parseReview(text: string): { verdict: Verdict; summary: string; 
 export function renderReview(config: Config, snapshot: Snapshot, review: ReturnType<typeof parseReview>): string {
   const marker = `<!-- crewbie-review:${Buffer.from(JSON.stringify({ run: snapshot.runId, pr: snapshot.pr, head: snapshot.head, verdict: review.verdict, partial: snapshot.omitted.length > 0 })).toString("base64")} -->`;
   const cell = (text: string) => text.replace(/\r?\n/g, " ");
-  const auto = mergeFor(config).mode === "auto";
+  const merge = mergeFor(config);
+  const auto = autoMergeFor(config, snapshot.confidence);
   const next = review.verdict === "changes"
     ? `Add the \`${ADDRESS_REVIEW_LABEL}\` label to this PR to have crewbie-${snapshot.owner} address these findings and any comments you add (counts as one task attempt). You can also fix or merge it yourself.`
     : snapshot.omitted.length ? "Some patches were not reviewed, so Crewbie will not auto-merge. Review them, then merge yourself."
     : auto ? `Crewbie merges this PR automatically once every check passes. To stop that, add \`${ADDRESS_REVIEW_LABEL}\` with comments, or close the PR.`
+    : merge.mode === "auto" ? `The plan rated this task ${snapshot.confidence === undefined ? "without a confidence score" : `${snapshot.confidence} confidence`}, below the ${merge.minConfidence} auto-merge threshold, so a human reviews and merges it. Merge when you are satisfied, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.`
     : `Merge when you are satisfied, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.`;
   return [
     marker,
@@ -139,6 +142,7 @@ export async function publishReview(root: string, client: GitHubApi, config: Con
     schemaVersion: 1, pr: integer(input.pr, "PR"), head: sha(input.head, "reviewed head"), issue: integer(input.issue, "task issue"),
     owner: string(input.owner, "task owner"), role: string(input.role, "reviewer role"), runId: integer(input.runId, "review run"),
     omitted: Array.isArray(input.omitted) ? input.omitted.map((path) => string(path, "omitted path")) : [],
+    ...(typeof input.confidence === "number" ? { confidence: input.confidence } : {}),
   };
   const output = await optionalText(await safePath(root, OUTPUT));
   if (!output?.trim()) throw new Error("The reviewer returned no output; nothing was posted.");

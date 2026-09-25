@@ -40,7 +40,8 @@ The installed workflows use:
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
 | Config `review.enabled` / `review.role` | Have a configured role review every finished PR head in a tool-free Copilot CLI job (`review.model` overrides the role's model) |
-| Config `merge.mode` | `manual` (default): you merge. `auto`: Crewbie merges once the reviewer passed the head and checks passed |
+| Config `merge.mode` | `manual` (default): you merge. `auto`: Crewbie merges once the reviewer passed the head and checks passed, and only tasks the plan rated at or above `merge.minConfidence` |
+| Config `merge.minConfidence` | Auto-merge threshold for the planner's per-task confidence (0–1, default `0.85`). Lower-rated or unrated tasks wait for human review. The rating is the planner's estimate, not a measured outcome; `plan.md` lists each task's rating and reason |
 
 Generated workflows embed the exact installed version's GitHub release tarball
 URL. A missing
@@ -344,6 +345,11 @@ planning settings are preserved; automatic execution on merge is not enabled by
 this prompt. Commit both the approved configuration and regenerated planning
 workflow before using the label.
 
+Dispatch lists only open managed issues, reads claim refs once, and revisits a
+closed issue only when it still holds a claim and closed within the last 24 hours
+(so an outliving session keeps its slot) or when an open task depends on it.
+Older closed tasks are not scanned and no longer appear in `crewbie status`.
+
 **A successful dispatch run is not evidence that an agent started.** Dispatch
 reconciles published managed implementation tasks, while
 `crewbie:ready-for-planning` belongs to the separate planning workflow. With no
@@ -374,8 +380,13 @@ reviewed proposal and commit the generated configuration, profiles, memory and
 `crewbie update` previews repository integration changes without AI reassessment;
 `crewbie update --apply` applies them and refreshes an existing `CREWBIE_PACKAGE`
 override to the installed CLI release. Upgrade the CLI separately with npm.
-Commit the generated file changes. Edited managed files block application; resolve
-the listed conflicts rather than changing ownership hashes blindly. `--offline`
+Commit the generated file changes. Edit Crewbie agents and instructions at any
+time: in an edited `crewbie-*.agent.md` update refreshes only the block between
+`<!-- crewbie:managed:start -->` and `<!-- crewbie:managed:end -->` and keeps
+everything else (a charter without those markers, `.crewbie/instructions.md`,
+the Crewbie skill and the PR template are kept as you wrote them and listed as
+kept). Only edited Crewbie workflows and colliding files you own still block
+application; resolve those rather than changing ownership hashes blindly. `--offline`
 leaves remote variables unchecked. Existing execution opt-outs and models remain
 unchanged.
 
@@ -577,6 +588,12 @@ they hold path conventions, a scoped `.github/instructions/<domain>.instructions
 when agents or root guidance carry path-specific conventions, and never invents rules for
 documents it was not given. Generated profiles no longer list automatically loaded files
 under "Reuse existing guidance".
+For focused guidance the assessment prefers `.github/instructions/<domain>.instructions.md`:
+the cloud agent, code review and VS Code, Visual Studio and JetBrains chat all load it,
+and `applyTo` globs can target file types across directories. Nested `AGENTS.md` is
+proposed only for directory scope in repositories that also use non-Copilot agents;
+Visual Studio and JetBrains Copilot chat do not read it. Neither format has published
+evidence of better task outcomes; the choice is about host coverage and scoping.
 See the [README sources](../README.md#sources-behind-guidance-assessment).
 
 The scanner reads visible non-ignored instruction files, README/CONTRIBUTING

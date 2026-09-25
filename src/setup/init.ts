@@ -51,12 +51,13 @@ export async function installSetup(root: string, value: unknown, options: { appl
     ...raw, instructions: [], constitutionText: null,
     config: { ...config, constitution: raw.constitutionText ? existingConstitution : config.constitution },
   };
-  const changes = await installation(root, proposal);
+  const kept: string[] = [];
+  const changes = await installation(root, proposal, undefined, kept);
   const labels = options.skipLabels ? [] : setupLabels(config);
   const copilotVersion = options.copilotVersion === undefined ? undefined : copilotVersionOf(options.copilotVersion);
   const planning = config.planning?.enabled === true && !options.skipLabels;
-  if (!options.apply) return options.json ? json({ files: changes.map(describeInstallationFile), labels, repository: config.repository, ...(planning && copilotVersion ? { copilotVersion } : {}) })
-    : renderInstallationPreview(changes, labels, config.repository)
+  if (!options.apply) return options.json ? json({ files: changes.map(describeInstallationFile), kept, labels, repository: config.repository, ...(planning && copilotVersion ? { copilotVersion } : {}) })
+    : renderInstallationPreview(changes, labels, config.repository, kept)
       + (planning && copilotVersion ? `\nACTIONS VARIABLE | ${COPILOT_VERSION_VARIABLE}=${copilotVersion} if unset` : "");
   if (!options.skipLabels) {
     if (!config.repository || !config.approvers.length) throw new Error("Set repository and human approvers before creating GitHub labels, or explicitly use --skip-labels for offline setup.");

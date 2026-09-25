@@ -14,11 +14,11 @@ export async function updateRepository(root: string, options: { apply?: boolean;
     const path = role.sourceAgent!;
     return [path, string(managed[agentArchivePath(path)], `managed archive fingerprint for ${path}`)];
   }));
-  const conflicts: string[] = [];
+  const conflicts: string[] = [], kept: string[] = [];
   const changes = await installation(root, {
     config, configBeforeHash: textHash(configText), constitutionText: null, instructions: [],
     agentAdoptions, adopt: { ".crewbie/config.json": hash(configText) },
-  }, conflicts);
+  }, conflicts, kept);
   const variablePath = `/repos/${config.repository}/actions/variables/CREWBIE_PACKAGE`;
   let override: string | null = null;
   if (!options.offline && config.repository) {
@@ -31,13 +31,13 @@ export async function updateRepository(root: string, options: { apply?: boolean;
     && await copilotVersionVariable(client, config.repository) === null;
   const copilotNote = copilotMissing ? ` Hosted planning fails until an approved Copilot CLI version is set: ${copilotVersionCommand(config.repository)}` : "";
   const preview = {
-    version: PACKAGE_VERSION, files: changes.map(describeInstallationFile), conflicts, packageVariable: variableChange,
+    version: PACKAGE_VERSION, files: changes.map(describeInstallationFile), conflicts, kept, packageVariable: variableChange,
     remoteChecked: !options.offline && !!config.repository, ...(copilotMissing ? { copilotVersionMissing: true } : {}),
   };
   if (!options.apply) return options.json ? json(preview) : [
     `Repository integration update using installed CLI ${PACKAGE_VERSION}. No AI assessment or model/policy changes.`,
-    renderInstallationPreview(changes, [], config.repository),
-    conflicts.length ? `Preserved edited files (resolve before applying):\n${conflicts.join("\n")}` : "No edited-file conflicts.",
+    renderInstallationPreview(changes, [], config.repository, kept),
+    conflicts.length ? `Edited workflows or colliding files (resolve before applying):\n${conflicts.join("\n")}` : "No conflicts; your edits to agents and instructions are kept.",
     variableChange ? `Actions CREWBIE_PACKAGE override will change from ${override} to ${PACKAGE_PIN}.`
       : options.offline ? "Offline: Actions variables were not checked; an old CREWBIE_PACKAGE override can still select an older runtime." : "No package-variable change needed.",
     ...(copilotMissing ? [copilotNote.trim()] : []),

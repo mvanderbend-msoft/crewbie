@@ -28,7 +28,7 @@ function githubFixture(input = batch()) {
         if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
         if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
         if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "restart", "address-review", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
-        if (path.includes("/issues?")) return structuredClone(issues);
+        if (path.includes("/issues?")) { const state = /state=(\w+)/.exec(path)?.[1] ?? "open", since = /since=([^&]+)/.exec(path)?.[1]; return structuredClone(issues.filter((issue) => (state === "all" || (issue.state ?? "open") === state) && !(since && issue.updated_at && issue.updated_at < since))); }
         const events = /\/issues\/(\d+)\/events$/.exec(path);
         if (events) return fixture.events[Number(events[1])] ?? [];
         if (/\/pulls\/\d+\/reviews$/.test(path)) return fixture.reviews;
@@ -537,9 +537,14 @@ test("without a reviewer, finished PRs are marked ready and left for a human mer
   assert.equal(fixture.reviewRequests.length + fixture.merges.length, 0);
 });
 
+const rated = (confidence) => {
+  const input = batch();
+  for (const task of input.tasks) Object.assign(task, { confidence, confidenceReason: "Small, well-covered change." });
+  return input;
+};
 test("the Crewbie reviewer reviews each head once; auto mode merges only a trusted pass with passing checks", async () => {
   const cfg = reviewing();
-  const fixture = githubFixture();
+  const fixture = githubFixture(rated(0.9));
   await dispatch(fixture.client, cfg);
   finishedPull(fixture);
   let work = await dispatch(fixture.client, cfg);
@@ -578,6 +583,46 @@ test("the Crewbie reviewer reviews each head once; auto mode merges only a trust
   work = await dispatch(fixture.client, cfg);
   assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD, merge_method: "squash" }]);
   assert.equal(work[0].state, "done");
+});
+
+test("auto mode leaves tasks below the plan's confidence threshold for a human; the threshold is configurable", async () => {
+  const cfg = reviewing();
+  const fixture = githubFixture(rated(0.6));
+  await dispatch(fixture.client, cfg);
+  finishedPull(fixture);
+  reviewRun(fixture, 10);
+  reviewComment(fixture, cfg, 10, []);
+  fixture.checkRuns.push({ id: 4, name: "build", status: "completed", conclusion: "success", app: { slug: "github-actions" } });
+  const work = await dispatch(fixture.client, cfg);
+  assert.match(work[0].reason, /rated this task 0\.6 confidence, below the 0\.85 auto-merge threshold/);
+  assert.equal(fixture.merges.length, 0);
+  await dispatch(fixture.client, reviewing({ merge: { mode: "auto", method: "squash", minConfidence: 0.5 } }));
+  assert.equal(fixture.merges.length, 1);
+});
+
+test("dispatch reads closed issues only for prerequisites of open work", async () => {
+  const fixture = githubFixture();
+  const old = parseBatch({ ...batch(), id: "finished" }, config());
+  fixture.issues.push({ number: 50, state: "closed", title: old.tasks[0].title, body: issueBody(old, old.tasks[0]), labels: ["crewbie:managed", "crewbie:done", "crewbie:owner:developer"], updated_at: "2020-01-01T00:00:00.000Z" });
+  fixture.claims.add(50);
+  const lists = [];
+  const list = fixture.client.list.bind(fixture.client);
+  fixture.client.list = (path) => { lists.push(path); return list(path); };
+  const work = await dispatch(fixture.client, config());
+  assert.ok(!work.some((item) => item.issue.number === 50));
+  assert.ok(!lists.some((path) => path.includes("/issues/50/") || (path.includes("state=closed") && !path.includes("since=")) || path.includes("state=all")), lists.join("\n"));
+});
+
+test("an open task whose prerequisite closed long ago launches once that prerequisite's PR merged", async () => {
+  for (const merged of [true, false]) {
+    const fixture = githubFixture();
+    Object.assign(fixture.issues[0], { state: "closed", updated_at: "2020-01-01T00:00:00.000Z" });
+    fixture.pulls.set(1, { id: 1001, number: 101, state: "closed", merged_at: merged ? "then" : null, user: { login: "Copilot" } });
+    const work = await dispatch(fixture.client, config({ maxActive: 3 }));
+    const consumer = work.find((item) => item.metadata.task.id === "consumer");
+    assert.equal(consumer.state, merged ? "running" : "blocked", String(merged));
+    assert.equal(work.find((item) => item.issue.number === 1).state, merged ? "done" : "failed");
+  }
 });
 
 test("an approver's address-review label continues the session with the review and comments, then the new head is reviewed", async () => {

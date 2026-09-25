@@ -29,14 +29,48 @@ test("repository update regenerates workflows from current policy without resett
   assert.deepEqual(JSON.parse(await updateRepository(root, { offline: true, json: true })).files, []);
 });
 
-test("repository update reports all edited managed-file conflicts and applies nothing", async (t) => {
+test("repository update keeps human-edited agents and instructions without conflicts", async (t) => {
   const root = await installed(t);
-  for (const path of [".crewbie/instructions.md", ".github/agents/crewbie-developer.agent.md"]) {
+  for (const path of [".crewbie/instructions.md", ".github/agents/crewbie-developer.agent.md", ".github/PULL_REQUEST_TEMPLATE.md"]) {
     await writeFile(join(root, path), "My approved custom content.\n");
   }
+  const preview = JSON.parse(await updateRepository(root, { offline: true, json: true }));
+  assert.deepEqual(preview.conflicts, []);
+  assert.deepEqual(preview.kept.sort(), [".crewbie/instructions.md", ".github/PULL_REQUEST_TEMPLATE.md", ".github/agents/crewbie-developer.agent.md"]);
+  assert.deepEqual(preview.files, []);
+  await updateRepository(root, { offline: true, apply: true });
+  assert.equal(await readFile(join(root, ".crewbie/instructions.md"), "utf8"), "My approved custom content.\n");
+});
+
+test("repository update refreshes only the managed block of an edited charter", async (t) => {
+  const root = await installed(t);
+  const path = join(root, ".github/agents/crewbie-developer.agent.md");
+  const original = await readFile(path, "utf8");
+  const start = original.indexOf("<!-- crewbie:managed:start");
+  assert.ok(start > 0 && original.includes("<!-- crewbie:managed:end -->"));
+  const edited = original.slice(0, start) + "Always prefer small components.\n\n" + original.slice(start).replace("## Context and handoff", "## Stale heading")
+    + "\nTeam note kept by the human.\n";
+  await writeFile(path, edited.replaceAll("\n", "\r\n"));
+  const preview = JSON.parse(await updateRepository(root, { offline: true, json: true }));
+  assert.deepEqual(preview.conflicts, []);
+  assert.ok(preview.files.some((change) => change.path === ".github/agents/crewbie-developer.agent.md" && change.ownership === "Merged with your edits"));
+  await updateRepository(root, { offline: true, apply: true });
+  const merged = await readFile(path, "utf8");
+  assert.ok(merged.includes("\r\n") && !/[^\r]\n/.test(merged));
+  assert.match(merged, /Always prefer small components\./);
+  assert.match(merged, /Team note kept by the human\./);
+  assert.match(merged, /## Context and handoff/);
+  assert.doesNotMatch(merged, /Stale heading/);
+  assert.deepEqual(JSON.parse(await updateRepository(root, { offline: true, json: true })).files, []);
+});
+
+test("repository update still blocks on a human-edited workflow and applies nothing", async (t) => {
+  const root = await installed(t);
+  await writeFile(join(root, ".crewbie/config.json"), JSON.stringify(config({ maxActive: 1, planning: { enabled: true, model: "planner", executeOnMerge: true } })));
+  await writeFile(join(root, ".github/workflows/crewbie-execute-plan.yml"), "name: mine\n");
   const manifest = await readFile(join(root, ".crewbie/managed.json"), "utf8");
   const preview = JSON.parse(await updateRepository(root, { offline: true, json: true }));
-  assert.equal(preview.conflicts.length, 2);
+  assert.deepEqual(preview.conflicts, [".github/workflows/crewbie-execute-plan.yml"]);
   await assert.rejects(updateRepository(root, { offline: true, apply: true }), /no changes applied/);
   assert.equal(await readFile(join(root, ".crewbie/managed.json"), "utf8"), manifest);
 });

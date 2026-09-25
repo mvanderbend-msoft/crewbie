@@ -27,20 +27,21 @@ export async function ensureLabels(client: GitHubApi, config: Config): Promise<v
       description: labelDescription(name) });
   }
 }
-export async function managedIssues(client: GitHubApi, repository: string): Promise<Record<string, unknown>[]> {
-  return (await client.list(`/repos/${repository}/issues?state=all&labels=crewbie%3Amanaged`)).filter((issue) => !issue.pull_request);
+export async function managedIssues(client: GitHubApi, repository: string, state: "all" | "open" | "closed" = "all", since?: Date): Promise<Record<string, unknown>[]> {
+  return (await client.list(`/repos/${repository}/issues?state=${state}&labels=crewbie%3Amanaged${since ? `&since=${since.toISOString()}` : ""}`)).filter((issue) => !issue.pull_request);
 }
 export function approvalComment(digest: string, execute: boolean): string {
   return `Crewbie approval: ${digest}\nExecution: ${execute ? "approved" : "not-approved"}\n\nScope, specialist, model, and dependencies are bound to the issue's exact title and body.`;
 }
 export async function hasApproval(client: GitHubApi, config: Config, issue: Record<string, unknown>, execute = true): Promise<boolean> {
-  const body = string(issue.body, "issue body");
-  const expected = approvalComment(issueDigest(string(issue.title, "issue title"), body), execute);
+  string(issue.body, "issue body");
   const comments = await client.list(`/repos/${config.repository}/issues/${integer(issue.number, "issue number")}/comments`);
-  return comments.some((comment) => {
-    return isApprover(comment.user, config.approvers)
-      && comment.body === expected && comment.created_at === comment.updated_at;
-  });
+  return approvedIn(comments, config, issue, execute);
+}
+/** hasApproval over comments the caller already fetched. */
+export function approvedIn(comments: Record<string, unknown>[], config: Config, issue: Record<string, unknown>, execute = true): boolean {
+  const expected = approvalComment(issueDigest(string(issue.title, "issue title"), string(issue.body, "issue body")), execute);
+  return comments.some((comment) => isApprover(comment.user, config.approvers) && comment.body === expected && comment.created_at === comment.updated_at);
 }
 export async function publish(client: GitHubApi, config: Config, batch: Batch, ado?: AdoApi, dispatchWorkflow = true): Promise<{ task: string; issue: number }[]> {
   requireExecution(config);

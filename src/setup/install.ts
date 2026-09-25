@@ -2,7 +2,7 @@ import { readdir, unlink } from "node:fs/promises";
 import { agentPrompt, bounded, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
 import { agentArchivePath, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
-import { roleProfile } from "./agents.js";
+import { mergeManagedBlock, roleProfile } from "./agents.js";
 import { editableGuidance, validateInstructionScope } from "./instruction-quality.js";
 
 async function hasPrTemplate(root: string): Promise<boolean> {
@@ -17,7 +17,12 @@ async function hasPrTemplate(root: string): Promise<boolean> {
   return false;
 }
 
-export interface FileChange { path: string; before: string | null; after: string | null }
+export interface FileChange { path: string; before: string | null; after: string | null; merged?: boolean }
+/** Crewbie Markdown a human may edit after init; their version wins over a regenerated one. */
+function humanEditable(path: string): boolean {
+  return /^\.github\/agents\/crewbie-[^/]+\.agent\.md$/.test(path)
+    || [".crewbie/instructions.md", ".github/skills/crewbie/SKILL.md", ".github/PULL_REQUEST_TEMPLATE.md"].includes(path);
+}
 export function setupConfiguration(value: unknown): Config {
   const data = record(value, "setup proposal");
   const config = parseConfig(data.config);
@@ -27,12 +32,20 @@ export function setupConfiguration(value: unknown): Config {
 function memorySeed(id: string, tier: string): string {
   return tier === "hot" ? `# ${id}: gotchas\n\nNon-obvious traps and surprising constraints only, one or two lines each with a link. No implementation summaries, scope notes or verification logs. Mark new entries proposed until reviewed; replace stale entries.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
 }
-async function checkedChanges(root: string, files: Record<string, string | null>, owned: Record<string, unknown>, adopted: Record<string, string> = {}, conflicts?: string[]): Promise<FileChange[]> {
+async function checkedChanges(root: string, files: Record<string, string | null>, owned: Record<string, unknown>, adopted: Record<string, string> = {}, conflicts?: string[], kept?: string[]): Promise<FileChange[]> {
   const changes: FileChange[] = [];
   for (const [path, after] of Object.entries(files)) {
     const before = await optionalText(await safePath(root, path));
     if (before === after || (before !== null && after !== null && textHash(before) === textHash(after))) continue;
     if (before !== null && !matchesTextHash(before, owned[path]) && adopted[path] !== hash(before)) {
+      // Edits to Crewbie Markdown after init are the human's: refresh only Crewbie's block, otherwise keep their file.
+      if (owned[path] !== undefined && after !== null && humanEditable(path)) {
+        const merged = path.startsWith(".github/agents/") ? mergeManagedBlock(before, after) : null;
+        if (merged !== null) agentPrompt(merged, `${path} with your edits`);
+        if (merged !== null && textHash(merged) !== textHash(before)) changes.push({ path, before, after: merged, merged: true });
+        else if (merged === null) kept?.push(path);
+        continue;
+      }
       if (conflicts) { conflicts.push(path); continue; }
       throw new Error(`Preserving user-owned or edited file: ${path}. Reconcile it manually before installation.`);
     }
@@ -40,7 +53,7 @@ async function checkedChanges(root: string, files: Record<string, string | null>
   }
   return changes;
 }
-export async function installation(root: string, proposal: unknown, conflicts?: string[]): Promise<FileChange[]> {
+export async function installation(root: string, proposal: unknown, conflicts?: string[], kept?: string[]): Promise<FileChange[]> {
   const data = record(proposal, "setup proposal");
   if (data.status === "clarification") throw new Error("Resolve setup clarification questions before installation.");
   const config = setupConfiguration(data);
@@ -127,7 +140,7 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
   if (await optionalText(manifestPath) !== null) owned = record(await readJson(manifestPath), "managed file manifest");
   const templatePath = ".github/PULL_REQUEST_TEMPLATE.md";
   if (owned[templatePath] !== undefined || !(await hasPrTemplate(root))) files[templatePath] = PR_TEMPLATE;
-  return checkedChanges(root, files, owned, adopted, conflicts);
+  return checkedChanges(root, files, owned, adopted, conflicts, kept);
 }
 export async function applyInstallation(root: string, changes: FileChange[]): Promise<void> {
   const manifest = await optionalText(await safePath(root, ".crewbie/managed.json"));
@@ -141,7 +154,8 @@ export async function applyInstallation(root: string, changes: FileChange[]): Pr
       delete hashes[change.path];
     } else {
       await writeAtomic(root, change.path, change.after);
-      hashes[change.path] = textHash(change.after);
+      // A merged charter keeps its last Crewbie fingerprint so later updates still treat it as human-edited.
+      if (!change.merged) hashes[change.path] = textHash(change.after);
     }
     await writeAtomic(root, ".crewbie/managed.json", json(hashes));
   }

@@ -10,8 +10,13 @@ export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
 export const ADDRESS_REVIEW_LABEL = "crewbie:address-review";
 export type MergeMethod = "merge" | "squash" | "rebase";
-/** manual: a human merges. auto: Crewbie merges once the session completed, the reviewer passed the current head and checks passed. */
-export const DEFAULT_MERGE: { mode: "auto" | "manual"; method: MergeMethod } = { mode: "manual", method: "merge" };
+/**
+ * manual: a human merges. auto: Crewbie merges once the session completed, the reviewer passed the current head, checks passed
+ * and the approved plan rated the task at least minConfidence; lower-confidence tasks wait for a human.
+ */
+export interface MergePolicy { mode: "auto" | "manual"; method: MergeMethod; minConfidence?: number }
+export const DEFAULT_MIN_CONFIDENCE = 0.85;
+export const DEFAULT_MERGE: MergePolicy = { mode: "manual", method: "merge" };
 export interface ReviewConfig { enabled: boolean; role: string; model?: string }
 export function modelProfile(value: unknown): ModelProfile {
   if (value !== "economy" && value !== "balanced" && value !== "quality") throw new Error("Model profile must be economy, balanced or quality.");
@@ -30,10 +35,15 @@ export interface Config {
   planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
   modelProfile?: ModelProfile;
   execution?: typeof DEFAULT_EXECUTION_LIMITS;
-  merge?: typeof DEFAULT_MERGE;
+  merge?: MergePolicy;
   review?: ReviewConfig;
 }
-export function mergeFor(config: Config): typeof DEFAULT_MERGE { return config.merge ?? DEFAULT_MERGE; }
+export function mergeFor(config: Config): Required<MergePolicy> { return { minConfidence: DEFAULT_MIN_CONFIDENCE, ...(config.merge ?? DEFAULT_MERGE) }; }
+/** Auto mode merges only tasks the approved plan rated at or above minConfidence; unrated tasks go to a human. */
+export function autoMergeFor(config: Config, confidence: number | undefined): boolean {
+  const merge = mergeFor(config);
+  return merge.mode === "auto" && confidence !== undefined && confidence >= merge.minConfidence;
+}
 /** The enabled reviewer role and the model it runs with, or null when PR review is off. */
 export function reviewerFor(config: Config): { role: string; model: string } | null {
   if (!config.review?.enabled) return null;
@@ -126,7 +136,9 @@ export function parseConfig(value: unknown): Config {
     if (mode !== "auto" && mode !== "manual") throw new Error("merge.mode must be auto or manual.");
     const method = value.method ?? DEFAULT_MERGE.method;
     if (method !== "merge" && method !== "squash" && method !== "rebase") throw new Error("merge.method must be merge, squash or rebase.");
-    merge = { mode, method };
+    const minConfidence = value.minConfidence;
+    if (minConfidence !== undefined && (typeof minConfidence !== "number" || !(minConfidence >= 0 && minConfidence <= 1))) throw new Error("merge.minConfidence must be a number from 0 to 1.");
+    merge = { mode, method, ...(minConfidence === undefined ? {} : { minConfidence }) };
   }
   let review: ReviewConfig | undefined;
   if (data.review !== undefined) {

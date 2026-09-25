@@ -1,9 +1,8 @@
-import { ADDRESS_REVIEW_LABEL, mergeFor, reviewerFor, type Config } from "../config.js";
+import { ADDRESS_REVIEW_LABEL, autoMergeFor, mergeFor, reviewerFor, type Config } from "../config.js";
 import { hash, integer, record, string } from "../core.js";
-import { GitHubError } from "./github.js";
 import { batchDigest, issueBody, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
 import { isApprover, type GitHubApi } from "../tracking/github.js";
-import { ensureLabels, hasApproval, managedIssues, setStatus } from "../tracking/issues.js";
+import { approvedIn, ensureLabels, hasApproval, managedIssues, setStatus } from "../tracking/issues.js";
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { attributePull } from "./attribution.js";
@@ -81,10 +80,7 @@ function copilotAssigned(issue: Record<string, unknown>): boolean {
     return ["copilot-swe-agent[bot]", "copilot-swe-agent", "Copilot"].includes(String(assignee.login));
   });
 }
-async function claimed(client: GitHubApi, repo: string, number: number): Promise<boolean> {
-  try { await client.request("GET", `/repos/${repo}/git/ref/tags/crewbie/claims/${number}`); return true; }
-  catch (error) { if (error instanceof GitHubError && error.status === 404) return false; throw error; }
-}
+
 export async function linkedPull(client: GitHubApi, repository: string, issue: number): Promise<Record<string, unknown> | null> {
   const pulls: Record<string, unknown>[] = [];
   const seen = new Set<number>();
@@ -133,31 +129,40 @@ export async function linkedPull(client: GitHubApi, repository: string, issue: n
   if (candidates.length > 1) throw new Error(`Issue #${issue} has multiple candidate agent PRs. Reconcile before dispatch.`);
   return candidates[0] ?? null;
 }
-export async function inspectWork(client: GitHubApi, config: Config, knownIssues: readonly number[] = []): Promise<Work[]> {
-  const all = await managedIssues(client, config.repository);
-  const required = new Set(knownIssues.map((number) => integer(number, "published issue number")));
+/** Closed issues updated within this window are still inspected, so a session that outlives its issue keeps its slot. */
+const RECENTLY_CLOSED_MS = 24 * 60 * 60 * 1000;
+/**
+ * Only open managed issues, recently closed ones and issues a scoped run names are inspected in full. Older closed
+ * issues are read only when an open task depends on them, so each run stays proportional to active work.
+ */
+export async function inspectWork(client: GitHubApi, config: Config, knownIssues: readonly number[] = [], now = new Date()): Promise<Work[]> {
+  const all = await managedIssues(client, config.repository, "open");
   const refs = await client.request("GET", `/repos/${config.repository}/git/matching-refs/tags/crewbie/claims/`);
   if (!Array.isArray(refs)) throw new Error("GitHub returned an invalid claim ledger.");
+  const claims = new Set<number>();
   for (const raw of refs) {
     const ref = string(record(raw, "claim ref").ref, "claim name");
     const match = /^refs\/tags\/crewbie\/claims\/(\d+)$/.exec(ref);
     if (!match) throw new Error(`Unexpected claim ref: ${ref}`);
-    required.add(integer(Number(match[1]), "claimed issue number"));
+    claims.add(integer(Number(match[1]), "claimed issue number"));
   }
-  for (const number of required) {
+  const recent = claims.size ? await managedIssues(client, config.repository, "closed", new Date(now.getTime() - RECENTLY_CLOSED_MS)) : [];
+  all.push(...recent.filter((issue) => claims.has(integer(issue.number, "issue number"))));
+  for (const number of new Set(knownIssues.map((number) => integer(number, "published issue number")))) {
     if (!all.some((issue) => issue.number === number)) {
-      all.push(record(await client.request("GET", `/repos/${config.repository}/issues/${number}`), "claimed issue"));
+      all.push(record(await client.request("GET", `/repos/${config.repository}/issues/${number}`), "published issue"));
     }
   }
+  all.sort((a, b) => integer(a.number, "issue number") - integer(b.number, "issue number"));
   const result: Work[] = [];
   let telemetry: ReturnType<typeof cloudTasks> | undefined;
   for (const issue of all) {
     const metadata = taskMetadata(String(issue.body ?? ""));
     if (!metadata) throw new Error(`Managed issue #${issue.number} lacks task metadata.`);
-    const approved = await hasApproval(client, config, issue);
     const number = integer(issue.number, "issue number");
-    const claim = await claimed(client, config.repository, number);
-    const comments = claim ? await client.list(`/repos/${config.repository}/issues/${number}/comments`) : [];
+    const claim = claims.has(number);
+    const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
+    const approved = approvedIn(comments, config, issue);
     let pr = claim ? await linkedPull(client, config.repository, number) : null;
     const restart = [...comments].reverse().find((comment) => String(comment.body ?? "").includes(RESTART_MARKER));
     // After a restart, an earlier closed, unmerged PR belongs to the ended attempt.
@@ -207,6 +212,21 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     if (!approved && state !== "failed") { state = "blocked"; reason = "Issue content no longer has current human execution approval."; }
     result.push({ issue, metadata, state, approved, claimed: claim, sessionComplete, ...(sessionEnded ? { sessionEnded } : {}), reason, ...(pr ? { pull: pr } : {}), ...(nativeTask ? { nativeTask } : {}) });
   }
+  const key = (batch: string, digest: string, id: string) => `${batch}/${digest}/${id}`;
+  const present = new Set(result.map((item) => key(item.metadata.batch, item.metadata.batchDigest, item.metadata.task.id)));
+  const missing = new Set(result.flatMap((item) => item.metadata.task.dependsOn.map((id) => key(item.metadata.batch, item.metadata.batchDigest, id))).filter((id) => !present.has(id)));
+  if (missing.size) {
+    for (const issue of await managedIssues(client, config.repository, "closed")) {
+      const metadata = taskMetadata(String(issue.body ?? ""));
+      const id = metadata && key(metadata.batch, metadata.batchDigest, metadata.task.id);
+      if (!metadata || !id || !missing.has(id)) continue;
+      missing.delete(id);
+      const merged = !!(await linkedPull(client, config.repository, integer(issue.number, "prerequisite issue")))?.merged_at;
+      result.push({ issue, metadata, state: merged ? "done" : "failed", approved: false, claimed: false, sessionComplete: false,
+        reason: merged ? "Closed; linked Copilot PR merged." : "Closed without a merged prerequisite PR." });
+      if (!missing.size) break;
+    }
+  }
   return result;
 }
 export function batchWork(work: Work[], batch: Batch): Work[] {
@@ -239,13 +259,15 @@ export function eligible(work: Work[], maxActive: number, batchId?: string): Wor
     const key = keyOf(item);
     if (visiting.has(key)) throw new Error(`Dependency cycle at ${item.metadata.batch}/${item.metadata.task.id}.`);
     if (visited.has(key)) return;
+    // Finished work no longer waits on anything, and its own prerequisites may not have been loaded.
+    if (item.state === "done" || item.state === "failed") { visited.add(key); return; }
     visiting.add(key);
     for (const id of item.metadata.task.dependsOn) {
       const dependency = byKey.get(keyOf(item, id));
       if (!dependency) throw new Error(`Missing prerequisite ${id}.`);
       visit(dependency);
       const ready = dependency.state === "done" || (item.metadata.task.kind === "review" && dependency.state === "review" && dependency.sessionComplete === true);
-      if (!item.claimed && item.state !== "failed" && item.state !== "done" && !ready) {
+      if (!item.claimed && !ready) {
         item.state = "blocked";
         item.reason = item.metadata.task.kind === "review" ? `Waiting for ${id} to complete its cloud session and expose a reviewable PR.` : `Waiting for ${id} to merge.`;
       }
@@ -324,6 +346,8 @@ async function afterSession(client: GitHubApi, config: Config, item: Work): Prom
   if (!review) return lead + await requestReview(client, config, number, head);
   if (review.verdict === "changes") return `${lead}crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}. Add ${ADDRESS_REVIEW_LABEL} to PR #${number} to have crewbie-${item.metadata.task.owner} address them.`;
   if (mergeFor(config).mode === "manual") return `${lead}crewbie-${reviewer.role} found no blocking issues; merge when you are satisfied.`;
+  const confidence = item.metadata.task.confidence;
+  if (!autoMergeFor(config, confidence)) return `${lead}crewbie-${reviewer.role} found no blocking issues. The plan rated this task ${confidence === undefined ? "without a confidence score" : `${confidence} confidence`}, below the ${mergeFor(config).minConfidence} auto-merge threshold; review and merge it yourself.`;
   if (review.partial) return `${lead}The review could not cover every patch, so Crewbie does not auto-merge; review and merge it yourself.`;
   const outcome = await autoMerge(client, config, number, head);
   if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }

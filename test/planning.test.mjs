@@ -12,6 +12,7 @@ import { installation, applyInstallation } from "../dist/setup/install.js";
 import { workflows } from "../dist/setup/templates.js";
 import { approvedMergedPlan, releaseMergedPlan, planningLocation } from "../dist/execution/planning-approval.js";
 import { fixture, config, task } from "./helpers.mjs";
+const planned = (id, dependsOn = []) => ({ ...task(id, dependsOn), confidence: 0.9, confidenceReason: "Small, well-specified change." });
 
 async function planningFixture(t, automatic = false) {
   const cfg = parseConfig(config({ planning: { enabled: true, model: "planning-model", executeOnMerge: automatic } }));
@@ -120,7 +121,7 @@ async function planningFixture(t, automatic = false) {
   const candidate = {
     summary: "Propose catalogue paging with bounded requests and explicit retry.",
     questions: [], teamSuggestions: [],
-    batch: { schemaVersion: 1, id: "model-id", spec: "Load a page at a time. Preserve cards and require explicit retry after failure.", tasks: [task("paging")], approval: null },
+    batch: { schemaVersion: 1, id: "model-id", spec: "Load a page at a time. Preserve cards and require explicit retry after failure.", tasks: [planned("paging")], approval: null },
   };
   const output = (value = candidate) => writeFile(join(root, ".crewbie-planning-output.txt"), JSON.stringify(value));
   const merge = () => {
@@ -310,7 +311,7 @@ test("description budgets are checked before remote writes", async (t) => {
 
 async function mergedFixture(t, unchangedPaths = []) {
   const f = await planningFixture(t, true);
-  f.candidate.batch.tasks = [task("catalogue-ui")];
+  f.candidate.batch.tasks = [planned("catalogue-ui")];
   await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
   await f.output();
   await publishPlanning(f.root, f.client, f.cfg);

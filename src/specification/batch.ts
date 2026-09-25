@@ -6,10 +6,23 @@ export interface Task {
   priority: number; dependsOn: string[];
   kind?: "implementation" | "review";
   adoWorkItem?: number;
+  /** Planner's 0-1 estimate that the PR can merge without human changes; gates auto-merge. */
+  confidence?: number;
+  confidenceReason?: string;
 }
 function taskKind(value: unknown): NonNullable<Task["kind"]> {
   if (value !== "implementation" && value !== "review") throw new Error("Task kind must be implementation or review.");
   return value;
+}
+function taskConfidence(task: Record<string, unknown>): Pick<Task, "confidence" | "confidenceReason"> {
+  if (task.confidence === undefined) {
+    if (task.confidenceReason !== undefined) throw new Error("confidenceReason needs a confidence score.");
+    return {};
+  }
+  if (typeof task.confidence !== "number" || !Number.isFinite(task.confidence) || task.confidence < 0 || task.confidence > 1) throw new Error("Task confidence must be a number from 0 to 1.");
+  const reason = string(task.confidenceReason, "confidence reason");
+  bounded(reason, 60, "Confidence reason");
+  return { confidence: task.confidence, confidenceReason: reason };
 }
 export interface SourceReference { uri: string; revision: string; fingerprint?: string }
 export function sourceReferences(value: unknown): SourceReference[] {
@@ -43,6 +56,7 @@ export function parseBatch(value: unknown, config?: Config): Batch {
       priority: integer(task.priority, "priority", 0, 1000), dependsOn: strings(task.dependsOn, "dependencies"),
       ...(task.kind === undefined ? {} : { kind: taskKind(task.kind) }),
       ...(task.adoWorkItem === undefined ? {} : { adoWorkItem: integer(task.adoWorkItem, "ADO work item") }),
+      ...taskConfidence(task),
     };
     bounded(result.body, limitsFor(config).spec, `${result.id} description`);
     if (result.model.trim().toLowerCase() === "auto") throw new Error("Tasks require an explicit approved model.");
@@ -104,6 +118,7 @@ export function taskMetadata(body: string): { batch: string; batchDigest: string
       dependsOn: strings(task.dependsOn, "dependencies"), priority: integer(task.priority, "priority", 0, 1000),
       ...(task.kind === undefined ? {} : { kind: taskKind(task.kind) }),
       ...(task.adoWorkItem === undefined ? {} : { adoWorkItem: integer(task.adoWorkItem, "ADO work item") }),
+      ...taskConfidence(task),
     },
   };
 }
