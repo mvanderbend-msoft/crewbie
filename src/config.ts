@@ -10,12 +10,8 @@ export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
 export const ADDRESS_REVIEW_LABEL = "crewbie:address-review";
 export type MergeMethod = "merge" | "squash" | "rebase";
-/**
- * Crewbie merges a task's PR once the session completed, the Crewbie reviewer (when enabled) passed the current head, checks
- * passed and the approved plan rated the task at least minConfidence; unrated and lower-confidence tasks wait for a human.
- */
-export interface MergePolicy { method: MergeMethod; minConfidence?: number }
-export const DEFAULT_MIN_CONFIDENCE = 0.85;
+/** How Crewbie merges task PRs into their plan's feature branch once the session completed and every check passed. */
+export interface MergePolicy { method: MergeMethod }
 export const DEFAULT_MERGE: MergePolicy = { method: "merge" };
 export interface ReviewConfig { enabled: boolean; role: string; model?: string }
 export function modelProfile(value: unknown): ModelProfile {
@@ -38,12 +34,8 @@ export interface Config {
   merge?: MergePolicy;
   review?: ReviewConfig;
 }
-export function mergeFor(config: Config): Required<MergePolicy> { return { minConfidence: DEFAULT_MIN_CONFIDENCE, ...(config.merge ?? DEFAULT_MERGE) }; }
-/** The approved plan's confidence decides: at or above minConfidence Crewbie merges; unrated and lower tasks go to a human. */
-export function autoMergeFor(config: Config, confidence: number | undefined): boolean {
-  return confidence !== undefined && confidence >= mergeFor(config).minConfidence;
-}
-/** The enabled reviewer role and the model it runs with, or null when PR review is off. */
+export function mergeFor(config: Config): MergePolicy { return config.merge ?? DEFAULT_MERGE; }
+/** The enabled reviewer of feature PRs and the model it runs with, or null when PR review is off. */
 export function reviewerFor(config: Config): { role: string; model: string } | null {
   if (!config.review?.enabled) return null;
   const role = config.roles.find((role) => role.id === config.review?.role);
@@ -133,10 +125,8 @@ export function parseConfig(value: unknown): Config {
     const value = record(data.merge, "merge");
     const method = value.method ?? DEFAULT_MERGE.method;
     if (method !== "merge" && method !== "squash" && method !== "rebase") throw new Error("merge.method must be merge, squash or rebase.");
-    const minConfidence = value.minConfidence;
-    if (minConfidence !== undefined && (typeof minConfidence !== "number" || !(minConfidence >= 0 && minConfidence <= 1))) throw new Error("merge.minConfidence must be a number from 0 to 1.");
-    // A legacy merge.mode is ignored: confidence alone decides between auto-merge and human merge.
-    merge = { method, ...(minConfidence === undefined ? {} : { minConfidence }) };
+    // Legacy merge.mode and merge.minConfidence are ignored: task PRs always merge into the feature branch.
+    merge = { method };
   }
   let review: ReviewConfig | undefined;
   if (data.review !== undefined) {

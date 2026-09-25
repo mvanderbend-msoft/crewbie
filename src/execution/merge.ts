@@ -1,4 +1,4 @@
-import { mergeFor, reviewerFor, type Config } from "../config.js";
+import { mergeFor, type Config } from "../config.js";
 import { GitHubError, integer, record, string } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
 
@@ -41,16 +41,16 @@ export function checksPassed(runs: Record<string, unknown>[], statuses: Record<s
   return null;
 }
 
-/** Merges the vetted head of a ready PR once every check passed and GitHub reports it mergeable. Never bypasses protection. */
+/** Merges a ready task PR at the completed session's head once every check passed and GitHub reports it mergeable. Never bypasses protection. */
 export async function autoMerge(client: GitHubApi, config: Config, number: number, reviewed: string): Promise<{ merged: boolean; reason: string }> {
   const merge = mergeFor(config);
   const prefix = `/repos/${config.repository}`;
-  const vetted = reviewerFor(config) ? "Reviewer passed" : "Session completed on";
+  const vetted = "Session completed on";
   const pr = record(await client.request("GET", `${prefix}/pulls/${number}`), "pull request");
   if (pr.state !== "open") return { merged: false, reason: "PR is not open." };
   if (pr.draft === true) return { merged: false, reason: "PR is still a draft." };
   const head = string(record(pr.head, "PR head").sha, "PR head SHA");
-  if (head !== reviewed) return { merged: false, reason: reviewerFor(config) ? "The PR changed after its review; awaiting a review of the new head." : "The PR head changed; waiting for the next dispatch run." };
+  if (head !== reviewed) return { merged: false, reason: "The PR head changed; waiting for the next dispatch run." };
   const checks = CHECK_READER.client ?? client;
   const runs = record(await checks.request("GET", `${prefix}/commits/${head}/check-runs?per_page=100`), "check runs");
   if (!Array.isArray(runs.check_runs) || integer(runs.total_count, "check run count", 0) > runs.check_runs.length) {
@@ -71,5 +71,5 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
     }
     throw error;
   }
-  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)}: ${reviewerFor(config) ? "the Crewbie reviewer passed it, " : ""}the plan rated it ${merge.minConfidence} or above and every check passed.` };
+  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)} into ${string(record(pr.base, "PR base").ref, "base branch")}: the session completed and every check passed.` };
 }

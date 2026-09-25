@@ -108,7 +108,7 @@ export async function syncAdo(github: GitHubApi, ado: AdoApi, config: Config, wo
     if (ids.length > 1) throw new Error(`Issue #${issue} has conflicting ADO links. Reconcile them before write-back.`);
     if (!ids[0]) continue;
     const urls = [`https://github.com/${config.repository}/issues/${issue}`];
-    const pr = await linkedPull(github, config.repository, issue);
+    const pr = await linkedPull(github, config.repository, issue, item.metadata.branch);
     if (pr) urls.push(`https://github.com/${config.repository}/pull/${integer(pr.number, "PR number")}`);
     await writeBack(ado, ids[0], urls, `Crewbie status: ${item.state}. ${item.reason}`);
   }

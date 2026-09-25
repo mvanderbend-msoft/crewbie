@@ -6,24 +6,13 @@ export interface Task {
   priority: number; dependsOn: string[];
   kind?: "implementation" | "review";
   adoWorkItem?: number;
-  /** Planner's 0-1 estimate that the PR can merge without human changes; gates auto-merge. */
-  confidence?: number;
-  confidenceReason?: string;
 }
 function taskKind(value: unknown): NonNullable<Task["kind"]> {
   if (value !== "implementation" && value !== "review") throw new Error("Task kind must be implementation or review.");
   return value;
 }
-function taskConfidence(task: Record<string, unknown>): Pick<Task, "confidence" | "confidenceReason"> {
-  if (task.confidence === undefined) {
-    if (task.confidenceReason !== undefined) throw new Error("confidenceReason needs a confidence score.");
-    return {};
-  }
-  if (typeof task.confidence !== "number" || !Number.isFinite(task.confidence) || task.confidence < 0 || task.confidence > 1) throw new Error("Task confidence must be a number from 0 to 1.");
-  const reason = string(task.confidenceReason, "confidence reason");
-  bounded(reason, 60, "Confidence reason");
-  return { confidence: task.confidence, confidenceReason: reason };
-}
+/** Task PRs of a plan merge into this branch; one feature PR then takes the whole plan to the default branch. */
+export function featureBranch(batchId: string): string { return `crewbie/${slug(batchId, "batch ID")}`; }
 export interface SourceReference { uri: string; revision: string; fingerprint?: string }
 export function sourceReferences(value: unknown): SourceReference[] {
   if (!Array.isArray(value)) throw new Error("sources must be a list of URI/revision records.");
@@ -56,7 +45,6 @@ export function parseBatch(value: unknown, config?: Config): Batch {
       priority: integer(task.priority, "priority", 0, 1000), dependsOn: strings(task.dependsOn, "dependencies"),
       ...(task.kind === undefined ? {} : { kind: taskKind(task.kind) }),
       ...(task.adoWorkItem === undefined ? {} : { adoWorkItem: integer(task.adoWorkItem, "ADO work item") }),
-      ...taskConfidence(task),
     };
     bounded(result.body, limitsFor(config).spec, `${result.id} description`);
     if (result.model.trim().toLowerCase() === "auto") throw new Error("Tasks require an explicit approved model.");
@@ -98,12 +86,20 @@ export function requireApproval(batch: Batch): void {
 export function issueDigest(title: string, body: string): string {
   return hash(JSON.stringify({ title, body }));
 }
-export function issueBody(batch: Batch, task: Task): string {
-  const metadata = JSON.stringify({ batch: batch.id, batchDigest: batchDigest(batch), sources: batch.sources, task });
+/** `feature: false` renders the body tasks had before feature branches, so their published issues still match. */
+export function issueBody(batch: Batch, task: Task, feature = true): string {
+  const metadata = JSON.stringify({ batch: batch.id, batchDigest: batchDigest(batch), sources: batch.sources, task, ...(feature ? { branch: featureBranch(batch.id) } : {}) });
   if (task.body.includes("<!-- crewbie-task:")) throw new Error("Task body contains a reserved metadata marker.");
   return `${task.body}\n\n## Context\n\n${batch.spec}\n\n${batch.sources.map((source) => `- ${source.uri} (revision: ${source.revision})`).join("\n")}\n\nUse the named Crewbie specialist. Link the resulting PR to this issue. Read and report the specialist's charter and relevant memory. Keep the PR description concise.\n\n<!-- crewbie-task:${Buffer.from(metadata).toString("base64")} -->`;
 }
-export function taskMetadata(body: string): { batch: string; batchDigest: string; sources: SourceReference[]; task: Task } | null {
+function taskBranch(value: unknown): string {
+  const branch = string(value, "feature branch");
+  if (!/^crewbie\/[a-z][a-z0-9-]{0,63}$/.test(branch)) throw new Error("Invalid Crewbie feature branch.");
+  return branch;
+}
+/** `branch` is absent on tasks published before feature branches; those PRs still target the default branch. */
+export interface TaskMetadata { batch: string; batchDigest: string; sources: SourceReference[]; task: Task; branch?: string }
+export function taskMetadata(body: string): TaskMetadata | null {
   const matches = [...body.matchAll(/<!-- crewbie-task:([A-Za-z0-9+/=]+) -->/g)];
   if (!matches.length) return null;
   if (matches.length !== 1 || !matches[0]?.[1]) throw new Error("Issue has ambiguous Crewbie metadata.");
@@ -118,7 +114,7 @@ export function taskMetadata(body: string): { batch: string; batchDigest: string
       dependsOn: strings(task.dependsOn, "dependencies"), priority: integer(task.priority, "priority", 0, 1000),
       ...(task.kind === undefined ? {} : { kind: taskKind(task.kind) }),
       ...(task.adoWorkItem === undefined ? {} : { adoWorkItem: integer(task.adoWorkItem, "ADO work item") }),
-      ...taskConfidence(task),
     },
+    ...(value.branch === undefined ? {} : { branch: taskBranch(value.branch) }),
   };
 }

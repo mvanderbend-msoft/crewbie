@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { setTimeout } from "node:timers/promises";
 import { batchWork, eligible } from "../dist/execution/dispatch.js";
 import { watchBatch } from "../dist/execution/watch.js";
-import { approvedBatch, batchDigest, issueBody, parseBatch } from "../dist/specification/batch.js";
+import { approvedBatch, issueBody, parseBatch, taskMetadata } from "../dist/specification/batch.js";
 import { batch, config } from "./helpers.mjs";
 
 function scenario() {
   const approved = approvedBatch(parseBatch(batch(), config()), true);
   const work = approved.tasks.map((task, index) => ({
     issue: { number: index + 1, title: task.title, body: issueBody(approved, task) },
-    metadata: { batch: approved.id, batchDigest: batchDigest(approved), task },
+    metadata: taskMetadata(issueBody(approved, task)),
     approved: true, claimed: true, state: "running", reason: "active",
   }));
   return { approved, work };

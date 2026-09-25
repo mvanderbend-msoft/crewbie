@@ -194,9 +194,9 @@ read revisions. Preserve supplied source references instead of inventing them.
 
 Split the work into reviewable tasks with one owner and explicit model each.
 Record priority and prerequisites by stable task ID. Include source revisions.
-Set \`kind: "review"\` for review tasks whose prerequisites need completed cloud
-sessions and linked PRs; implementation tasks (the default) require merged
-prerequisites. Keep context attestations out of requirement/source prose.
+Set \`kind: "review"\` for review or verification tasks. Every task starts after
+its prerequisites merged into the plan's feature branch and works on that branch.
+Keep context attestations out of requirement/source prose.
 Include the owner's memory paths and shared decisions in the proposed scope when
 learning updates are appropriate; otherwise explicitly defer them to nightly
 review. Memory changes are proposals on the work branch, not direct writes to

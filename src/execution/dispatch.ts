@@ -1,5 +1,5 @@
-import { ADDRESS_REVIEW_LABEL, autoMergeFor, mergeFor, reviewerFor, type Config } from "../config.js";
-import { hash, integer, record, string } from "../core.js";
+import { ADDRESS_REVIEW_LABEL, reviewerFor, type Config } from "../config.js";
+import { GitHubError, hash, integer, record, string } from "../core.js";
 import { batchDigest, issueBody, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
 import { isApprover, type GitHubApi } from "../tracking/github.js";
 import { approvedIn, ensureLabels, hasApproval, managedIssues, setStatus } from "../tracking/issues.js";
@@ -81,7 +81,14 @@ function copilotAssigned(issue: Record<string, unknown>): boolean {
   });
 }
 
-export async function linkedPull(client: GitHubApi, repository: string, issue: number): Promise<Record<string, unknown> | null> {
+const COPILOT_LOGINS = ["copilot-swe-agent[bot]", "copilot-swe-agent", "Copilot"];
+const byCopilot = (pr: Record<string, unknown>) => pr.user !== null && COPILOT_LOGINS.includes(String(record(pr.user, "PR author").login));
+/**
+ * The Copilot PR for a task issue. Default-branch PRs are found through GitHub's closing references; GitHub does not link
+ * PRs into a feature branch, so those are found through the issue's cross-references and must target that branch.
+ */
+export async function linkedPull(client: GitHubApi, repository: string, issue: number, branch?: string): Promise<Record<string, unknown> | null> {
+  if (branch) return branchPull(client, repository, issue, branch);
   const pulls: Record<string, unknown>[] = [];
   const seen = new Set<number>();
   const [owner, name] = repository.split("/");
@@ -112,9 +119,7 @@ export async function linkedPull(client: GitHubApi, repository: string, issue: n
       if (seen.has(number)) continue;
       seen.add(number);
       const pr = record(await client.request("GET", `/repos/${repository}/pulls/${number}`), "pull request");
-      if (pr.user === null) continue;
-      const user = record(pr.user, "PR author");
-      if (["copilot-swe-agent[bot]", "copilot-swe-agent", "Copilot"].includes(String(user.login))) pulls.push(pr);
+      if (byCopilot(pr)) pulls.push(pr);
     }
     const info = record(connection.pageInfo, "closing reference page");
     if (typeof info.hasNextPage !== "boolean") throw new Error("Closing-reference pagination is unverified.");
@@ -123,6 +128,26 @@ export async function linkedPull(client: GitHubApi, repository: string, issue: n
     if (next === after || page === 99) throw new Error("Closing-reference pagination could not complete safely.");
     after = next;
   }
+  return pickPull(pulls, issue);
+}
+async function branchPull(client: GitHubApi, repository: string, issue: number, branch: string): Promise<Record<string, unknown> | null> {
+  const pulls: Record<string, unknown>[] = [];
+  const seen = new Set<number>();
+  for (const event of await client.list(`/repos/${repository}/issues/${integer(issue, "issue number")}/timeline`)) {
+    if (event.event !== "cross-referenced" || event.source === null || event.source === undefined) continue;
+    const source = record(event.source, "cross-reference source").issue;
+    const url = source && typeof source === "object" ? (source as { pull_request?: { url?: unknown } }).pull_request?.url : undefined;
+    const match = typeof url === "string" ? /\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(url) : null;
+    if (!match || match[1]!.toLowerCase() !== repository.toLowerCase()) continue;
+    const number = integer(Number(match[2]), "cross-referencing PR");
+    if (seen.has(number)) continue;
+    seen.add(number);
+    const pr = record(await client.request("GET", `/repos/${repository}/pulls/${number}`), "pull request");
+    if (byCopilot(pr) && record(pr.base, "PR base").ref === branch) pulls.push(pr);
+  }
+  return pickPull(pulls, issue);
+}
+function pickPull(pulls: Record<string, unknown>[], issue: number): Record<string, unknown> | null {
   // A restart leaves the earlier closed, unmerged PR linked; the current PR is the one that is open or merged.
   const current = pulls.length > 1 ? pulls.filter((pr) => pr.state === "open" || pr.merged_at) : pulls;
   let candidates = current.length || !pulls.length ? current : [pulls.reduce((a, b) => integer(b.number, "PR") > integer(a.number, "PR") ? b : a)];
@@ -132,6 +157,8 @@ export async function linkedPull(client: GitHubApi, repository: string, issue: n
   if (candidates.length > 1 && merged.length) candidates = [merged[0]!];
   const titled = candidates.filter((pr) => new RegExp(`#${integer(issue, "issue number")}(?!\\d)`).test(String(pr.title ?? "")));
   if (candidates.length > 1 && titled.length === 1) candidates = titled;
+  const closing = candidates.filter((pr) => new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${issue}(?!\\d)`, "i").test(String(pr.body ?? "")));
+  if (candidates.length > 1 && closing.length === 1) candidates = closing;
   if (candidates.length > 1) throw new Error(`Issue #${issue} has multiple candidate agent PRs. Reconcile before dispatch.`);
   return candidates[0] ?? null;
 }
@@ -169,7 +196,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     const claim = claims.has(number);
     const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
     const approved = approvedIn(comments, config, issue);
-    let pr = claim ? await linkedPull(client, config.repository, number) : null;
+    let pr = claim ? await linkedPull(client, config.repository, number, metadata.branch) : null;
     const restart = [...comments].reverse().find((comment) => String(comment.body ?? "").includes(RESTART_MARKER));
     // After a restart, an earlier closed, unmerged PR belongs to the ended attempt.
     if (pr && restart && pr.state === "closed" && !pr.merged_at && String(restart.created_at) > String(pr.created_at)) pr = null;
@@ -184,7 +211,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     } else if (claim && !pr && !copilotAssigned(issue)) {
       state = "blocked"; reason = "Launch was claimed but neither Copilot assignment nor a linked PR is visible. Inspect the outcome before retrying.";
     }
-    if (pr?.merged_at) { state = "done"; reason = "Linked Copilot PR merged."; }
+    if (pr?.merged_at) { state = "done"; reason = metadata.branch ? `Merged into ${metadata.branch}.` : "Linked Copilot PR merged."; }
     else if (pr) {
       telemetry ??= cloudTasks(client, config.repository);
       const snapshot = await telemetry;
@@ -227,7 +254,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
       const id = metadata && key(metadata.batch, metadata.batchDigest, metadata.task.id);
       if (!metadata || !id || !missing.has(id)) continue;
       missing.delete(id);
-      const merged = !!(await linkedPull(client, config.repository, integer(issue.number, "prerequisite issue")))?.merged_at;
+      const merged = !!(await linkedPull(client, config.repository, integer(issue.number, "prerequisite issue"), metadata.branch))?.merged_at;
       result.push({ issue, metadata, state: merged ? "done" : "failed", approved: false, claimed: false, sessionComplete: false,
         reason: merged ? "Closed; linked Copilot PR merged." : "Closed without a merged prerequisite PR." });
       if (!missing.size) break;
@@ -245,7 +272,7 @@ export function batchWork(work: Work[], batch: Batch): Work[] {
     const matches = selected.filter((item) => item.metadata.task.id === task.id);
     const item = matches[0];
     if (matches.length !== 1 || !item || item.metadata.batchDigest !== digest || !item.approved
-      || item.issue.title !== task.title || item.issue.body !== issueBody(batch, task)) {
+      || item.issue.title !== task.title || item.issue.body !== issueBody(batch, task, item.metadata.branch !== undefined)) {
       throw new Error(`Published task ${task.id} differs from the approved batch; stop for reconciliation.`);
     }
   }
@@ -272,10 +299,12 @@ export function eligible(work: Work[], maxActive: number, batchId?: string): Wor
       const dependency = byKey.get(keyOf(item, id));
       if (!dependency) throw new Error(`Missing prerequisite ${id}.`);
       visit(dependency);
-      const ready = dependency.state === "done" || (item.metadata.task.kind === "review" && dependency.state === "review" && dependency.sessionComplete === true);
+      // Review tasks of a feature plan review merged work on the feature branch; older plans reviewed unmerged PRs.
+      const early = item.metadata.task.kind === "review" && !item.metadata.branch;
+      const ready = dependency.state === "done" || (early && dependency.state === "review" && dependency.sessionComplete === true);
       if (!item.claimed && !ready) {
         item.state = "blocked";
-        item.reason = item.metadata.task.kind === "review" ? `Waiting for ${id} to complete its cloud session and expose a reviewable PR.` : `Waiting for ${id} to merge.`;
+        item.reason = early ? `Waiting for ${id} to complete its cloud session and expose a reviewable PR.` : `Waiting for ${id} to merge${item.metadata.branch ? ` into ${item.metadata.branch}` : ""}.`;
       }
     }
     visiting.delete(key); visited.add(key);
@@ -327,14 +356,96 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
       await setStatus(client, config.repository, fresh, "blocked");
       continue;
     }
+    const base = item.metadata.branch ? await ensureBranch(client, config, item.metadata.branch, sha) : branch;
     await reserveLaunch(client, config, item.metadata, issue, sha, true);
     // Atomic remote claim prevents a second workflow from launching the same issue.
     await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/tags/crewbie/claims/${issue}`, sha });
-    await assign(client, config, item, fresh, branch);
+    await assign(client, config, item, fresh, base);
   }
   await restarts(client, config, work, branch, sha, discoverModels, ado);
   await addressReviews(client, config, work, sha, discoverModels, ado);
+  await featurePulls(client, config, work, branch);
   return work;
+}
+/** Creates a plan's feature branch from the default branch the first time one of its tasks launches. */
+async function ensureBranch(client: GitHubApi, config: Config, branch: string, sha: string): Promise<string> {
+  // The git refs API takes the ref path with literal slashes; the branch name was validated as crewbie/<slug>.
+  const path = `/repos/${config.repository}/git/ref/heads/${branch}`;
+  try { await client.request("GET", path); return branch; }
+  catch (error) { if (!(error instanceof GitHubError && error.status === 404)) throw error; }
+  try { await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/heads/${branch}`, sha }); }
+  catch (error) { if (!(error instanceof GitHubError && error.status === 422)) throw error; await client.request("GET", path); }
+  return branch;
+}
+const FEATURE_MARKER = "<!-- crewbie-feature:";
+/**
+ * Once every task of a feature plan merged into its branch, Crewbie opens one PR to the default branch that closes all of
+ * the plan's issues. The Crewbie reviewer (when enabled) reviews each new head; only a human merges it.
+ */
+async function featurePulls(client: GitHubApi, config: Config, work: Work[], base: string): Promise<void> {
+  const prefix = `/repos/${config.repository}`;
+  const plans = new Map<string, Work[]>();
+  for (const item of work) {
+    if (!item.metadata.branch) continue;
+    const key = `${item.metadata.batch}/${item.metadata.batchDigest}`;
+    plans.set(key, [...plans.get(key) ?? [], item]);
+  }
+  for (const items of plans.values()) {
+    if (items.some((item) => item.state !== "done")) continue;
+    const { batch, branch } = items[0]!.metadata as { batch: string; branch: string };
+    const owner = config.repository.split("/")[0]!;
+    const pulls = (await client.list(`${prefix}/pulls?state=all&head=${encodeURIComponent(`${owner}:${branch}`)}&base=${encodeURIComponent(base)}`))
+      .sort((a, b) => integer(b.number, "PR") - integer(a.number, "PR"));
+    let feature = pulls.find((pr) => pr.state === "open" || pr.merged_at);
+    let note: string;
+    if (feature?.merged_at) note = `Feature PR #${String(feature.number)} merged into ${base}.`;
+    else if (!feature && pulls.length) note = `Feature PR #${String(pulls[0]!.number)} was closed without merging; reopen it to continue.`;
+    else {
+      let opened = "";
+      if (!feature) {
+        try {
+          feature = record(await client.request("POST", `${prefix}/pulls`, { title: await featureTitle(client, config, batch), head: branch, base, body: featureBody(config, batch, branch, items) }), "feature PR");
+          opened = `Opened feature PR #${String(feature.number)}. `;
+        } catch (error) {
+          if (error instanceof GitHubError && error.status === 422) { note = `${branch} has nothing to merge into ${base}, or GitHub refused the feature PR.`; setNote(items, branch, note); continue; }
+          throw error;
+        }
+      }
+      note = opened + await featureReview(client, config, feature, branch);
+    }
+    setNote(items, branch, note);
+  }
+}
+function setNote(items: Work[], branch: string, note: string): void { for (const item of items) item.reason = `Merged into ${branch}. ${note}`; }
+async function featureTitle(client: GitHubApi, config: Config, batch: string): Promise<string> {
+  const source = /^issue-(\d+)$/.exec(batch)?.[1];
+  if (source) {
+    try { return `Crewbie feature: ${string(record(await client.request("GET", `/repos/${config.repository}/issues/${source}`), "source issue").title, "source title")} (#${source})`; }
+    catch (error) { if (!(error instanceof GitHubError && error.status === 404)) throw error; }
+  }
+  return `Crewbie feature: ${batch}`;
+}
+function featureBody(config: Config, batch: string, branch: string, items: Work[]): string {
+  const reviewer = reviewerFor(config);
+  const sorted = [...items].sort((a, b) => integer(a.issue.number, "issue") - integer(b.issue.number, "issue"));
+  return [
+    `Every task of plan \`${batch}\` merged into \`${branch}\`. Check out that branch to test the whole feature, then merge this PR yourself; Crewbie never merges it.${reviewer ? ` crewbie-${reviewer.role} reviews each new head.` : ""}`,
+    "", "## Tasks",
+    ...sorted.map((item) => `- #${String(item.issue.number)} ${String(item.issue.title)}${item.pull ? ` (#${String(item.pull.number)})` : ""}`),
+    "", ...sorted.map((item) => `Closes #${String(item.issue.number)}`),
+    "", `${FEATURE_MARKER}${batch} -->`,
+  ].join("\n");
+}
+async function featureReview(client: GitHubApi, config: Config, pull: Record<string, unknown>, branch: string): Promise<string> {
+  const number = integer(pull.number, "feature PR");
+  const reviewer = reviewerFor(config);
+  const human = `Test ${branch}, then merge feature PR #${number} yourself.`;
+  if (!reviewer) return human;
+  const head = string(record(pull.head, "feature PR head").sha, "feature PR head SHA");
+  const review = await trustedReview(client, config, number, head);
+  if (!review) return `${await requestReview(client, config, number, head)} ${human}`;
+  if (review.verdict === "changes") return `crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}; push fixes to ${branch} for a fresh review, or merge feature PR #${number} yourself if you disagree.`;
+  return `crewbie-${reviewer.role} found no blocking issues on ${head.slice(0, 7)}${review.partial ? " (partial review)" : ""}. ${human}`;
 }
 function labelsOf(issue: Record<string, unknown>): string[] {
   if (!Array.isArray(issue.labels)) throw new Error("Issue labels are missing.");
@@ -342,30 +453,27 @@ function labelsOf(issue: Record<string, unknown>): string[] {
 }
 const prLabels = (pull: Record<string, unknown>) => Array.isArray(pull.labels) ? labelsOf(pull) : [];
 const activeSessions = (work: Work[]) => work.filter((other) => other.claimed && other.state !== "done" && other.sessionComplete !== true && other.sessionEnded !== true).length;
-/** After a completed session: mark the PR ready, have the Crewbie reviewer (if enabled) review each new head, and auto-merge tasks the plan rated at or above the threshold. */
+/**
+ * After a completed session Crewbie marks the PR ready. A feature-plan task PR merges into its feature branch once every
+ * check passed, without review. Tasks published before feature branches get a Crewbie review (if enabled) and a human merge.
+ */
 async function afterSession(client: GitHubApi, config: Config, item: Work): Promise<string> {
   const pull = item.pull!;
   const number = integer(pull.number, "PR number");
   const lead = await markReady(client, pull) ? "Crewbie marked the PR ready for review. " : "";
   if (prLabels(pull).includes(ADDRESS_REVIEW_LABEL)) return `${lead}Address-review requested on PR #${number}.`;
-  const reviewer = reviewerFor(config);
-  const confidence = item.metadata.task.confidence;
-  const rated = confidence === undefined ? "without a confidence score" : `${confidence} confidence`;
   const head = string(record(pull.head, "PR head").sha, "PR head SHA");
-  if (!reviewer) {
-    if (!autoMergeFor(config, confidence)) return `${lead}Cloud task completed. The plan rated this task ${rated}, below the ${mergeFor(config).minConfidence} auto-merge threshold; review and merge it yourself.`;
+  if (item.metadata.branch) {
     const outcome = await autoMerge(client, config, number, head);
     if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }
     return lead + outcome.reason;
   }
+  const reviewer = reviewerFor(config);
+  if (!reviewer) return `${lead}Cloud task completed; review and merge PR #${number} yourself.`;
   const review = await trustedReview(client, config, number, head);
   if (!review) return lead + await requestReview(client, config, number, head);
   if (review.verdict === "changes") return `${lead}crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}. Add ${ADDRESS_REVIEW_LABEL} to PR #${number} to have crewbie-${item.metadata.task.owner} address them.`;
-  if (!autoMergeFor(config, confidence)) return `${lead}crewbie-${reviewer.role} found no blocking issues. The plan rated this task ${rated}, below the ${mergeFor(config).minConfidence} auto-merge threshold; review and merge it yourself.`;
-  if (review.partial) return `${lead}The review could not cover every patch, so Crewbie does not auto-merge; review and merge it yourself.`;
-  const outcome = await autoMerge(client, config, number, head);
-  if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }
-  return lead + outcome.reason;
+  return `${lead}crewbie-${reviewer.role} found no blocking issues${review.partial ? " (partial review)" : ""}; review and merge PR #${number} yourself.`;
 }
 /** An approver's address-review label on a PR continues the specialist's session on that branch with the review as feedback. */
 async function addressReviews(client: GitHubApi, config: Config, work: Work[], sha: string, discoverModels: DiscoverModels, ado?: AdoApi): Promise<void> {
@@ -509,7 +617,7 @@ async function restarts(client: GitHubApi, config: Config, work: Work[], branch:
       body: `Crewbie restart requested by @${String(record(labeled.actor, "actor").login)}: attempt ${reserved.taskUsed + 1} of ${reserved.maxAttemptsPerTask} for this task. The previous session had ended.\n${RESTART_MARKER}${reserved.taskUsed + 1} -->`,
     });
     item.sessionEnded = false;
-    await assign(client, config, item, { ...fresh, assignees: [] }, branch);
+    await assign(client, config, item, { ...fresh, assignees: [] }, item.metadata.branch ? await ensureBranch(client, config, item.metadata.branch, sha) : branch);
   }
 }
 export async function preflight(client: GitHubApi, config: Config, batchId?: string, discoverModels: DiscoverModels = listCopilotModels, ado?: AdoApi) {

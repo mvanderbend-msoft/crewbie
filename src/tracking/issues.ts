@@ -54,7 +54,7 @@ export async function reapproveIssues(client: GitHubApi, config: Config, issues:
     if (!metadata) throw new Error(`Issue #${number} is not a Crewbie task.`);
     const role = config.roles.find((role) => role.id === metadata.task.owner);
     if (!role) throw new Error(`Issue #${number}'s owner ${metadata.task.owner} is not a configured role. Replan it instead.`);
-    const payload = { batch: metadata.batch, batchDigest: metadata.batchDigest, sources: metadata.sources, task: { ...metadata.task, model: role.model } };
+    const payload = { ...metadata, task: { ...metadata.task, model: role.model } };
     const next = body.replace(/<!-- crewbie-task:[A-Za-z0-9+/=]+ -->/, `<!-- crewbie-task:${Buffer.from(JSON.stringify(payload)).toString("base64")} -->`);
     const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
     if (next === body && approvedIn(comments, config, issue)) { lines.push(`#${number}: already approved for crewbie-${role.id} on ${role.model}; nothing to change.`); continue; }

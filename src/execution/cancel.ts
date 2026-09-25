@@ -10,8 +10,9 @@ export async function cancelRun(client: GitHubApi, config: Config, issueNumber: 
   const prefix = `/repos/${config.repository}`;
   const inspect = async () => {
     const issue = record(await client.request("GET", `${prefix}/issues/${issueNumber}`), "execution issue");
-    if (!taskMetadata(string(issue.body, "issue body"))) throw new Error("Cancellation requires a Crewbie execution issue.");
-    const pr = await linkedPull(client, config.repository, issueNumber);
+    const metadata = taskMetadata(string(issue.body, "issue body"));
+    if (!metadata) throw new Error("Cancellation requires a Crewbie execution issue.");
+    const pr = await linkedPull(client, config.repository, issueNumber, metadata.branch);
     if (!pr) throw new Error("No unambiguous linked Copilot PR. Use GitHub's session viewer to stop the session manually.");
     const run = record(await client.request("GET", `${prefix}/actions/runs/${runId}`), "agent run");
     const head = record(pr.head, "PR head");

@@ -8,7 +8,8 @@ import { issueBody, taskMetadata } from "../dist/specification/batch.js";
 import { config, batch } from "./helpers.mjs";
 
 function fixture() {
-  const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0]));
+  // Default-branch task (pre-feature-branch), whose PR GitHub links through closing references.
+const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0], false));
   const state = { refs: new Set(), objects: new Map(), comments: {}, tag: null, writes: [], user: "maintainer", cancelled: false, denial: false, confirmation: false };
   const run = { id: 42, run_attempt: 1, event: "dynamic", repository: { full_name: "example/project" }, head_branch: "copilot/work", pull_requests: [{ id: 100 }], status: "in_progress" };
   const client = {
@@ -37,7 +38,7 @@ function fixture() {
         return {};
       }
       if (method === "DELETE" && path.includes("/git/refs/")) { state.refs.delete(`refs/${path.split("/git/refs/")[1]}`); return null; }
-      if (path.endsWith("/issues/1")) return { body: issueBody(b, b.tasks[0]) };
+      if (path.endsWith("/issues/1")) return { body: issueBody(b, b.tasks[0], false) };
       if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
         nodes: [{ number: 10, repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false },
       } } } } };

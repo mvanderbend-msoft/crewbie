@@ -30,7 +30,7 @@ test("deferred memory proposals reach nightly evidence without accepting arbitra
   const b = parseBatch(batch(), cfg);
   const client = {
     async list(path) {
-      if (path.includes("/issues?")) return [{ number: 1, body: issueBody(b, b.tasks[0]), updated_at: "2026-09-22T07:00:00Z" }];
+      if (path.includes("/issues?")) return [{ number: 1, body: issueBody(b, b.tasks[0], false), updated_at: "2026-09-22T07:00:00Z" }];
       if (path.endsWith("/timeline")) return [{ event: "cross-referenced", source: { issue: { pull_request: { url: "https://api.github.com/repos/example/project/pulls/2" } } } }];
       if (path.endsWith("/issues/2/comments")) return [
         { id: 8, user: { login: "Copilot", type: "Bot" }, updated_at: "2026-09-22T08:00:00Z", body: "<!-- crewbie-memory-proposal -->\nPropose a primitive-string regression lesson in developer/hot.md. Source: PR #2." },
@@ -58,7 +58,7 @@ test("closing an unexecuted issue is reported without inventing a completed sess
   const cfg = config(), b = parseBatch(batch(), cfg);
   const client = {
     async list(path) {
-      return path.includes("/issues?") ? [{ number: 1, state: "closed", body: issueBody(b, b.tasks[0]), updated_at: "2026-09-22T08:00:00Z" }] : [];
+      return path.includes("/issues?") ? [{ number: 1, state: "closed", body: issueBody(b, b.tasks[0], false), updated_at: "2026-09-22T08:00:00Z" }] : [];
     },
     async request(_method, path) {
       assert.equal(path, "/graphql");

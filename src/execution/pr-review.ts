@@ -1,8 +1,8 @@
 import { unlink } from "node:fs/promises";
-import { ADDRESS_REVIEW_LABEL, autoMergeFor, mergeFor, reviewerFor, type Config } from "../config.js";
+import { ADDRESS_REVIEW_LABEL, reviewerFor, type Config } from "../config.js";
 import { agentPrompt, errorCode, integer, json, optionalText, readJson, record, safePath, string, writeAtomic } from "../core.js";
 import { memoryContext } from "../memory/context.js";
-import { taskMetadata } from "../specification/batch.js";
+import { taskMetadata, type TaskMetadata } from "../specification/batch.js";
 import { isApprover, type GitHubApi } from "../tracking/github.js";
 
 export const REVIEW_WORKFLOW = "crewbie-review.yml";
@@ -20,7 +20,8 @@ const ACTIONS_BOT = "github-actions[bot]";
 export type Verdict = "pass" | "changes";
 export interface Finding { severity: "blocking" | "minor"; path: string; line: number | null; body: string }
 export interface TrustedReview { verdict: Verdict; partial: boolean; head: string; url: string; body: string; createdAt: string }
-interface Snapshot { schemaVersion: 1; pr: number; head: string; issue: number; owner: string; role: string; runId: number; omitted: string[]; confidence?: number }
+/** A review covers either one task PR (published before feature branches) or a plan's whole feature PR. */
+interface Snapshot { schemaVersion: 1; pr: number; head: string; issue?: number; owner?: string; feature?: { batch: string; branch: string }; role: string; runId: number; omitted: string[] }
 
 export function reviewRunName(pr: number, head: string): string { return `Crewbie review PR #${pr} at ${head}`; }
 const sha = (value: unknown, label: string) => {
@@ -29,7 +30,7 @@ const sha = (value: unknown, label: string) => {
   return text;
 };
 
-async function taskIssue(client: GitHubApi, config: Config, pr: number) {
+async function closingTasks(client: GitHubApi, config: Config, pr: number): Promise<{ issue: Record<string, unknown>; metadata: TaskMetadata }[]> {
   const [owner, name] = config.repository.split("/");
   const response = record(await client.request("POST", "/graphql", {
     query: "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:20){nodes{number}}}}}",
@@ -44,18 +45,33 @@ async function taskIssue(client: GitHubApi, config: Config, pr: number) {
     const metadata = taskMetadata(String(issue.body ?? ""));
     if (metadata) tasks.push({ issue, metadata });
   }
+  return tasks;
+}
+async function taskIssue(client: GitHubApi, config: Config, pr: number) {
+  const tasks = await closingTasks(client, config, pr);
   // A PR can mention another task's issue with a closing keyword; its own task is the one whose linked PR it is.
   let own = tasks;
   if (tasks.length > 1) {
     const { linkedPull } = await import("./dispatch.js");
     own = [];
     for (const task of tasks) {
-      const linked = await linkedPull(client, config.repository, integer(task.issue.number, "issue")).catch(() => null);
+      const linked = await linkedPull(client, config.repository, integer(task.issue.number, "issue"), task.metadata.branch).catch(() => null);
       if (linked && linked.number === pr) own.push(task);
     }
   }
   if (own.length !== 1) throw new Error(`PR #${pr} must close exactly one Crewbie task issue to be reviewed.`);
   return own[0]!;
+}
+/** The plan behind a feature PR: a same-repository Crewbie feature branch into the default branch, closing that plan's tasks. */
+async function featureTasks(client: GitHubApi, config: Config, pull: Record<string, unknown>) {
+  const head = record(pull.head, "PR head"), base = record(pull.base, "PR base");
+  const branch = String(head.ref ?? "");
+  if (!branch.startsWith("crewbie/") || head.repo === null || record(head.repo, "head repository").full_name !== config.repository) return null;
+  const repository = record(await client.request("GET", `/repos/${config.repository}`), "repository");
+  if (base.ref !== repository.default_branch) return null;
+  const tasks = (await closingTasks(client, config, integer(pull.number, "PR"))).filter((task) => task.metadata.branch === branch);
+  if (!tasks.length) throw new Error(`Feature PR #${String(pull.number)} closes no Crewbie task of ${branch}; nothing was reviewed.`);
+  return { batch: tasks[0]!.metadata.batch, branch, tasks };
 }
 
 /** Builds the reviewer prompt from the PR's API diff and the default-branch reviewer charter; no PR code is checked out. */
@@ -68,7 +84,8 @@ export async function prepareReview(root: string, client: GitHubApi, config: Con
   const pull = record(await client.request("GET", `/repos/${config.repository}/pulls/${pr}`), "pull request");
   if (pull.state !== "open") return { ready: false, reason: `PR #${pr} is not open.`, model: "" };
   if (sha(record(pull.head, "PR head").sha, "PR head") !== head) return { ready: false, reason: "The PR head moved; dispatch requests a review of the new head.", model: "" };
-  const { issue, metadata } = await taskIssue(client, config, pr);
+  const feature = await featureTasks(client, config, pull);
+  const single = feature ? null : await taskIssue(client, config, pr);
   const charterPath = `.github/agents/crewbie-${reviewer.role}.agent.md`;
   const charter = await optionalText(await safePath(root, charterPath));
   if (charter === null) throw new Error(`Missing reviewer charter: ${charterPath}`);
@@ -80,7 +97,9 @@ Report only issues you can point to in the diff. A finding is "blocking" when it
 Return only JSON: {"verdict":"pass or changes","summary":"short overall judgement","findings":[{"severity":"blocking or minor","path":"file","line":1,"body":"what is wrong and how to fix it"}]}
 Reviewer charter: ${charter}
 Context: ${json(context)}
-Task #${String(issue.number)} (owner crewbie-${metadata.task.owner}): ${json({ title: metadata.task.title, body: metadata.task.body })}
+${feature
+    ? `This feature PR merges every task of plan ${feature.batch} from ${feature.branch} into the default branch. Review the combined change against every task's scope and acceptance criteria and how the tasks fit together.\nTasks: ${json(feature.tasks.map(({ issue, metadata }) => ({ issue: issue.number, owner: `crewbie-${metadata.task.owner}`, title: metadata.task.title, body: metadata.task.body })))}`
+    : `Task #${String(single!.issue.number)} (owner crewbie-${single!.metadata.task.owner}): ${json({ title: single!.metadata.task.title, body: single!.metadata.task.body })}`}
 PR: ${json({ title: pull.title, body: pull.body ?? "" })}
 Diff (API patches; files marked omitted did not fit this review):
 `;
@@ -95,8 +114,8 @@ Diff (API patches; files marked omitted did not fit this review):
   }
   const prompt = header + diff;
   if (Buffer.byteLength(prompt) > PROMPT_BUDGET) throw new Error("Reviewer context exceeds the Copilot CLI prompt budget even without patches; nothing was reviewed.");
-  const snapshot: Snapshot = { schemaVersion: 1, pr, head, issue: integer(issue.number, "task issue"), owner: metadata.task.owner, role: reviewer.role, runId, omitted,
-    ...(metadata.task.confidence === undefined ? {} : { confidence: metadata.task.confidence }) };
+  const snapshot: Snapshot = { schemaVersion: 1, pr, head, role: reviewer.role, runId, omitted,
+    ...(feature ? { feature: { batch: feature.batch, branch: feature.branch } } : { issue: integer(single!.issue.number, "task issue"), owner: single!.metadata.task.owner }) };
   await writeAtomic(root, INPUT, json(snapshot));
   await writeAtomic(root, PROMPT, prompt);
   return { ready: true, reason: `Reviewer context prepared for PR #${pr} at ${head.slice(0, 7)}${omitted.length ? `; ${omitted.length} patch(es) did not fit` : ""}.`, model: reviewer.model };
@@ -118,21 +137,22 @@ export function parseReview(text: string): { verdict: Verdict; summary: string; 
   return { verdict, summary, findings };
 }
 
-export function renderReview(config: Config, snapshot: Snapshot, review: ReturnType<typeof parseReview>): string {
+export function renderReview(_config: Config, snapshot: Snapshot, review: ReturnType<typeof parseReview>): string {
   const marker = `<!-- crewbie-review:${Buffer.from(JSON.stringify({ run: snapshot.runId, pr: snapshot.pr, head: snapshot.head, verdict: review.verdict, partial: snapshot.omitted.length > 0 })).toString("base64")} -->`;
   const cell = (text: string) => text.replace(/\r?\n/g, " ");
-  const merge = mergeFor(config);
-  const auto = autoMergeFor(config, snapshot.confidence);
-  const next = review.verdict === "changes"
-    ? `Add the \`${ADDRESS_REVIEW_LABEL}\` label to this PR to have crewbie-${snapshot.owner} address these findings and any comments you add (counts as one task attempt). You can also fix or merge it yourself.`
-    : snapshot.omitted.length ? "Some patches were not reviewed, so Crewbie will not auto-merge. Review them, then merge yourself."
-    : auto ? `Crewbie merges this PR automatically once every check passes. To stop that, add \`${ADDRESS_REVIEW_LABEL}\` with comments, or close the PR.`
-    : `The plan rated this task ${snapshot.confidence === undefined ? "without a confidence score" : `${snapshot.confidence} confidence`}, below the ${merge.minConfidence} auto-merge threshold, so a human reviews and merges it. Merge when you are satisfied, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.`;
+  const partial = snapshot.omitted.length ? " Some patches were not reviewed; check them yourself." : "";
+  const next = snapshot.feature
+    ? review.verdict === "changes"
+      ? `Push fixes to \`${snapshot.feature.branch}\` and Crewbie reviews the new head, or merge anyway if you disagree. Crewbie never merges this PR.${partial}`
+      : `Test the feature on \`${snapshot.feature.branch}\`, then merge this PR yourself; Crewbie never merges it.${partial}`
+    : review.verdict === "changes"
+      ? `Add the \`${ADDRESS_REVIEW_LABEL}\` label to this PR to have crewbie-${snapshot.owner} address these findings and any comments you add (counts as one task attempt). You can also fix or merge it yourself.`
+      : `Review and merge this PR yourself, or add comments and the \`${ADDRESS_REVIEW_LABEL}\` label for another pass.${partial}`;
   return [
     marker,
     `## Crewbie review · crewbie-${snapshot.role}`,
     "",
-    `**Verdict:** ${review.verdict === "pass" ? "✅ no blocking issues" : "❌ changes requested"} · head \`${snapshot.head.slice(0, 7)}\` · task #${snapshot.issue}`,
+    `**Verdict:** ${review.verdict === "pass" ? "✅ no blocking issues" : "❌ changes requested"} · head \`${snapshot.head.slice(0, 7)}\` · ${snapshot.feature ? `feature \`${snapshot.feature.branch}\`` : `task #${snapshot.issue}`}`,
     "",
     review.summary.trim(),
     ...(review.findings.length ? ["", "### Findings", ...review.findings.map((finding) =>
@@ -148,10 +168,12 @@ export async function publishReview(root: string, client: GitHubApi, config: Con
   const input = record(await readJson(await safePath(root, INPUT)), "review input");
   if (input.schemaVersion !== 1) throw new Error("Unsupported review input.");
   const snapshot: Snapshot = {
-    schemaVersion: 1, pr: integer(input.pr, "PR"), head: sha(input.head, "reviewed head"), issue: integer(input.issue, "task issue"),
-    owner: string(input.owner, "task owner"), role: string(input.role, "reviewer role"), runId: integer(input.runId, "review run"),
+    schemaVersion: 1, pr: integer(input.pr, "PR"), head: sha(input.head, "reviewed head"),
+    role: string(input.role, "reviewer role"), runId: integer(input.runId, "review run"),
     omitted: Array.isArray(input.omitted) ? input.omitted.map((path) => string(path, "omitted path")) : [],
-    ...(typeof input.confidence === "number" ? { confidence: input.confidence } : {}),
+    ...(input.feature === undefined
+      ? { issue: integer(input.issue, "task issue"), owner: string(input.owner, "task owner") }
+      : { feature: { batch: string(record(input.feature, "feature").batch, "feature batch"), branch: string(record(input.feature, "feature").branch, "feature branch") } }),
   };
   const output = await optionalText(await safePath(root, OUTPUT));
   if (!output?.trim()) throw new Error("The reviewer returned no output; nothing was posted.");

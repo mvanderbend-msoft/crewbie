@@ -17,8 +17,8 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
   const workflowPurposes: Record<string, string> = {
     "crewbie-plan.yml": "Prepare a coordinator plan from approved issue intake; the planning opt-in gate still applies.",
     "crewbie-execute-plan.yml": "Verify exact-head human approval and merge before publishing implementation tasks.",
-    "crewbie-dispatch.yml": "Release approved tasks when dependencies, capacity and launch controls permit; mark finished PRs ready, request reviews, continue on address-review and auto-merge tasks the plan rated at or above the confidence threshold.",
-    "crewbie-review.yml": "Have the configured Crewbie reviewer comment on each finished PR head; reads the API diff and never runs PR code.",
+    "crewbie-dispatch.yml": "Release approved tasks when dependencies, capacity and launch controls permit; merge each finished task PR into its plan's feature branch once checks pass, then open the feature PR to the default branch and request its review.",
+    "crewbie-review.yml": "Have the configured Crewbie reviewer comment on each feature PR head; reads the API diff and never runs PR code.",
     "crewbie-maintain.yml": "Offer bounded knowledge-maintenance proposals; scheduled analysis remains opt-in.",
     "crewbie-report.yml": "Collect execution evidence into a static report without starting implementation agents.",
   };
@@ -57,7 +57,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     "| Specialist | Action | Model | Responsibility |", "| --- | --- | --- | --- |",
     ...config.roles.map((role) => `| ${cell(role.id)} | ${installed.has(role.id) ? "Keep/update installed specialist" : role.sourceAgent ? `Adopt ${cell(role.sourceAgent)}` : "New specialist"} | ${cell(role.model)} | ${cell(role.purpose)} |`),
     "", `Concurrency: ${config.maxActive} active sessions. This is not a limit on team size.`,
-    config.review?.enabled ? `PR reviewer: crewbie-${config.review.role} reviews every finished PR before you are asked to review and before Crewbie auto-merges it.` : "PR reviewer: off.", "",
+    config.review?.enabled ? `PR reviewer: crewbie-${config.review.role} reviews each feature PR before you merge it into the default branch.` : "PR reviewer: off.", "",
     `Model profile: **${config.modelProfile ?? "balanced"}**. Explicit model overrides remain authoritative.`,
     `Crewbie launch limits: **${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxLaunchesPerBatch} per batch / ${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxAttemptsPerTask} per task**, including the first attempt and uncertain requests. Not a monetary cap.`, "",
   ];

@@ -61,7 +61,7 @@ export async function collectRecords(client: GitHubApi, config: Config): Promise
     const metadata = taskMetadata(String(issue.body ?? ""));
     if (!metadata) continue;
     const number = integer(issue.number, "issue number");
-    const pr = await linkedPull(client, config.repository, number);
+    const pr = await linkedPull(client, config.repository, number, metadata.branch);
     let date = string(pr?.updated_at ?? issue.updated_at, "updated timestamp");
     const evidence: string[] = [];
     if (pr) {

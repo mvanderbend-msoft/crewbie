@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { autoMergeFor, parseConfig } from "../dist/config.js";
+import { parseConfig } from "../dist/config.js";
 import { issueBody, parseBatch } from "../dist/specification/batch.js";
 import { parseReview, prepareReview, publishReview } from "../dist/execution/pr-review.js";
 import { config, batch, fixture } from "./helpers.mjs";
@@ -10,15 +10,10 @@ import { config, batch, fixture } from "./helpers.mjs";
 const HEAD = "c".repeat(40);
 const reviewConfig = config({ review: { enabled: true, role: "developer" } });
 
-test("confidence alone decides auto-merge; a legacy merge.mode is ignored and the reviewer must be a configured role", () => {
+test("legacy merge.mode and merge.minConfidence are ignored and the reviewer must be a configured role", () => {
   assert.equal(parseConfig(config()).merge, undefined);
   assert.deepEqual(parseConfig(config({ merge: { mode: "manual" } })).merge, { method: "merge" });
-  assert.deepEqual(parseConfig(config({ merge: { method: "squash", minConfidence: 0.9 } })).merge, { method: "squash", minConfidence: 0.9 });
-  assert.throws(() => parseConfig(config({ merge: { minConfidence: 2 } })), /from 0 to 1/);
-  const cfg = parseConfig(config());
-  assert.equal(autoMergeFor(cfg, 0.85), true);
-  assert.equal(autoMergeFor(cfg, 0.84), false);
-  assert.equal(autoMergeFor(cfg, undefined), false);
+  assert.deepEqual(parseConfig(config({ merge: { method: "squash", minConfidence: 0.9 } })).merge, { method: "squash" });
   assert.throws(() => parseConfig(config({ review: { enabled: true, role: "ghost" } })), /not a configured role/);
   assert.deepEqual(parseConfig(reviewConfig).review, { enabled: true, role: "developer" });
 });
@@ -35,7 +30,7 @@ async function setup(t) {
     ".crewbie/decisions.md": "# Decisions\n", ".crewbie/team/developer/hot.md": "# Hot\n", ".crewbie/team/developer/index.md": "# Index\n",
   });
   const b = parseBatch(batch(), config());
-  const pull = { number: 101, state: "open", title: "Add foundation", body: "What/why", head: { sha: HEAD } };
+  const pull = { number: 101, state: "open", title: "Add foundation", body: "What/why", head: { sha: HEAD }, base: { ref: "main" } };
   const comments = [];
   const client = {
     async list(path) {
@@ -46,7 +41,8 @@ async function setup(t) {
     async request(method, path, body) {
       if (path === "/graphql") return { data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 1 }] } } } } };
       if (path.endsWith("/pulls/101")) return structuredClone(pull);
-      if (path.endsWith("/issues/1")) return { number: 1, body: issueBody(b, b.tasks[0]) };
+      // Task-PR review applies to tasks published before feature branches.
+      if (path.endsWith("/issues/1")) return { number: 1, body: issueBody(b, b.tasks[0], false) };
       if (method === "POST" && path.endsWith("/issues/101/comments")) { comments.push({ body: body.body }); return {}; }
       throw new Error(`Unexpected request: ${method} ${path}`);
     },
@@ -82,7 +78,7 @@ test("a PR that also mentions another task's issue as closing is reviewed for it
     if (path === "/graphql" && body.query.includes("closingIssuesReferences")) return { data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 1 }, { number: 2 }] } } } } };
     if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
       nodes: [{ number: own[body.variables.number], repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
-    if (path.endsWith("/issues/2")) return { number: 2, body: issueBody(b, b.tasks[1]) };
+    if (path.endsWith("/issues/2")) return { number: 2, body: issueBody(b, b.tasks[1], false) };
     if (path.endsWith("/pulls/200")) return { number: 200, state: "closed", merged_at: "then", user: { login: "Copilot" } };
     const result = await request(method, path, body);
     return path.endsWith("/pulls/101") ? { ...result, user: { login: "Copilot" } } : result;
@@ -92,6 +88,28 @@ test("a PR that also mentions another task's issue as closing is reviewed for it
   assert.match(await readFile(join(root, ".crewbie-review-prompt.txt"), "utf8"), new RegExp(b.tasks[0].title));
   own[1] = 300;
   await assert.rejects(prepareReview(root, client, reviewConfig, 101, HEAD, 59), /exactly one Crewbie task issue/);
+});
+
+test("a feature PR is reviewed against every task of its plan, and the verdict leaves the merge to a human", async (t) => {
+  const { root, pull, comments, client } = await setup(t);
+  const b = parseBatch(batch(), config());
+  Object.assign(pull, { head: { sha: HEAD, ref: "crewbie/feature", repo: { full_name: "example/project" } }, base: { ref: "main" } });
+  const request = client.request;
+  client.request = async (method, path, body) => {
+    if (path === "/graphql") return { data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 1 }, { number: 2 }, { number: 3 }] } } } } };
+    if (path === "/repos/example/project") return { default_branch: "main" };
+    const issue = /\/issues\/([123])$/.exec(path);
+    if (issue) return { number: Number(issue[1]), body: issueBody(b, b.tasks[Number(issue[1]) - 1]) };
+    return request(method, path, body);
+  };
+  assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 60)).ready, true);
+  const prompt = await readFile(join(root, ".crewbie-review-prompt.txt"), "utf8");
+  assert.match(prompt, /merges every task of plan feature from crewbie\/feature into the default branch/);
+  for (const task of b.tasks) assert.ok(prompt.includes(task.title), task.title);
+  await writeFile(join(root, ".crewbie-review-output.txt"), JSON.stringify({ verdict: "pass", summary: "Fits together.", findings: [] }));
+  assert.match(await publishReview(root, client, reviewConfig), /pass/);
+  assert.match(comments[0].body, /feature `crewbie\/feature`[\s\S]*Test the feature on `crewbie\/feature`, then merge this PR yourself; Crewbie never merges it/);
+  assert.doesNotMatch(comments[0].body, /address-review/);
 });
 
 test("review output containing a secret is never posted", async (t) => {
