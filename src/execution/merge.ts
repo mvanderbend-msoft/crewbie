@@ -61,12 +61,10 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   }
   const combined = record(await checks.request("GET", `${prefix}/commits/${head}/status`), "commit status");
   const statuses = Array.isArray(combined.statuses) ? combined.statuses.map((status) => record(status, "commit status")) : [];
-  // Workflows awaiting approval (the default for Copilot PRs) create no check runs, only an action_required suite.
-  const suites = record(await checks.request("GET", `${prefix}/commits/${head}/check-suites?per_page=100`), "check suites");
-  const held = (Array.isArray(suites.check_suites) ? suites.check_suites : []).map((suite) => record(suite, "check suite"))
-    .some((suite) => suite.conclusion === "action_required");
-  if (held) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. Workflow runs on this PR await approval in Actions; approve them, then Crewbie merges once they pass.` };
-  const waiting = checksPassed(runs.check_runs.map((run) => record(run, "check run")), statuses);
+  // Crewbie assumes no CI and no Actions settings: checks that ran must pass, but none running (no CI, branch filters or
+  // runs held for approval) does not block, because the human-merged feature PR into the default branch is the gate.
+  const ran = runs.check_runs.map((run) => record(run, "check run")).filter((run) => run.conclusion !== "action_required");
+  const waiting = checksPassed(ran, statuses);
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
   if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };
   if (pr.mergeable !== true) return { merged: false, reason: "GitHub is still computing mergeability; Crewbie retries on its next run." };
@@ -79,5 +77,6 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
     }
     throw error;
   }
-  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)} into ${string(record(pr.base, "PR base").ref, "base branch")}: the session completed and every check passed.` };
+  const verified = ran.length || statuses.length ? "every check passed" : "no checks ran on it; the feature PR is where it gets tested";
+  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)} into ${string(record(pr.base, "PR base").ref, "base branch")}: the session completed and ${verified}.` };
 }

@@ -65,7 +65,6 @@ function githubFixture(input = batch()) {
           fixture.readied.push(pr.number); pr.draft = false;
           return { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } };
         }
-        if (/\/commits\/[^/]+\/check-suites/.test(path)) return { check_suites: fixture.checkSuites ?? [] };
         if (/\/commits\/[^/]+\/check-runs/.test(path)) return { total_count: fixture.checkRuns.length, check_runs: fixture.checkRuns };
         if (/\/commits\/[^/]+\/status$/.test(path)) return { statuses: fixture.statuses };
         const merge = /\/pulls\/(\d+)\/merge$/.exec(path);
@@ -576,11 +575,7 @@ test("a finished task PR of a feature plan merges into the feature branch once e
   assert.match(work[0].reason, /Session completed on aaaaaaa\. Waiting for check build/);
   assert.equal(fixture.merges.length, 0);
   fixture.checkRuns[0] = { ...fixture.checkRuns[0], status: "completed", conclusion: "success" };
-  fixture.checkSuites = [{ app: { slug: "github-actions" }, status: "completed", conclusion: "action_required" }];
-  work = await dispatch(fixture.client, cfg);
-  assert.match(work[0].reason, /await approval in Actions/, "Workflows awaiting approval ran no checks, so nothing merges untested.");
-  assert.equal(fixture.merges.length, 0);
-  fixture.checkSuites = [{ app: { slug: "github-actions" }, status: "completed", conclusion: "success" }];
+  fixture.checkRuns.push({ id: 5, name: "ci", status: "completed", conclusion: "action_required", app: { slug: "github-actions" } });
   work = await dispatch(fixture.client, cfg);
   assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD, merge_method: "squash" }]);
   assert.equal(work[0].state, "done");
@@ -695,12 +690,17 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
     const outcome = await autoMerge(user, config({ merge: { method: "squash" } }), 101, HEAD);
     assert.equal(outcome.merged, true, outcome.reason);
     assert.deepEqual(merges, [{ sha: HEAD, merge_method: "squash" }]);
-    assert.equal(reads.length, 3);
+    assert.equal(reads.length, 2);
+    assert.match(outcome.reason, /every check passed/);
+    CHECK_READER.client = { async request(method, path) { return path.includes("/check-runs") ? { total_count: 0, check_runs: [] } : { statuses: [] }; } };
+    const bare = await autoMerge(user, config(), 101, HEAD);
+    assert.equal(bare.merged, true, "A repository without CI still gets its task PRs merged into the feature branch.");
+    assert.match(bare.reason, /no checks ran on it; the feature PR is where it gets tested/);
     files = [{ filename: ".github/workflows/ci.yml" }];
     const guarded = await autoMerge(user, config(), 101, HEAD);
     assert.equal(guarded.merged, false);
     assert.match(guarded.reason, /changes \.github\/workflows\/ci\.yml; review and merge it yourself/);
-    assert.equal(merges.length, 1, "Workflow changes are never auto-merged: they run with secrets on the feature branch.");
+    assert.equal(merges.length, 2, "Workflow changes are never auto-merged: they run with secrets on the feature branch.");
   } finally { delete CHECK_READER.client; }
 });
 

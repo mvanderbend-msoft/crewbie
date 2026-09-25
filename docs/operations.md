@@ -859,12 +859,9 @@ Changing a task's kind invalidates its approval like other scope changes.
   target it; a task that depends on another waits until that task's PR merged
   into the branch, review tasks included. GitHub links closing keywords only on PRs
   into the default branch, so Crewbie finds task PRs through the issue timeline,
-  and task issues stay open with `crewbie:done` until the feature PR merges. Make
-  your CI run on PRs into `crewbie/**` (a `branches: [main]` filter skips them and
-  Crewbie then merges with no checks), and protect the default branch. Issues
+  and task issues stay open with `crewbie:done` until the feature PR merges. Issues
   published before feature branches carry no branch and are ignored by dispatch
-  and launch allowances;
-  finish them by hand.
+  and launch allowances; finish them by hand.
 - **Restart.** A configured approver adds `crewbie:restart` to a task issue whose
   previous session verifiably ended: Copilot reported it could not start, or its
   task failed, timed out or was cancelled and its PR is closed. Dispatch, under
@@ -880,10 +877,11 @@ Changing a task's kind invalidates its approval like other scope changes.
   *Settings → Copilot → Cloud agent → Actions workflow approval*), the hourly
   reconcile does it instead.
 - **Merge into the feature branch.** Dispatch merges a task PR into its feature
-  branch once the session completed, every check on the head passed (the newest
-  run of each check counts), no workflow run awaits approval in Actions and GitHub
-  reports no conflict. Task PRs are not
-  reviewed. It pins the head SHA and never bypasses branch protection. Pending
+  branch once the session completed, every check that ran on the head passed (the
+  newest run of each check counts) and GitHub reports no conflict. Crewbie needs no
+  CI: with no checks (no CI, a branch filter such as `branches: [main]`, or runs
+  held for approval in Actions) it merges and says so, because the feature PR,
+  which a human tests and merges, is the gate. Task PRs are not reviewed. It pins the head SHA and never bypasses branch protection. Pending
   checks are re-evaluated on the next dispatch run, including the hourly schedule.
   A PR that changes `.github/workflows/` is left for a human merge, because
   workflows on the feature branch run with repository secrets for PRs into it.
