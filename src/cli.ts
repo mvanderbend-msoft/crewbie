@@ -8,6 +8,7 @@ import { limitsFor, loadConfig } from "./config.js";
 import { probeCapabilities, renderReport } from "./execution/capabilities.js";
 import { githubReader } from "./execution/github.js";
 import { dispatch, eligible, inspectWork, preflight, renderDispatchResult } from "./execution/dispatch.js";
+import { CHECK_READER } from "./execution/merge.js";
 import { baselineLaunches, setLaunchPause } from "./execution/controls.js";
 import { cancelRun } from "./execution/cancel.js";
 import { watchBatch } from "./execution/watch.js";
@@ -318,6 +319,7 @@ async function main(): Promise<void> {
     const hints = (process.env.CREWBIE_ISSUE_NUMBERS ?? "").trim();
     const issueNumbers = hints ? hints.split(",").map((value) => integer(Number(value), "confirmed issue number")) : [];
     if (issueNumbers.length > 100) throw new Error("At most 100 confirmed issue IDs can be reconciled at once.");
+    if (process.env.CREWBIE_CHECKS_TOKEN) CHECK_READER.client = api(process.env.CREWBIE_CHECKS_TOKEN);
     const work = await dispatch(github, config, ado, issueNumbers.length ? { issueNumbers } : undefined);
     const summary = renderDispatchResult(work, config);
     output.text(summary);

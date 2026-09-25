@@ -264,6 +264,8 @@ on:
     - cron: '17 * * * *'
 permissions:
   contents: read
+  checks: read
+  statuses: read
 concurrency:
   group: crewbie-dispatch
   cancel-in-progress: false
@@ -281,6 +283,7 @@ jobs:
 ${setup}      - name: Reconcile approved work
         env:
           GH_TOKEN: \${{ secrets.CREWBIE_USER_TOKEN }}
+          CREWBIE_CHECKS_TOKEN: \${{ github.token }}
           CREWBIE_ADO_TOKEN: \${{ secrets.CREWBIE_ADO_TOKEN }}
           CREWBIE_ISSUE_NUMBERS: \${{ inputs.issue_numbers }}
         run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-dispatch

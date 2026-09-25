@@ -13,6 +13,9 @@ export async function markReady(client: GitHubApi, pr: Record<string, unknown>):
   return true;
 }
 
+/** Reads check runs and statuses; the dispatch job sets its checks-scoped GITHUB_TOKEN so the user credential needs no Checks access. */
+export const CHECK_READER: { client?: GitHubApi } = {};
+
 const PASSED = new Set(["success", "skipped", "neutral"]);
 
 /** Every check on the head passed. Re-runs of one check keep only the newest; the running dispatch job itself is excluded. */
@@ -48,11 +51,12 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   if (pr.draft === true) return { merged: false, reason: "PR is still a draft." };
   const head = string(record(pr.head, "PR head").sha, "PR head SHA");
   if (head !== reviewed) return { merged: false, reason: reviewerFor(config) ? "The PR changed after its review; awaiting a review of the new head." : "The PR head changed; waiting for the next dispatch run." };
-  const runs = record(await client.request("GET", `${prefix}/commits/${head}/check-runs?per_page=100`), "check runs");
+  const checks = CHECK_READER.client ?? client;
+  const runs = record(await checks.request("GET", `${prefix}/commits/${head}/check-runs?per_page=100`), "check runs");
   if (!Array.isArray(runs.check_runs) || integer(runs.total_count, "check run count", 0) > runs.check_runs.length) {
     return { merged: false, reason: "Not every check run could be read; merge manually after verifying checks." };
   }
-  const combined = record(await client.request("GET", `${prefix}/commits/${head}/status`), "commit status");
+  const combined = record(await checks.request("GET", `${prefix}/commits/${head}/status`), "commit status");
   const statuses = Array.isArray(combined.statuses) ? combined.statuses.map((status) => record(status, "commit status")) : [];
   const waiting = checksPassed(runs.check_runs.map((run) => record(run, "check run")), statuses);
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };

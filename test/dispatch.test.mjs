@@ -623,6 +623,28 @@ test("the Crewbie reviewer reviews each head once; Crewbie merges only a trusted
   assert.equal(work[0].state, "done");
 });
 
+test("auto-merge reads checks with the job's checks token, so the user credential needs no Checks access", async () => {
+  const { autoMerge, CHECK_READER } = await import("../dist/execution/merge.js");
+  const merges = [];
+  const user = { async request(method, path, body) {
+    if (path.includes("/check-runs") || path.endsWith("/status")) throw new GitHubError(403, "Resource not accessible by personal access token");
+    if (method === "GET" && path.endsWith("/pulls/101")) return { state: "open", draft: false, mergeable: true, head: { sha: HEAD } };
+    if (method === "PUT" && path.endsWith("/pulls/101/merge")) { merges.push(body); return { merged: true }; }
+    throw new Error(`Unexpected ${method} ${path}`);
+  } };
+  const reads = [];
+  CHECK_READER.client = { async request(method, path) {
+    reads.push(path);
+    return path.includes("/check-runs") ? { total_count: 1, check_runs: [{ id: 1, name: "build", status: "completed", conclusion: "success", app: { slug: "github-actions" } }] } : { statuses: [] };
+  } };
+  try {
+    const outcome = await autoMerge(user, config({ merge: { method: "squash" } }), 101, HEAD);
+    assert.equal(outcome.merged, true, outcome.reason);
+    assert.deepEqual(merges, [{ sha: HEAD, merge_method: "squash" }]);
+    assert.equal(reads.length, 2);
+  } finally { delete CHECK_READER.client; }
+});
+
 test("Crewbie leaves tasks below the plan's confidence threshold for a human; the threshold is configurable", async () => {
   const cfg = reviewing();
   const fixture = githubFixture(rated(0.6));

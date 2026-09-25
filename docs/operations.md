@@ -20,6 +20,10 @@ assignment permissions alone do not grant telemetry access. The optional
 same-PR correction loop needs **Agent tasks: read/write**. See GitHub's
 [Agent Tasks permissions](https://docs.github.com/en/rest/agent-tasks/agent-tasks).
 Unavailable telemetry keeps capacity reserved rather than guessing completion.
+Auto-merge reads the PR's check runs and commit statuses with the dispatch job's
+own `GITHUB_TOKEN` (`checks: read`, `statuses: read`), so the user credential
+needs no Checks or Commit statuses access; the merge itself uses the user
+credential's Contents and Pull requests write access.
 
 Read-only dashboard collection and PR checks use the job-scoped `GITHUB_TOKEN`
 with explicit read permissions. They do not require copying a user's saved
