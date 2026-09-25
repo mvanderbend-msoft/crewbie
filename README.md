@@ -324,9 +324,15 @@ Without `executeOnMerge`, the manual team-installation and batch-approval path
 below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)
 for credentials, workflow recovery and approval boundaries.
 
-### Disagree with the plan
+### Answer questions or disagree with the plan
 
-Keep the planning PR open. Put specific feedback in a local `feedback.txt`, then:
+When the plan needs clarification, Crewbie opens it as a draft and posts the
+questions as a PR comment. **Reply on the PR** with your answers; an approver's
+reply runs one paid revision of the same PR. When the plan has no open questions,
+start a comment with `/crewbie revise` followed by your feedback. Other comments,
+edited comments, bots and non-approvers never start a run.
+
+From a terminal, the same revision is available locally:
 
 ```powershell
 crewbie revise-plan --pr 7 --feedback-file feedback.txt

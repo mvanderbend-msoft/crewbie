@@ -37,7 +37,7 @@ export async function repoText(client: GitHubApi, repo: string, path: string, re
 }
 export async function verifyPlanningRun(client: GitHubApi, config: Config, runId: number, baseSha: string, completed = false): Promise<string> {
   const run = record(await client.request("GET", `/repos/${config.repository}/actions/runs/${integer(runId, "planning run")}`), "planning workflow run");
-  if (!["issues", "workflow_dispatch"].includes(String(run.event)) || run.path !== ".github/workflows/crewbie-plan.yml" || run.head_sha !== baseSha
+  if (!["issues", "issue_comment", "workflow_dispatch"].includes(String(run.event)) || run.path !== ".github/workflows/crewbie-plan.yml" || run.head_sha !== baseSha
     || record(run.head_repository, "run repository").full_name !== config.repository || !isApprover(run.actor, config.approvers)
     || (run.triggering_actor !== undefined && !isApprover(run.triggering_actor, config.approvers))
     || (completed && (run.status !== "completed" || run.conclusion !== "success"))) {

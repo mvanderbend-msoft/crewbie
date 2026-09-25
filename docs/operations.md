@@ -442,8 +442,12 @@ its own task graph.
 The same source/base/configuration snapshot is deduplicated, including a closed
 planning PR. Existing branches without a matching PR indicate interrupted
 publication and stop visibly; inspect them rather than deleting state or blindly
-retrying. For an open plan, use `crewbie revise-plan --pr N --feedback-file feedback.txt`
-to preview a same-PR revision and repeat with `--apply` to request one paid run.
+retrying. For an open plan, reply on the PR: while it has open questions (posted
+as a Crewbie comment, PR in draft) any new approver comment is taken as the answers;
+otherwise a comment starting with `/crewbie revise` carries the feedback. Each such
+comment requests one paid run (the planning workflow listens to `issue_comment`).
+Locally, `crewbie revise-plan --pr N --feedback-file feedback.txt` previews the same
+revision and `--apply` requests it.
 The workflow accepts an explicit human request, reuses prior setup/plan/batch
 context, skips the full assessment and regenerates the execution manifest.
 Only configured approvers may request it. It checks source, policy, base ancestry

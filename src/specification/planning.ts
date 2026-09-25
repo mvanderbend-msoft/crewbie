@@ -86,6 +86,29 @@ export async function requestPlanningRevision(client: GitHubApi, config: Config,
   });
   return `Requested one planning revision of PR #${number}. No implementation was authorized. Review the revised head before approving and merging.`;
 }
+const REVISE_COMMAND = /^\s*\/crewbie\s+revise\b[:\s]*/i;
+const QUESTIONS_MARKER = "<!-- crewbie-plan-questions -->";
+/** Turns an approver's reply on a planning PR into revision inputs, or explains why it does not revise. */
+async function commentRevision(client: GitHubApi, config: Config, event: Record<string, unknown>): Promise<Record<string, string> | string> {
+  if (event.action !== "created") return "Only new comments revise a plan.";
+  const issue = record(event.issue, "comment issue");
+  if (!issue.pull_request) return "Comment is not on a pull request.";
+  const text = String(record(event.comment, "comment").body ?? "");
+  if (text.includes("<!-- crewbie")) return "Crewbie's own comment.";
+  const number = integer(issue.number, "planning PR");
+  const pr = record(await client.request("GET", `/repos/${config.repository}/pulls/${number}`), "planning PR");
+  const head = record(pr.head, "planning head");
+  if (!String(head.ref).startsWith("crewbie/plans/") || record(head.repo, "head repository").full_name !== config.repository) return "Not a Crewbie planning PR.";
+  const command = REVISE_COMMAND.test(text), asking = String(pr.body ?? "").includes(QUESTIONS_MARKER);
+  if (!command && !asking) return "This plan has no open questions; start a comment with /crewbie revise to request a revision.";
+  const feedback = text.replace(REVISE_COMMAND, "").trim();
+  if (!feedback) return "Add your feedback after /crewbie revise.";
+  const source = await sourceIssue(client, config, planningLocation(String(head.ref)).sourceIssue);
+  return {
+    pr: String(number), head: string(head.sha, "planning head SHA"), source: issueDigest(source.title, source.body),
+    feedback: asking && !command ? `Human answers to the previous plan's questions:\n${feedback}` : feedback,
+  };
+}
 async function existingPlan(client: GitHubApi, config: Config, snapshot: Snapshot): Promise<string | null> {
   const pulls = await client.list(`/repos/${config.repository}/pulls?state=all&head=${config.repository.split("/")[0]}:${branch(snapshot)}`);
   if (pulls.length > 1) throw new Error("Ambiguous planning pull requests; inspect them before retrying.");
@@ -109,7 +132,14 @@ export async function preparePlanning(root: string, client: GitHubApi, config: C
   const skipped = (reason: string) => ({ ready: false, reason, model: "" });
   if (!config.planning?.enabled) return skipped("Automatic planning is disabled.");
   const event = record(eventValue, "issue event");
-  const inputs = event.inputs === undefined ? null : record(event.inputs, "planning revision inputs");
+  let inputs = event.inputs === undefined ? null : record(event.inputs, "planning revision inputs");
+  if (event.comment !== undefined) {
+    if (record(event.repository, "event repository").full_name !== config.repository) throw new Error("Planning event targets another repository.");
+    if (!isApprover(event.sender, config.approvers)) return skipped("Only configured human approvers' comments revise a plan.");
+    const answer = await commentRevision(client, config, event);
+    if (typeof answer === "string") return skipped(answer);
+    inputs = answer;
+  }
   const revising = inputs !== null && typeof inputs.pr === "string" && !!inputs.pr.trim();
   if (!revising && (event.action !== "labeled" || record(event.label, "trigger label").name !== PLANNING_LABEL)) return skipped("Not a ready-for-planning label event.");
   if (record(event.repository, "event repository").full_name !== config.repository) throw new Error("Planning event targets another repository.");
@@ -295,7 +325,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
     };
     files[`${directory}/execution.json`] = json(execution);
   }
-  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${handoff}\n\nRevise: \`crewbie revise-plan --pr NUMBER --feedback-file feedback.txt\`, then \`--apply\` for one paid revision reusing this plan. Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->`;
+  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from an approver runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
   const prLimit = limitsFor(config).pr;
   if (prLimit !== undefined) bounded(body.replace(/<!--[\s\S]*?-->/g, ""), prLimit, "Planning PR description");
   const commit = record(await client.request("GET", `${prefix}/git/commits/${snapshot.baseSha}`), "base commit");
@@ -328,11 +358,19 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
         throw new Error(`Revision published, but its draft/ready state update failed. Inspect the PR rather than repeating paid analysis. ${error instanceof Error ? error.message : "GitHub metadata update failed."}`);
       }
     }
+    await askQuestions(client, config, snapshot.revision.pr, plan.questions);
     return `Revised the same planning PR: ${string(prior.pr.html_url, "planning PR URL")}. Review and approve the new final head before merge.`;
   }
   await client.request("POST", `${prefix}/git/refs`, { ref: `refs/heads/${branch(snapshot)}`, sha: string(created.sha, "planning commit SHA") });
   const pull = record(await client.request("POST", `${prefix}/pulls`, {
     title: `Crewbie: ${source.title.slice(0, 160)} (plan #${source.number})`, body, head: branch(snapshot), base: snapshot.base, draft: plan.questions.length > 0,
   }), "planning pull request");
+  await askQuestions(client, config, integer(pull.number, "planning PR"), plan.questions);
   return `Coordinator proposal ready for human review: ${string(pull.html_url, "planning PR URL")}`;
+}
+async function askQuestions(client: GitHubApi, config: Config, number: number, questions: string[]): Promise<void> {
+  if (!questions.length) return;
+  const body = `### Crewbie needs answers before planning tasks\n\n${questions.map((question, index) => `${index + 1}. ${question}`).join("\n")}\n\nReply in a comment on this PR with your answers. Crewbie revises this plan automatically (one paid run per reply).\n\n<!-- crewbie-plan-questions-comment -->`;
+  try { await client.request("POST", `/repos/${config.repository}/issues/${number}/comments`, { body }); }
+  catch (error) { console.warn(`Plan published, but posting its questions as a comment failed: ${error instanceof Error ? error.message : "GitHub error"}`); }
 }

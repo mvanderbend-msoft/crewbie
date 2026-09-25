@@ -47,7 +47,7 @@ async function planningFixture(t, automatic = false) {
       if (method !== "GET") state.writes.push({ method, path, body });
       if (method === "GET" && path === "/user") return sender;
       if (method === "GET" && path === `${prefix}/issues/12`) return state.source;
-      if (method === "GET" && /^\/repos\/example\/project\/actions\/runs\/(?:42|43)$/.test(path)) return state.run;
+      if (method === "GET" && /^\/repos\/example\/project\/actions\/runs\/(?:42|43|44)$/.test(path)) return state.run;
       if (method === "GET" && path === `${prefix}/pulls/13`) return state.pulls[0];
       if (method === "GET" && path === `${prefix}/branches/main`) return { commit: { sha: state.sha } };
       if (method === "GET" && path.startsWith(`${prefix}/compare/`)) return { status: "identical", merge_base_commit: { sha: state.pulls[0]?.state === "open" ? sha : "c".repeat(40) } };
@@ -269,6 +269,8 @@ test("planning workflow is opt-in, label-gated and separates analysis from repos
   const file = workflows(false, true)[".github/workflows/crewbie-plan.yml"];
   const flow = YAML.parse(file);
   assert.deepEqual(flow.on.issues.types, ["labeled"]);
+  assert.deepEqual(flow.on.issue_comment.types, ["created"]);
+  assert.match(flow.jobs.prepare.if, /issue_comment.*pull_request.*Bot/);
   assert.match(flow.jobs.prepare.if, /crewbie:ready-for-planning/);
   assert.equal(flow.jobs.prepare.permissions.contents, "read");
   assert.equal(flow.jobs.prepare.permissions.actions, "read", "Preparation verifies its GitHub Actions run provenance.");
@@ -623,6 +625,33 @@ test("clarification revisions become ready for review and report partial metadat
     assert.equal(f.state.pulls[0].head.sha, "d".repeat(40));
     assert.equal((await preparePlanning(f.root, f.client, f.cfg, event, 43)).ready, false);
   }
+});
+
+test("an approver's reply to the plan's questions revises the same PR; other comments never start paid analysis", async (t) => {
+  const f = await planningFixture(t, true);
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  await f.output({ ...f.candidate, questions: ["Which paging size should be used?"], batch: null });
+  await publishPlanning(f.root, f.client, f.cfg);
+  const asked = f.state.comments.get(13).at(-1).body;
+  assert.match(asked, /1\. Which paging size should be used\?[\s\S]*Reply in a comment on this PR/);
+  assert.match(f.state.pulls[0].body, /crewbie-plan-questions/);
+  f.state.run.event = "issue_comment";
+  const reply = (body, sender = f.event.sender) => ({ action: "created", repository: f.event.repository, sender,
+    issue: { number: 13, pull_request: { url: "x" } }, comment: { body, user: sender } });
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply("Use 20.", { login: "outsider", type: "User" }), 43)).ready, false);
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply(asked), 43)).ready, false, "Crewbie's own comment never triggers.");
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, { ...reply("Use 20."), action: "edited" }, 43)).ready, false);
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply("Use 20 items per page."), 43)).ready, true);
+  const prompt = await readFile(join(f.root, ".crewbie-planning-prompt.txt"), "utf8");
+  assert.match(prompt, /answers to the previous plan's questions:\\nUse 20 items per page\./);
+  await f.output();
+  f.state.nextCommit = "d".repeat(40);
+  assert.match(await publishPlanning(f.root, f.client, f.cfg), /Revised the same planning PR/);
+  assert.equal(f.state.pulls[0].draft, false);
+  assert.doesNotMatch(f.state.pulls[0].body, /crewbie-plan-questions/);
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply("Looks good."), 44)).ready, false, "Without open questions a plain comment is not a revision.");
+  assert.equal((await preparePlanning(f.root, f.client, f.cfg, reply("/crewbie revise Split retries into their own task."), 44)).ready, true);
+  assert.match(await readFile(join(f.root, ".crewbie-planning-prompt.txt"), "utf8"), /Feedback: "Split retries into their own task\."/);
 });
 
 test("a planning PR edited during publication is never overwritten", async (t) => {
