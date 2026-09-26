@@ -41,6 +41,14 @@ export function checksPassed(runs: Record<string, unknown>[], statuses: Record<s
   return null;
 }
 
+async function matchesDefault(client: GitHubApi, prefix: string, base: string, file: Record<string, unknown>): Promise<boolean> {
+  const path = String(file.filename).split("/").map(encodeURIComponent).join("/");
+  let current: string | null;
+  try { current = String(record(await client.request("GET", `${prefix}/contents/${path}?ref=${encodeURIComponent(base)}`), "workflow file").sha); }
+  catch (error) { if (error instanceof GitHubError && error.status === 404) current = null; else throw error; }
+  return file.status === "removed" ? current === null : typeof file.sha === "string" && file.sha === current;
+}
+
 /** Merges a ready task PR at the completed session's head once every check passed and GitHub reports it mergeable. Never bypasses protection. */
 export async function autoMerge(client: GitHubApi, config: Config, number: number, reviewed: string): Promise<{ merged: boolean; reason: string }> {
   const merge = mergeFor(config);
@@ -52,7 +60,13 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   const head = string(record(pr.head, "PR head").sha, "PR head SHA");
   if (head !== reviewed) return { merged: false, reason: "The PR head changed; waiting for the next dispatch run." };
   // Workflows on the feature branch run with repository secrets for PRs into it, so a person merges workflow changes.
-  const workflows = (await client.list(`${prefix}/pulls/${number}/files`)).map((file) => String(file.filename)).filter((name) => name.startsWith(".github/workflows/"));
+  // A workflow file identical to the default branch (for example brought in by merging it) is not a change a person must vet.
+  const files = (await client.list(`${prefix}/pulls/${number}/files`)).filter((file) => String(file.filename).startsWith(".github/workflows/"));
+  const workflows: string[] = [];
+  if (files.length) {
+    const base = string(record(await client.request("GET", prefix), "repository").default_branch, "default branch");
+    for (const file of files) if (!await matchesDefault(client, prefix, base, file)) workflows.push(String(file.filename));
+  }
   if (workflows.length) return { merged: false, reason: `PR #${number} changes ${workflows.join(", ")}; review and merge it yourself.` };
   const checks = CHECK_READER.client ?? client;
   const runs = record(await checks.request("GET", `${prefix}/commits/${head}/check-runs?per_page=100`), "check runs");

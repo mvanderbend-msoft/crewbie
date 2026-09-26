@@ -747,6 +747,9 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
     if (path.includes("/check-runs") || path.endsWith("/status")) throw new GitHubError(403, "Resource not accessible by personal access token");
     if (method === "GET" && path.endsWith("/pulls/101")) return { state: "open", draft: false, mergeable: true, head: { sha: HEAD }, base: { ref: BRANCH } };
     if (method === "PUT" && path.endsWith("/pulls/101/merge")) { merges.push(body); return { merged: true }; }
+    if (method === "GET" && path === "/repos/example/project") return { default_branch: "main" };
+    if (method === "GET" && path === "/repos/example/project/contents/.github/workflows/ci.yml?ref=main") return { sha: "main-blob" };
+    if (method === "GET" && path.startsWith("/repos/example/project/contents/")) throw new GitHubError(404, null);
     throw new Error(`Unexpected ${method} ${path}`);
   } };
   const reads = [];
@@ -764,11 +767,16 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
     const bare = await autoMerge(user, config(), 101, HEAD);
     assert.equal(bare.merged, true, "A repository without CI still gets its task PRs merged into the feature branch.");
     assert.match(bare.reason, /no checks ran on it; the feature PR is where it gets tested/);
-    files = [{ filename: ".github/workflows/ci.yml" }];
+    files = [{ filename: ".github/workflows/ci.yml", status: "modified", sha: "agent-blob" }];
     const guarded = await autoMerge(user, config(), 101, HEAD);
     assert.equal(guarded.merged, false);
     assert.match(guarded.reason, /changes \.github\/workflows\/ci\.yml; review and merge it yourself/);
     assert.equal(merges.length, 2, "Workflow changes are never auto-merged: they run with secrets on the feature branch.");
+    files = [{ filename: ".github/workflows/ci.yml", status: "modified", sha: "main-blob" }, { filename: ".github/workflows/old.yml", status: "removed", sha: "x" }];
+    const synced = await autoMerge(user, config(), 101, HEAD);
+    assert.equal(synced.merged, true, "Workflow files identical to the default branch (merged in from it) do not need a person.");
+    files = [{ filename: ".github/workflows/new.yml", status: "added", sha: "agent-blob" }];
+    assert.equal((await autoMerge(user, config(), 101, HEAD)).merged, false, "A workflow the default branch lacks is still guarded.");
   } finally { delete CHECK_READER.client; }
 });
 

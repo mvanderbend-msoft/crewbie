@@ -322,7 +322,8 @@ planning (unless that person is the PR's author). Init picks a Crewbie reviewer 
 preferring an existing review specialist) that comments on each head of that
 feature PR. You test the feature branch and merge the feature PR yourself; Crewbie
 never merges it. A task PR that changes `.github/workflows/` is left for you to
-merge. A failed start or session is relaunched by adding `crewbie:restart`.
+merge, unless each changed workflow file is identical to the default branch (as
+when a conflict task merges the default branch in). A failed start or session is relaunched by adding `crewbie:restart`.
 Issues published before feature branches are no longer dispatched; finish them
 by hand.
 
