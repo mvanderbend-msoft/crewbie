@@ -278,7 +278,8 @@ export function batchWork(work: Work[], batch: Batch): Work[] {
   requireApproval(batch);
   if (!batch.approval?.execute) throw new Error("Watching requires execution approval.");
   const digest = batchDigest(batch);
-  const selected = work.filter((item) => item.metadata.batch === batch.id && item.metadata.batchDigest === digest);
+  const expected = new Set(batch.tasks.map((task) => task.id));
+  const selected = work.filter((item) => item.metadata.batch === batch.id && item.metadata.batchDigest === digest && expected.has(item.metadata.task.id));
   if (selected.length !== batch.tasks.length) throw new Error(`Published batch is incomplete or duplicated (${selected.length} records for ${batch.tasks.length} tasks); reconcile before dispatch.`);
   for (const task of batch.tasks) {
     const matches = selected.filter((item) => item.metadata.task.id === task.id);
@@ -356,7 +357,17 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
   const sha = string(record(branchInfo.commit, "commit").sha, "base SHA");
   for (const item of launchable) {
     const issue = integer(item.issue.number, "issue number");
-    const fresh = await freshLaunchable(client, config, item, sha, ado);
+    let fresh: Record<string, unknown>;
+    try {
+      fresh = await freshLaunchable(client, config, item, sha, ado);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Source verification failed.";
+      if (!/Source changed|requirements changed/i.test(message)) throw error;
+      item.state = "blocked";
+      item.reason = `Source verification failed: ${message}`;
+      await setStatus(client, config.repository, item.issue, "blocked");
+      continue;
+    }
     const allowance = await launchAllowance(client, config, item.metadata, issue);
     if (allowance.blocked) {
       item.state = "blocked"; item.reason = allowance.blocked;
@@ -384,6 +395,8 @@ async function ensureBranch(client: GitHubApi, config: Config, branch: string, s
   return branch;
 }
 export const FEATURE_MARKER = "<!-- crewbie-feature:";
+const FEATURE_TASKS_START = "<!-- crewbie-feature-tasks:start -->";
+const FEATURE_TASKS_END = "<!-- crewbie-feature-tasks:end -->";
 /**
  * Once every task of a feature plan merged into its branch, Crewbie opens one PR to the default branch that closes all of
  * the plan's issues. The Crewbie reviewer (when enabled) reviews each new head; only a human merges it.
@@ -416,8 +429,9 @@ async function featurePulls(client: GitHubApi, config: Config, work: Work[], bas
           throw error;
         }
       } else {
-        const body = featureBody(config, batch, branch, items);
-        if (feature.state === "open" && typeof feature.body === "string" && feature.body !== body) {
+        const current = typeof feature.body === "string" ? feature.body : "";
+        const body = updateFeatureBody(config, batch, items, current);
+        if (feature.state === "open" && body !== current) {
           feature = record(await client.request("PATCH", `${prefix}/pulls/${integer(feature.number, "feature PR")}`, { body }), "feature PR");
         }
       }
@@ -437,15 +451,45 @@ async function featureTitle(client: GitHubApi, config: Config, batch: string): P
 }
 export function featureBody(config: Config, batch: string, branch: string, items: FeatureBodyItem[]): string {
   const reviewer = reviewerFor(config);
-  const sorted = [...items].sort((a, b) => integer(a.issue.number, "issue") - integer(b.issue.number, "issue"));
   return [
     `Every task of plan \`${batch}\` merged into \`${branch}\`. Check out that branch to test the whole feature, then merge this PR yourself; Crewbie never merges it.${reviewer ? ` crewbie-${reviewer.role} reviews each new head.` : ""} Comment \`/crewbie fix\` to have the specialists address a changes-requested review.`,
-    "", "## Tasks",
+    "", managedFeatureBlock(config, items),
+    "", `${FEATURE_MARKER}${batch} -->`,
+  ].join("\n");
+}
+function managedFeatureBlock(config: Config, items: FeatureBodyItem[]): string {
+  const sorted = [...items].sort((a, b) => integer(a.issue.number, "issue") - integer(b.issue.number, "issue"));
+  return [
+    FEATURE_TASKS_START,
+    "## Tasks",
     ...sorted.map((item) => `- #${String(item.issue.number)} ${String(item.issue.title)}${item.pull ? ` (#${String(item.pull.number)})` : ""}`),
     "", ...sorted.map((item) => `Closes #${String(item.issue.number)}`),
     ...sourceIssues(config, items).map((number) => `Closes #${String(number)}`),
-    "", `${FEATURE_MARKER}${batch} -->`,
+    FEATURE_TASKS_END,
   ].join("\n");
+}
+function taskIssueSet(items: FeatureBodyItem[]): Set<number> {
+  return new Set(items.map((item) => integer(item.issue.number, "issue")));
+}
+function bodyCloses(body: string): Set<number> {
+  return new Set([...body.matchAll(/\bCloses\s+#(\d+)\b/gi)].map((match) => Number(match[1])));
+}
+function hasManagedTaskSet(body: string, items: FeatureBodyItem[]): boolean {
+  const closes = bodyCloses(body);
+  for (const issue of taskIssueSet(items)) if (!closes.has(issue)) return false;
+  return true;
+}
+export function updateFeatureBody(config: Config, batch: string, items: FeatureBodyItem[], current: string): string {
+  if (hasManagedTaskSet(current, items)) return current;
+  const block = managedFeatureBlock(config, items);
+  const start = current.indexOf(FEATURE_TASKS_START), end = current.indexOf(FEATURE_TASKS_END);
+  if (start >= 0 && end > start) return `${current.slice(0, start)}${block}${current.slice(end + FEATURE_TASKS_END.length)}`;
+  const missing = [...taskIssueSet(items)].filter((issue) => !bodyCloses(current).has(issue)).sort((a, b) => a - b).map((issue) => `Closes #${issue}`);
+  const addition = missing.length ? `\n${missing.join("\n")}` : "";
+  const marker = `${FEATURE_MARKER}${batch} -->`;
+  const index = current.indexOf(marker);
+  if (index >= 0) return `${current.slice(0, index).trimEnd()}${addition}\n\n${current.slice(index)}`;
+  return `${current.trimEnd()}${addition}\n\n${marker}`;
 }
 function sourceIssues(config: Config, items: FeatureBodyItem[]): number[] {
   const prefix = `https://github.com/${config.repository}/issues/`;

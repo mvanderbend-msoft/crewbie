@@ -3,6 +3,7 @@ import { reviewerFor, type Config } from "../config.js";
 import { agentPrompt, errorCode, integer, json, optionalText, readJson, record, safePath, string, writeAtomic } from "../core.js";
 import { memoryContext } from "../memory/context.js";
 import { taskMetadata, type TaskMetadata } from "../specification/batch.js";
+import { managedIssues } from "../tracking/issues.js";
 import { isWriter, type GitHubApi } from "../tracking/github.js";
 
 export const REVIEW_WORKFLOW = "crewbie-review.yml";
@@ -15,6 +16,7 @@ const MARKER = /^<!-- crewbie-review:([A-Za-z0-9+/=]+) -->/;
 const PROMPT_BUDGET = 100_000;
 const COMMENT_BUDGET = 65_000;
 const ACTIONS_BOT = "github-actions[bot]";
+const FEATURE_MARKER = "<!-- crewbie-feature:";
 
 export type Verdict = "pass" | "changes";
 export interface Finding { severity: "blocking" | "minor"; path: string; line: number | null; body: string }
@@ -31,13 +33,23 @@ const sha = (value: unknown, label: string) => {
 
 export async function closingTasks(client: GitHubApi, config: Config, pr: number): Promise<{ issue: Record<string, unknown>; metadata: TaskMetadata }[]> {
   const [owner, name] = config.repository.split("/");
+  const pull = record(await client.request("GET", `/repos/${config.repository}/pulls/${integer(pr, "PR")}`), "pull request");
+  const branch = String(record(pull.head, "PR head").ref ?? "");
+  const batch = new RegExp(`${FEATURE_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\s]+)\\s*-->`).exec(String(pull.body ?? ""))?.[1];
+  const managed = (await managedIssues(client, config.repository)).flatMap((issue) => {
+    const metadata = taskMetadata(String(issue.body ?? ""));
+    return metadata && metadata.branch === branch && (!batch || metadata.batch === batch) ? [{ issue, metadata }] : [];
+  });
+  if (managed.length) return managed.sort((a, b) => integer(a.issue.number, "issue") - integer(b.issue.number, "issue"));
   const response = record(await client.request("POST", "/graphql", {
-    query: "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:20){nodes{number}}}}}",
-    variables: { owner, name, number: pr },
+    query: `query($owner:String!,$name:String!,$number:Int!,$after:String){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:100,after:$after){nodes{number} pageInfo{hasNextPage endCursor}}}}}`,
+    variables: { owner, name, number: pr, after: null },
   }), "closing issues");
   if (Array.isArray(response.errors) && response.errors.length) throw new Error("GitHub could not read the issues this PR closes.");
-  const nodes = record(record(record(record(response.data, "closing data").repository, "repository").pullRequest, "pull request").closingIssuesReferences, "closing issues").nodes;
+  const connection = record(record(record(record(response.data, "closing data").repository, "repository").pullRequest, "pull request").closingIssuesReferences, "closing issues");
+  const nodes = connection.nodes;
   if (!Array.isArray(nodes)) throw new Error("GitHub returned invalid closing issues.");
+  if (record(connection.pageInfo, "closing issues page").hasNextPage) throw new Error("Feature PR closes too many issues for the fallback reader; managed issue metadata is required.");
   const tasks = [];
   for (const node of nodes) {
     const issue = record(await client.request("GET", `/repos/${config.repository}/issues/${integer(record(node, "closing issue").number, "issue")}`), "task issue");

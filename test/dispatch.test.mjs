@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { dispatch as runDispatch, linkedPull, preflight, renderDispatchResult } from "../dist/execution/dispatch.js";
 import { GitHubError } from "../dist/execution/github.js";
-import { approvedBatch, featureBranch, issueBody, issueDigest, parseBatch } from "../dist/specification/batch.js";
+import { approvedBatch, batchDigest, featureBranch, issueBody, issueDigest, parseBatch, taskMetadata } from "../dist/specification/batch.js";
 import { watchBatch } from "../dist/execution/watch.js";
 import { approvalComment } from "../dist/tracking/issues.js";
-import { config, batch } from "./helpers.mjs";
+import { config, batch, task } from "./helpers.mjs";
 import { parseReview, renderReview } from "../dist/execution/pr-review.js";
 const models = async () => [{ id: "approved-model", name: "Approved model" }];
 const BRANCH = featureBranch(parseBatch(batch(), config()));
@@ -23,7 +23,7 @@ function githubFixture(input = batch()) {
   const fixture = {
     issues, claims, pulls, assignments, launches, paused: false, cloudTasks: [], cloudStatusDenied: false, failAssignment: false, ignoreAssignment: false, extraComments: {},
     events: {}, posted: [], unassigned: [], readied: [], merges: [], reviews: [], checkRuns: [], statuses: [],
-    prComments: {}, reviewRuns: [], reviewRequests: [], continuations: [], branches: new Set(), featurePulls: [],
+    prComments: {}, reviewRuns: [], reviewRequests: [], continuations: [], branches: new Set(), featurePulls: [], prPatches: [], sourceIssue: { title: "Requirement", body: "", updated_at: "source-v1" },
     get locked() { return locked; },
     client: {
       async list(path) {
@@ -92,6 +92,7 @@ function githubFixture(input = batch()) {
           return { tasks: fixture.cloudTasks };
         }
         if (path === "/repos/example/project") return { default_branch: "main" };
+        if (path === "/repos/example/project/issues/73") return fixture.sourceIssue;
         if (path.endsWith("/branches/main")) return { commit: { sha: "base-sha" } };
         if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
         if (path.includes("/contents/.github/agents/")) return { sha: "profile-sha", type: "file" };
@@ -163,8 +164,11 @@ function githubFixture(input = batch()) {
         const pr = /\/pulls\/(\d+)$/.exec(path);
         if (pr) {
           const found = [...pulls.values()].find((item) => item.number === Number(pr[1]));
+          const feature = fixture.featurePulls.find((item) => item.number === Number(pr[1]));
+          if (feature && method === "PATCH") { fixture.prPatches.push(body); Object.assign(feature, body); return structuredClone(feature); }
           // Task PRs of a feature plan target its feature branch unless a test says otherwise.
-          return found && { base: { ref: featureBranch(b) }, ...found };
+          if (found) return { base: { ref: featureBranch(b) }, ...found };
+          if (feature) return structuredClone(feature);
         }
         throw new Error(`Unexpected request: ${method} ${path}`);
       },
@@ -266,6 +270,20 @@ test("owner-label tampering cannot redirect an approved task", async () => {
   const work = await dispatch(fixture.client, config());
   assert.equal(work[0].state, "blocked");
   assert.ok(!fixture.claims.has(1));
+});
+
+test("source verification failures block only that launch item and dispatch continues", async () => {
+  const fixture = githubFixture();
+  const metadata = taskMetadata(fixture.issues[0].body);
+  const changed = { ...metadata, sources: [{ uri: "https://github.com/example/project/issues/73", revision: "source-v1" }] };
+  fixture.issues[0].body = fixture.issues[0].body.replace(/<!-- crewbie-task:[A-Za-z0-9+/=]+ -->/, `<!-- crewbie-task:${Buffer.from(JSON.stringify(changed)).toString("base64")} -->`);
+  fixture.sourceIssue.updated_at = "source-v2";
+  const work = await dispatch(fixture.client, config());
+  assert.equal(work[0].state, "blocked");
+  assert.match(work[0].reason, /Source verification failed: Source changed/);
+  assert.ok(!fixture.claims.has(1));
+  assert.ok(fixture.claims.has(3), "the independent item still launches");
+  assert.equal(fixture.assignments.length, 1);
 });
 
 test("a concurrent dispatcher waits for the global capacity lock and never double-launches", async () => {
@@ -624,6 +642,34 @@ test("once every task merged, one feature PR closes them all; the reviewer revie
   work = await dispatch(fixture.client, cfg);
   assert.match(work[0].reason, /Feature PR #900 merged into main/);
   assert.equal(fixture.merges.length, 0, "Crewbie never merges the feature PR.");
+});
+
+test("feature PR body updates only managed task closes and preserves human edits", async () => {
+  const fixture = githubFixture();
+  fixture.branches.add(BRANCH);
+  for (const issue of [1, 2, 3]) {
+    fixture.claims.add(issue);
+    fixture.pulls.set(issue, { id: 1000 + issue, number: 100 + issue, state: "closed", merged_at: "then", user: { login: "Copilot" } });
+  }
+  await dispatch(fixture.client, config());
+  const feature = fixture.featurePulls[0];
+  feature.body = `Human intro.\n\n${feature.body}\n\nHuman footer.`;
+  const base = parseBatch(batch(), config());
+  const fix = { ...task("fix-1-developer"), title: "Address Crewbie review fixes for developer" };
+  fixture.issues.push({
+    number: 4, state: "open", title: fix.title,
+    body: issueBody(approvedBatch({ ...base, tasks: [fix] }, true), fix, { batchDigest: batchDigest(base), branch: BRANCH }),
+    labels: ["crewbie:managed", "crewbie:done", "crewbie:owner:developer"],
+  });
+  fixture.claims.add(4);
+  fixture.pulls.set(4, { id: 1004, number: 104, state: "closed", merged_at: "then", user: { login: "Copilot" } });
+  await dispatch(fixture.client, config());
+  assert.equal(fixture.prPatches.length, 1);
+  assert.match(feature.body, /^Human intro\./);
+  assert.match(feature.body, /Human footer\./);
+  assert.match(feature.body, /Closes #4/);
+  await dispatch(fixture.client, config());
+  assert.equal(fixture.prPatches.length, 1, "unchanged task issue set is not rewritten");
 });
 test("a plan still in progress opens no feature PR, and a closed feature PR is not reopened", async () => {
   const fixture = githubFixture();

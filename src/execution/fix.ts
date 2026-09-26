@@ -3,7 +3,8 @@ import { GitHubError, integer, record, string } from "../core.js";
 import { approvedBatch, issueBody, issueDigest, taskMetadata, type Batch, type Task, type TaskMetadata } from "../specification/batch.js";
 import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { approvalComment, ensureLabels, hasApproval, managedIssues } from "../tracking/issues.js";
-import { featureBody, linkedPull, type FeatureBodyItem } from "./dispatch.js";
+import { verifySources } from "../tracking/sources.js";
+import { updateFeatureBody, linkedPull, type FeatureBodyItem } from "./dispatch.js";
 import { featureTasks, trustedLatestReview, type Finding } from "./pr-review.js";
 
 const COMMAND = /^\s*\/crewbie\s+(fix|revise)\b[:\s]*/i;
@@ -26,6 +27,18 @@ function marker(body: string): { comment: number; issues: number[] } | null {
     const issues = Array.isArray(data.issues) ? data.issues.map((value) => integer(value, "fix issue")) : [];
     return { comment: integer(data.comment, "comment"), issues };
   } catch { return null; }
+}
+async function trustedReceipt(client: GitHubApi, comments: Record<string, unknown>[], comment: number): Promise<{ comment: number; issues: number[] } | null> {
+  const marked = comments.map((item) => ({ comment: item, receipt: marker(String(item.body ?? "")) })).filter((item) => item.receipt?.comment === comment);
+  if (!marked.length) return null;
+  const user = record(await client.request("GET", "/user"), "authenticated user");
+  const login = String(user.login ?? "");
+  for (const item of marked) {
+    if (item.comment.created_at !== item.comment.updated_at) continue;
+    const author = item.comment.user === null || item.comment.user === undefined ? null : record(item.comment.user, "receipt author");
+    if (author && String(author.login ?? "").toLowerCase() === login.toLowerCase()) return item.receipt!;
+  }
+  return null;
 }
 function parseFindings(reviewBody: string): Finding[] {
   const findings: Finding[] = [];
@@ -159,8 +172,7 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
   const number = integer(issue.number, "feature PR");
   const commentId = integer(comment.id, "comment");
   const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
-  const priorReceipt = comments.map((item) => marker(String(item.body ?? ""))).find((item) => item?.comment === commentId);
-  if (priorReceipt) return `Fix request comment ${commentId} was already handled for ${priorReceipt.issues.map((id) => `#${id}`).join(", ") || "no new tasks"}.`;
+  const priorReceipt = await trustedReceipt(client, comments, commentId);
   const pull = record(await client.request("GET", `/repos/${config.repository}/pulls/${number}`), "feature PR");
   const head = record(pull.head, "PR head");
   if (String(head.ref ?? "").startsWith("crewbie/plans/")) {
@@ -170,11 +182,18 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
   if (!feature) return command[1]!.toLowerCase() === "revise" ? "This PR is not a Crewbie feature PR, so /crewbie revise remains a planning-PR command." : "This PR is not a Crewbie feature PR.";
   const tasks = feature.tasks;
   const digest = tasks[0]!.metadata.batchDigest;
-  const already = (await managedIssues(client, config.repository)).filter((candidate) => {
+  try {
+    await verifySources(tasks[0]!.metadata.sources, client, config);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Source verification failed.";
+    await client.request("POST", `/repos/${config.repository}/issues/${number}/comments`, { body: `Crewbie could not create fix tasks: the PRD changed since planning; replan or revert the edit.\n\n${message}` });
+    return "The PRD changed since planning; replan or revert the edit before requesting fixes.";
+  }
+  const managed = await managedIssues(client, config.repository);
+  const already = managed.filter((candidate) => {
     const metadata = taskMetadata(String(candidate.body ?? ""));
     return metadata?.batch === feature.batch && metadata.batchDigest === digest && String(candidate.body ?? "").includes(sourceMarker(commentId));
   });
-  if (already.length) return `Fix request comment ${commentId} already created ${already.map((item) => `#${String(item.number)}`).join(", ")}.`;
   const repository = record(await client.request("GET", `/repos/${config.repository}`), "repository");
   const defaultBranch = string(repository.default_branch, "default branch");
   const sync = await syncDefault(client, config, feature.branch, defaultBranch);
@@ -188,8 +207,9 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
   }
   const merged = await mergedTasks(client, config, tasks);
   const nonReview = tasks.find((task) => task.metadata.task.kind !== "review") ?? tasks[0]!;
-  const existingIds = (await managedIssues(client, config.repository)).map((candidate) => taskMetadata(String(candidate.body ?? ""))?.task.id).filter(Boolean) as string[];
-  const round = Math.max(0, ...existingIds.map((id) => /^fix-(\d+)-/.exec(id)?.[1]).filter(Boolean).map(Number)) + 1;
+  const existingIds = managed.map((candidate) => taskMetadata(String(candidate.body ?? ""))?.task.id).filter(Boolean) as string[];
+  const existingRound = already.map((candidate) => /^fix-(\d+)-/.exec(taskMetadata(String(candidate.body ?? ""))?.task.id ?? "")?.[1]).find(Boolean);
+  const round = existingRound ? integer(Number(existingRound), "fix round") : Math.max(0, ...existingIds.map((id) => /^fix-(\d+)-/.exec(id)?.[1]).filter(Boolean).map(Number)) + 1;
   const newTasks: Task[] = [];
   let conflictId: string | null = null;
   if (sync === "conflict") {
@@ -216,11 +236,15 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
   }
   const batch: Batch = approvedBatch({ schemaVersion: 1, id: feature.batch, spec: `Follow-up fixes requested on feature PR #${number}.`, sources: tasks[0]!.metadata.sources, tasks: newTasks, approval: null }, true);
   const created = await publishFixTasks(client, config, batch, digest, feature.branch, newTasks);
+  if (priorReceipt && created.length === priorReceipt.issues.length && created.every((item) => priorReceipt.issues.includes(item.issue))
+    && priorReceipt.issues.every((issue) => new RegExp(`\\bCloses\\s+#${issue}\\b`, "i").test(String(pull.body ?? "")))) {
+    return `Fix request comment ${commentId} was already handled for ${priorReceipt.issues.map((id) => `#${id}`).join(", ") || "no new tasks"}.`;
+  }
   const allItems: FeatureBodyItem[] = [...tasks, ...created.map((item) => ({
     issue: { number: item.issue, title: newTasks.find((task) => task.id === item.task)?.title ?? item.task },
     metadata: { batch: feature.batch, batchDigest: digest, branch: feature.branch, sources: tasks[0]!.metadata.sources, task: newTasks.find((task) => task.id === item.task)! },
   }))];
-  const nextBody = featureBody(config, feature.batch, feature.branch, allItems);
+  const nextBody = updateFeatureBody(config, feature.batch, allItems, String(pull.body ?? ""));
   if (String(pull.body ?? "") !== nextBody) await client.request("PATCH", `/repos/${config.repository}/pulls/${number}`, { body: nextBody });
   await client.request("POST", `/repos/${config.repository}/actions/workflows/crewbie-dispatch.yml/dispatches`, {
     ref: defaultBranch, inputs: { issue_numbers: created.map((item) => item.issue).join(",") },

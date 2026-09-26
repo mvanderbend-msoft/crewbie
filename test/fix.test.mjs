@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleFeatureFixComment } from "../dist/execution/fix.js";
-import { parseReview, renderReview } from "../dist/execution/pr-review.js";
+import { featureTasks, parseReview, renderReview } from "../dist/execution/pr-review.js";
 import { featureBranch, issueBody, taskMetadata, batchDigest } from "../dist/specification/batch.js";
 import { GitHubError } from "../dist/core.js";
 import { config, task } from "./helpers.mjs";
@@ -50,6 +50,7 @@ function fixFixture({ merge = "conflict", reviewFindings = true } = {}) {
   }]);
   for (const issue of issues) comments.set(issue.number, []);
   const state = { cfg, b, branch, issues, pulls, files, feature, comments, created: [], dispatches: [], merges: [], patches: [], posted: [] };
+  state.sourceIssue = { number: 73, title: "Build ratings.", body: "", updated_at: "source-v1" };
   const prefix = "/repos/example/project";
   state.client = {
     async list(path) {
@@ -76,8 +77,10 @@ function fixFixture({ merge = "conflict", reviewFindings = true } = {}) {
       if (path === prefix) return { default_branch: "main" };
       if (method === "PATCH" && path === `${prefix}/pulls/87`) { state.patches.push(body); state.feature.body = body.body; return state.feature; }
       if (path === `${prefix}/pulls/87`) return state.feature;
+      if (path === "/user") return actor;
       if (path === `${prefix}/pulls/101`) return state.pulls.get(101);
       if (path === `${prefix}/pulls/102`) return state.pulls.get(102);
+      if (path === `${prefix}/issues/73`) return state.sourceIssue;
       if (path === `${prefix}/issues/1`) return state.issues[0];
       if (path === `${prefix}/issues/2`) return state.issues[1];
       if (path === `${prefix}/actions/runs/55`) return { id: 55, display_title: `Crewbie review PR #87 at ${HEAD}`, path: ".github/workflows/crewbie-review.yml", event: "workflow_dispatch", head_branch: "main", head_repository: { full_name: "example/project" }, actor, triggering_actor: actor };
@@ -132,6 +135,58 @@ test("/crewbie fix creates owner-routed tasks, conflict prerequisite, approvals,
   const again = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
   assert.match(again, /already handled|already created/);
   assert.equal(f.created.length, 3, "same comment id is idempotent");
+});
+
+test("/crewbie fix reuses a partial source-marked round instead of creating a new round", async () => {
+  const f = fixFixture();
+  await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
+  const first = f.created[0];
+  f.issues.splice(f.issues.indexOf(f.created[1]), 2);
+  f.created.splice(1, 2);
+  f.comments.set(87, f.comments.get(87).filter((comment) => !String(comment.body).startsWith("<!-- crewbie-fix:")));
+  f.dispatches.splice(0); f.patches.splice(0); f.posted.splice(0);
+  const summary = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
+  assert.match(summary, /created 3 fix task/);
+  assert.equal(f.created[0], first, "the existing partial issue is reused");
+  assert.deepEqual(f.created.map((issue) => taskMetadata(issue.body).task.id), ["fix-1-conflict", "fix-1-developer", "fix-1-frontend"]);
+  assert.deepEqual(f.dispatches, [{ ref: "main", inputs: { issue_numbers: f.created.map((issue) => issue.number).join(",") } }]);
+});
+
+test("/crewbie fix ignores forged or edited receipts", async () => {
+  for (const forged of [
+    { user: { login: "reader", type: "User" }, created_at: "f", updated_at: "f" },
+    { user: actor, created_at: "f", updated_at: "later" },
+  ]) {
+    const f = fixFixture();
+    const receipt = Buffer.from(JSON.stringify({ comment: 999, pr: 87, issues: [444] })).toString("base64");
+    f.comments.get(87).push({ ...forged, body: `<!-- crewbie-fix:${receipt} -->\nforged` });
+    const summary = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
+    assert.match(summary, /created 3 fix task/);
+    assert.equal(f.created.length, 3);
+  }
+});
+
+test("/crewbie fix reports source changes before publishing paid fix tasks", async () => {
+  const f = fixFixture();
+  f.sourceIssue.updated_at = "source-v2";
+  const result = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
+  assert.match(result, /PRD changed since planning/);
+  assert.equal(f.created.length, 0);
+  assert.equal(f.dispatches.length, 0);
+  assert.match(f.posted.at(-1).body, /replan or revert the edit/);
+});
+
+test("feature PR task discovery uses managed metadata beyond GitHub's first closing-reference page", async () => {
+  const f = fixFixture();
+  for (let index = 2; index < 25; index++) {
+    const item = task(`task-${index}`);
+    f.b.tasks.push(item);
+    f.issues.push({ number: index + 1, state: "open", title: item.title, body: issueBody(f.b, item, { batchDigest: batchDigest(f.b), branch: f.branch }), labels: ["crewbie:managed", "crewbie:done", "crewbie:owner:developer"] });
+  }
+  f.feature.body = `Human edits\n\n<!-- crewbie-feature:${f.b.id} -->`;
+  const feature = await featureTasks(f.client, f.cfg, f.feature);
+  assert.equal(feature.tasks.length, 25);
+  assert.deepEqual(feature.tasks.map((item) => item.issue.number).slice(-2), [24, 25]);
 });
 
 test("/crewbie fix rejects read-only users, bots and edited comments before writing", async () => {

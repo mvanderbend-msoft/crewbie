@@ -54,6 +54,10 @@ test("watch fails closed on missing approval, changed scope, missing tasks and A
   await assert.rejects(watchBatch({ ...approved, approval: null }, async () => work), /unapproved/);
   await assert.rejects(watchBatch(approvedBatch(approved, false), async () => work), /execution approval/);
   assert.throws(() => batchWork(work.slice(1), approved), /incomplete/);
+  const fix = structuredClone(work[0]);
+  fix.issue.number = 99;
+  fix.metadata.task.id = "fix-1-developer";
+  assert.equal(batchWork([...work, fix], approved).length, approved.tasks.length);
   work[0].issue.body += "\nChanged scope";
   await assert.rejects(watchBatch(approved, async () => work), /differs/);
   await assert.rejects(watchBatch(approved, async () => { throw new Error("API failed"); }), /API failed/);

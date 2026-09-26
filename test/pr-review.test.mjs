@@ -35,6 +35,9 @@ async function setup(t) {
   const comments = [];
   const client = {
     async list(path) {
+      if (path === "/repos/example/project/issues?state=all&labels=crewbie%3Amanaged") {
+        return b.tasks.map((task, index) => ({ number: index + 1, title: task.title, body: issueBody(b, task), labels: ["crewbie:managed"] }));
+      }
       if (path.endsWith("/pulls/101/files")) return [{ filename: "src/a.ts", status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1,2 @@\n-old\n+new" }];
       if (path.endsWith("/issues/101/comments")) return comments;
       throw new Error(`Unexpected list: ${path}`);
