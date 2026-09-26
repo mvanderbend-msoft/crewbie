@@ -62,6 +62,7 @@ function githubFixture(input = batch()) {
           return {};
         }
         if (method === "DELETE" && path.endsWith("/requested_reviewers")) { (fixture.withdrawn ??= []).push(...body.reviewers); return {}; }
+        if (method === "POST" && path.endsWith("/requested_reviewers")) { (fixture.requested ??= []).push({ path, reviewers: body.reviewers }); return {}; }
         if (path === "/graphql" && body.query.includes("markPullRequestReadyForReview")) {
           const pr = [...pulls.values()].find((item) => item.node_id === body.variables.id);
           fixture.readied.push(pr.number); pr.draft = false;
@@ -614,8 +615,14 @@ test("the feature PR also closes the PRD issue the plan came from", async () => 
     fixture.claims.add(issue);
     fixture.pulls.set(issue, { id: 1000 + issue, number: 100 + issue, state: "closed", merged_at: "then", user: { login: "Copilot" } });
   }
-  await dispatch(fixture.client, config());
+  fixture.events[73] = [
+    { event: "labeled", label: { name: "crewbie:ready-for-planning" }, actor: { type: "User", login: "reader" } },
+    { event: "labeled", label: { name: "crewbie:ready-for-planning" }, actor: { type: "User", login: "maintainer" } },
+  ];
+  const work = await dispatch(fixture.client, config());
   assert.match(fixture.featurePulls[0].body, /Closes #3\nCloses #73\n/);
+  assert.deepEqual(fixture.requested, [{ path: "/repos/example/project/pulls/900/requested_reviewers", reviewers: ["maintainer"] }], "Whoever last labeled the PRD for planning is asked to review its feature PR.");
+  assert.match(work[0].reason, /Requested review from @maintainer\./);
 });
 test("once every task merged, one feature PR closes them all; the reviewer reviews each head and only a human merges it", async () => {
   const cfg = reviewing();

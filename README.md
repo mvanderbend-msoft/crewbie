@@ -317,7 +317,8 @@ job, not a native cloud implementation session. Each plan is delivered on its
 own feature branch, `crewbie/<plan>-<revision>`: tasks start from it, and their finished PRs
 are marked ready and merged into it once every check passes, without review. When
 every task merged, Crewbie opens one feature PR into the default branch that closes
-all of the plan's issues. Init picks a Crewbie reviewer role (`review.role`,
+all of the plan's issues and requests review from whoever labeled the PRD for
+planning (unless that person is the PR's author). Init picks a Crewbie reviewer role (`review.role`,
 preferring an existing review specialist) that comments on each head of that
 feature PR. You test the feature branch and merge the feature PR yourself; Crewbie
 never merges it. A task PR that changes `.github/workflows/` is left for you to

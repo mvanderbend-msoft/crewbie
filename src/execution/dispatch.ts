@@ -1,4 +1,4 @@
-import { reviewerFor, type Config } from "../config.js";
+import { PLANNING_LABEL, reviewerFor, type Config } from "../config.js";
 import { GitHubError, hash, integer, record, string } from "../core.js";
 import { batchDigest, issueBody, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
 import { isWriter, type GitHubApi } from "../tracking/github.js";
@@ -423,7 +423,7 @@ async function featurePulls(client: GitHubApi, config: Config, work: Work[], bas
       if (!feature) {
         try {
           feature = record(await client.request("POST", `${prefix}/pulls`, { title: await featureTitle(client, config, batch), head: branch, base, body: featureBody(config, batch, branch, items) }), "feature PR");
-          opened = `Opened feature PR #${String(feature.number)}. `;
+          opened = `Opened feature PR #${String(feature.number)}. ${await requestRequesters(client, config, feature, items)}`;
         } catch (error) {
           if (error instanceof GitHubError && error.status === 422) { note = `${branch} has nothing to merge into ${base}, or GitHub refused the feature PR.`; setNote(items, branch, note); continue; }
           throw error;
@@ -438,6 +438,29 @@ async function featurePulls(client: GitHubApi, config: Config, work: Work[], bas
       note = opened + await featureReview(client, config, feature, branch);
     }
     setNote(items, branch, note);
+  }
+}
+/** Asks whoever labeled the PRD for planning to review its feature PR; GitHub refuses the PR's own author, who already owns it. */
+async function requestRequesters(client: GitHubApi, config: Config, pull: Record<string, unknown>, items: Work[]): Promise<string> {
+  const author = typeof pull.user === "object" && pull.user !== null ? (pull.user as Record<string, unknown>).login : undefined;
+  const people = new Set<string>();
+  for (const number of sourceIssues(config, items)) {
+    let events: Record<string, unknown>[];
+    try { events = await client.list(`/repos/${config.repository}/issues/${String(number)}/events`); }
+    catch (error) { if (error instanceof GitHubError && error.status === 404) continue; throw error; }
+    const labeled = events.filter((event) => event.event === "labeled" && typeof event.label === "object" && event.label !== null
+      && (event.label as Record<string, unknown>).name === PLANNING_LABEL).at(-1);
+    if (labeled && await isWriter(client, config.repository, labeled.actor)) people.add(String(record(labeled.actor, "label actor").login));
+  }
+  people.delete(String(author));
+  if (!people.size) return "";
+  const reviewers = [...people].sort();
+  try {
+    await client.request("POST", `/repos/${config.repository}/pulls/${integer(pull.number, "feature PR")}/requested_reviewers`, { reviewers });
+    return `Requested review from ${reviewers.map((login) => `@${login}`).join(", ")}. `;
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 422) return "";
+    throw error;
   }
 }
 function setNote(items: Work[], branch: string, note: string): void { for (const item of items) item.reason = `Merged into ${branch}. ${note}`; }
