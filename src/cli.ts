@@ -14,6 +14,7 @@ import { cancelRun } from "./execution/cancel.js";
 import { watchBatch } from "./execution/watch.js";
 import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/review-loop.js";
 import { initCommand } from "./setup/init.js";
+import { terminalPrompts } from "./setup/terminal.js";
 import { latestCopilotVersion } from "./setup/copilot-version.js";
 import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
@@ -31,6 +32,7 @@ import { dashboard } from "./reporting/dashboard.js";
 import { collectRecords, parseRecords } from "./reporting/records.js";
 import { collectPrUsage, renderPrUsage } from "./reporting/pr-usage.js";
 import { createOutput } from "./presentation.js";
+import { checkoutTestFeature, discoverTestFeatures, renderTestFeatureList, runStartCommand, saveLocalStart, selectionOrThrow, suggestedStartCommand } from "./execution/test-feature.js";
 
 const HELP = `Crewbie: a project-specific AI implementation crew.
 
@@ -62,6 +64,7 @@ PLANNING AND EXECUTION
   cancel --issue N --run-id ID [--apply]           Preview/cancel an attributable cloud-agent Actions run
   reapprove --issue N[,N...] [--apply]            Move open tasks to their owner's configured model and re-approve
   budget --issue N --historical-attempts N [--apply]  Adopt reviewed pre-upgrade launch counts; never reset them
+  test [feature] [--list] [--no-start]            Check out a Crewbie feature branch and start the app
   approve --batch batch.json --yes [--execute]     Approve exact local scope
   publish --batch batch.json [--apply] [--ado-create] [--dispatch-local] [--watch]
     --watch [--timeout-seconds 3600] [--poll-seconds 30]  Reconcile until handoff
@@ -117,6 +120,7 @@ async function main(): Promise<void> {
       description: { type: "string" },
       guidance: { type: "string" }, "assessment-only": { type: "boolean" }, "skip-labels": { type: "boolean" },
       "copilot-version": { type: "string" },
+      start: { type: "string" },
       execute: { type: "boolean" }, source: { type: "string" }, issue: { type: "string" },
       "ado-id": { type: "string" }, "ado-create": { type: "boolean" },
       "dispatch-local": { type: "boolean" },
@@ -127,11 +131,12 @@ async function main(): Promise<void> {
       pr: { type: "string" },
       "feedback-file": { type: "string" },
       "review-loop": { type: "string" },
+      list: { type: "boolean" }, "no-start": { type: "boolean" },
     },
   });
   const output = createOutput({ machine: values.json === true || positionals[0]?.startsWith("internal-") === true });
   if (values.help || positionals.length === 0) { output.text(HELP); return; }
-  if (positionals.length !== 1) throw new Error("Choose exactly one command.");
+  if (positionals.length !== 1 && !(positionals[0] === "test" && positionals.length === 2)) throw new Error("Choose exactly one command.");
   const command = positionals[0];
   if (command !== "init") output.heading(command!);
   if (values["review-loop"] && (command !== "publish" || values.batch || values.pr || values["dispatch-local"])) throw new Error("--review-loop requires publish and cannot be combined with batch/PR publication.");
@@ -176,6 +181,41 @@ async function main(): Promise<void> {
     return;
   }
   const config = await loadConfig(root);
+  if (command === "test") {
+    if (!config.repository) throw new Error("Configure repository before testing a feature.");
+    const client = api(token());
+    const features = await discoverTestFeatures(client, config);
+    const query = positionals[1];
+    if (values.list || !query) {
+      output.data(features, renderTestFeatureList(features));
+      return;
+    }
+    const feature = selectionOrThrow(features, query);
+    if (values.json) { output.data(feature); return; }
+    const { previous } = await checkoutTestFeature(root, feature);
+    output.text([
+      `Checked out ${feature.branch}: ${feature.title}`,
+      ...(feature.pullRequest ? [`Feature PR: ${feature.pullRequest.url}`] : []),
+      `Run \`git switch ${previous}\` to go back.`,
+    ].join("\n"));
+    if (values["no-start"]) return;
+    let start = config.local?.start ?? "";
+    if (!start && process.stdin.isTTY && process.stdout.isTTY) {
+      const suggestion = await suggestedStartCommand(root);
+      const prompt = suggestion
+        ? `Command to start the app locally when testing a feature? Press Enter for ${suggestion}. Leave empty to skip.`
+        : "Command to start the app locally when testing a feature? Leave empty to skip.";
+      start = (await terminalPrompts().ask(prompt)).trim() || suggestion || "";
+      if (start && await terminalPrompts().confirm("Save this start command to .crewbie/config.json?", true)) await saveLocalStart(root, config, start);
+    }
+    if (!start) {
+      output.text("No local.start command is configured. Set local.start in .crewbie/config.json to start the app automatically after checkout.");
+      return;
+    }
+    output.text(`Starting: ${start}`);
+    process.exitCode = await runStartCommand(root, start);
+    return;
+  }
   if (command === "budget") {
     if (!values.issue || !values["historical-attempts"]) throw new Error("Use budget --issue N --historical-attempts N; review historical attempts before --apply.");
     output.text(await baselineLaunches(api(token()), config, integer(Number(values.issue), "issue"), integer(Number(values["historical-attempts"]), "historical attempts"), values.apply === true));

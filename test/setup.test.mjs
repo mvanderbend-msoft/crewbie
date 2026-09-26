@@ -43,6 +43,8 @@ test("full-stack assessment includes nested source evidence and keeps planning c
   assert.deepEqual(report.inventory.files, []);
   assert.match(profile({ id: "coordinator", purpose: "Coordinate.", model: "" }, config()), /requirement inputs only/);
   assert.match(SKILL, /ownership-manifest hashes are not\s+read revisions/);
+  assert.match(SKILL, /crewbie test/);
+  agentPrompt(SKILL, "crewbie skill");
 });
 
 test("assessment proposes a small specialist team and installs dormant learning memory", async (t) => {

@@ -46,6 +46,7 @@ The installed workflows use:
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
 | Config `review.enabled` / `review.role` | Have a configured role review every head of a plan's feature PR in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist); an installed choice, including `enabled: false`, is kept |
 | Config `merge.method` | How task PRs merge into the feature branch: `merge` (default), `squash` or `rebase`. Legacy `merge.mode` and `merge.minConfidence` are ignored |
+| Config `local.start` | Optional local app start command used by `crewbie test` after it checks out a feature branch, for example `npm run dev` |
 
 Generated workflows embed the exact installed version's GitHub release tarball
 URL. A missing
@@ -892,6 +893,14 @@ Changing a task's kind invalidates its approval like other scope changes.
   the feature branch into the default branch, listing the tasks and closing their
   issues. Only a human merges it. If it is closed without merging, Crewbie reports
   that and does not reopen it.
+- **Local testing.** `crewbie test [feature]` discovers open feature PRs and
+  in-progress `crewbie/...` branches from task metadata, matches by issue/PR
+  number, branch or title words, refuses dirty working trees, fetches and switches
+  to the feature branch, and runs configured `local.start` unless `--no-start` is
+  supplied. Use `--list` to see choices and `--json` for a machine-readable
+  selection/list. Interactive init suggests `local.start` from package scripts
+  (`dev`, optionally after `install:all`, or `start`) and `init --start "COMMAND"`
+  records an explicit command in the reviewed setup.
 - **Crewbie review.** With `"review": { "enabled": true, "role": "<role id>" }`,
   dispatch starts `crewbie-review.yml` once for each head of a feature PR. The
   reviewer reads its own charter and memory from the default branch plus the PR's

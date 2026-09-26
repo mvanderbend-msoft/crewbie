@@ -1,4 +1,4 @@
-import { readJson, record, string, strings, slug, integer, safePath } from "./core.js";
+import { bounded, readJson, record, string, strings, slug, integer, safePath } from "./core.js";
 
 export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
@@ -13,6 +13,7 @@ export type MergeMethod = "merge" | "squash" | "rebase";
 export interface MergePolicy { method: MergeMethod }
 export const DEFAULT_MERGE: MergePolicy = { method: "merge" };
 export interface ReviewConfig { enabled: boolean; role: string; model?: string }
+export interface LocalConfig { start: string }
 export function modelProfile(value: unknown): ModelProfile {
   if (value !== "economy" && value !== "balanced" && value !== "quality") throw new Error("Model profile must be economy, balanced or quality.");
   return value;
@@ -31,6 +32,7 @@ export interface Config {
   execution?: typeof DEFAULT_EXECUTION_LIMITS;
   merge?: MergePolicy;
   review?: ReviewConfig;
+  local?: LocalConfig;
 }
 export function mergeFor(config: Config): MergePolicy { return config.merge ?? DEFAULT_MERGE; }
 /** The enabled reviewer of feature PRs and the model it runs with, or null when PR review is off. */
@@ -138,6 +140,13 @@ export function parseConfig(value: unknown): Config {
     if (model !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) || model.toLowerCase() === "auto")) throw new Error("Choose an explicit review model identifier, not auto.");
     review = { enabled: value.enabled, role, ...(model === undefined ? {} : { model }) };
   }
+  let local: LocalConfig | undefined;
+  if (data.local !== undefined) {
+    const value = record(data.local, "local");
+    const start = string(value.start, "local.start");
+    bounded(start, 120, "local.start");
+    local = { start };
+  }
   return {
     schemaVersion: 1, repository, roles, constitution,
     maxActive: integer(data.maxActive, "maxActive", 1, 20),
@@ -150,6 +159,7 @@ export function parseConfig(value: unknown): Config {
     } }),
     ...(merge ? { merge } : {}),
     ...(review ? { review } : {}),
+    ...(local ? { local } : {}),
   };
 }
 export async function loadConfig(root: string): Promise<Config> {

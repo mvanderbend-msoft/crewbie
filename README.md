@@ -336,6 +336,22 @@ Without `executeOnMerge`, the manual team-installation and batch-approval path
 below remains available. See [approval-to-execution setup](docs/operations.md#approve-and-merge-to-execute)
 for credentials, workflow recovery and approval boundaries.
 
+### Test a feature locally
+
+From the repository root, ask your IDE agent to test the feature or run:
+
+```powershell
+crewbie test "galactic ratings"
+```
+
+Crewbie lists or matches open feature PRs and in-progress Crewbie feature
+branches, refuses to touch a dirty working tree, fetches and switches to the
+selected `crewbie/...` branch, and then runs `local.start` from
+`.crewbie/config.json`. Configure it during init with `--start "npm run dev"` or
+add `"local": { "start": "npm run dev" }` to the reviewed config. Use
+`crewbie test --list`, `crewbie test 73 --no-start`, or `crewbie test 73 --json`
+for listing, checkout-only and machine-readable selection.
+
 ### Answer questions or disagree with the plan
 
 When the plan needs clarification, Crewbie opens it as a draft and posts the

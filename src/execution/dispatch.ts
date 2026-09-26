@@ -378,7 +378,7 @@ async function ensureBranch(client: GitHubApi, config: Config, branch: string, s
   catch (error) { if (!(error instanceof GitHubError && error.status === 422)) throw error; await client.request("GET", path); }
   return branch;
 }
-const FEATURE_MARKER = "<!-- crewbie-feature:";
+export const FEATURE_MARKER = "<!-- crewbie-feature:";
 /**
  * Once every task of a feature plan merged into its branch, Crewbie opens one PR to the default branch that closes all of
  * the plan's issues. The Crewbie reviewer (when enabled) reviews each new head; only a human merges it.

@@ -143,7 +143,7 @@ ${WRITING}
 
 export const SKILL = `---
 name: crewbie
-description: "Use when onboarding, reassessing a crew, reviewing a labeled-issue implementation plan, or splitting user-supplied requirements into specialist-owned issues."
+description: "Use when onboarding, reassessing a crew, reviewing a labeled-issue implementation plan, splitting requirements into specialist-owned issues, or checking out a Crewbie feature to test it locally."
 ---
 # Crewbie
 
@@ -209,6 +209,12 @@ Use \`crewbie publish --batch FILE\` for a preview, then \`--apply\` for approve
 For local-auth execution, add \`--dispatch-local --watch\` to reconcile automatically
 until cloud handoff or a blocker. This never grants approval or merges PRs.
 Changes to approved scope, owner, model or dependencies require reapproval.
+
+When the user asks to test, try or run a feature locally, run
+\`crewbie test "<their words>"\` in a terminal. Use a background/async terminal
+because the app may keep running. If several features match, show the list and
+ask which one. If the tree is dirty, ask before stashing or committing; never
+discard changes. Report the local URL or port printed by the app.
 
 After cloud completion, check the persisted PR description against the actual
 specialist handoff and CI. GitHub may regenerate the body independently. If needed,

@@ -11,6 +11,7 @@ import { explicitModel, listCopilotModels, type ModelChoice } from "./copilot.js
 import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
 import { terminalPrompts, type SetupPrompts } from "./terminal.js";
 import { COPILOT_VERSION_VARIABLE, copilotVersion as copilotVersionOf, copilotVersionCommand, copilotVersionVariable, setCopilotVersion } from "./copilot-version.js";
+import { suggestedStartCommand } from "../execution/test-feature.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
@@ -18,6 +19,7 @@ interface InitOptions {
   guidance?: string; "assessment-only"?: boolean; "skip-labels"?: boolean;
   json?: boolean; "copilot-version"?: string;
   "model-policy"?: string; "specialist-model"?: string; "model-profile"?: string;
+  start?: string;
 }
 interface InitIO {
   client: () => GitHubApi;
@@ -86,6 +88,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if ((options as { approver?: unknown }).approver !== undefined) throw new Error("--approver is no longer supported; repository write access authorizes setup.");
     if (options["model-policy"] !== undefined && !["fixed", "cost-aware"].includes(options["model-policy"])) throw new Error("--model-policy must be fixed or cost-aware.");
     if (options["model-profile"] !== undefined) modelProfile(options["model-profile"]);
+    if (options.start !== undefined) parseConfig({ schemaVersion: 1, repository: "", roles: [{ id: "developer", purpose: "Validate start.", model: "model" }], constitution: null, maxActive: 1, nightly: { enabled: false, maxRecords: 1, allowedPaths: [] }, ado: null, local: { start: options.start } });
     if (options["assessment-only"] && (options.proposal || options.apply || options.guidance)) throw new Error("--assessment-only cannot apply setup or guidance.");
     if (options.proposal) {
       const proposal = record(await readJson(await safePath(root, options.proposal)), "setup proposal");
@@ -166,6 +169,15 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
     });
     let proposal = await propose();
+    if (options.start !== undefined) proposal.config.local = { start: parseConfig({ ...proposal.config, local: { start: options.start } }).local!.start };
+    else if (!proposal.config.local?.start && terminal?.ask) {
+      const suggestion = await suggestedStartCommand(root);
+      const prompt = suggestion
+        ? `Command to start the app locally when testing a feature? Press Enter for ${suggestion}. Leave empty to skip.`
+        : "Command to start the app locally when testing a feature? Leave empty to skip.";
+      const answer = (await terminal.ask(prompt)).trim() || suggestion || "";
+      if (answer) proposal.config.local = { start: parseConfig({ ...proposal.config, local: { start: answer } }).local!.start };
+    }
     // The CLI catalog includes models the cloud agent rejects; check only the chosen ones, since each check leaves a failed task.
     const checked = new Map<string, boolean>();
     while (proposal.status === "ready" && proposal.config.repository) {

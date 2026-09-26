@@ -109,6 +109,7 @@ test("CLI formats real terminal status while JSON and redirected status remain p
   assert.deepEqual(JSON.parse(machine), JSON.parse(run(root, "status", "--batch", "batch.json")));
   const help = run(root, "--help");
   for (const section of ["SETUP AND GUIDANCE", "PLANNING AND EXECUTION", "STATUS AND REPORTS", "OUTPUT AND AUTHENTICATION"]) assert.ok(help.includes(section));
+  assert.match(help, /test \[feature\].*feature branch/);
   assert.doesNotMatch(help, /\x1b/);
 });
 
