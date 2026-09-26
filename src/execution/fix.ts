@@ -103,34 +103,23 @@ function ownerWithMostChanges(tasks: { issue: Record<string, unknown>; metadata:
   return [...scores].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0]
     ?? (tasks.find((task) => task.metadata.task.kind !== "review") ?? tasks[0]!).metadata.task.owner;
 }
-function taskBody(owner: string, findings: Finding[], notes: string, stale: string, comment: number): string {
-  const findingLines = findings.length ? findings.map((finding) =>
-    `- ${finding.severity}: ${finding.path}${finding.line === null ? "" : `:${finding.line}`} — ${finding.body}`).join("\n") : "- No structured review findings were available for this owner.";
-  const note = notes ? `\n\n## Write-access user notes\n\n${notes}` : "";
-  return `Address the Crewbie feature-PR review feedback assigned to crewbie-${owner}.${stale}
+/** One task and one PR per fix request: conflicts first, then every finding, each tagged with the specialist area it touches. */
+function fixBody(conflict: { defaultBranch: string; featureBranch: string } | null, findings: { finding: Finding; owner: string }[], notes: string, stale: string, comment: number): string {
+  const parts: string[] = [`Address the Crewbie feature-PR fix request in one PR.${stale}`];
+  if (conflict) parts.push(`## First: merge conflicts
 
-## Findings to address or explain
+Your branch starts from \`${conflict.featureBranch}\`. Merge \`origin/${conflict.defaultBranch}\` into it first and resolve conflicts preserving both sides' intent.`);
+  if (findings.length) parts.push(`## Findings to address or explain
 
-${findingLines}${note}
+Findings outside your own area name the specialist who owns it; follow that area's scoped instructions.
 
-## Acceptance criteria
-- Each finding above is addressed in code or explicitly explained in the PR handoff if no code change is needed.
-- Existing behavior remains covered by relevant checks.
-- The feature branch remains ready for a new Crewbie review.
-
-${sourceMarker(comment)}`;
-}
-function conflictBody(defaultBranch: string, featureBranch: string, notes: string, comment: number): string {
-  return `Make \`${featureBranch}\` mergeable with \`${defaultBranch}\` before review fixes continue.
-
-In your task branch, which starts from \`${featureBranch}\`, merge \`origin/${defaultBranch}\`, resolve conflicts preserving both sides' intent, and open the task PR back into \`${featureBranch}\`. If the merge brings changes under \`.github/workflows/\`, Crewbie's existing auto-merge guard may leave that task PR for a human to merge.
-${notes ? `\nHuman notes from the fix request:\n\n${notes}\n` : ""}
-## Acceptance criteria
-- The task PR merges the current \`${defaultBranch}\` into the feature branch's work branch.
-- Conflicts are resolved without discarding either side's intended behavior.
-- Existing behavior remains covered by relevant checks.
-
-${sourceMarker(comment)}`;
+${findings.map(({ finding, owner }) =>
+    `- ${finding.severity} (crewbie-${owner}): ${finding.path}${finding.line === null ? "" : `:${finding.line}`} — ${finding.body}`).join("\n")}`);
+  if (notes) parts.push(`## Write-access user notes\n\n${notes}`);
+  parts.push(`## Acceptance criteria
+${conflict ? `- The current \`${conflict.defaultBranch}\` is merged in without discarding either side's intended behavior.\n` : ""}- Each finding and note is addressed in code or explicitly explained in the PR handoff.
+- Existing behavior remains covered by relevant checks.`, sourceMarker(comment));
+  return parts.join("\n\n");
 }
 async function publishFixTasks(client: GitHubApi, config: Config, batch: Batch, digest: string, branch: string, tasks: Task[]): Promise<CreatedIssue[]> {
   await ensureLabels(client, config);
@@ -208,32 +197,20 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
   const merged = await mergedTasks(client, config, tasks);
   const nonReview = tasks.find((task) => task.metadata.task.kind !== "review") ?? tasks[0]!;
   const existingIds = managed.map((candidate) => taskMetadata(String(candidate.body ?? ""))?.task.id).filter(Boolean) as string[];
-  const existingRound = already.map((candidate) => /^fix-(\d+)-/.exec(taskMetadata(String(candidate.body ?? ""))?.task.id ?? "")?.[1]).find(Boolean);
-  const round = existingRound ? integer(Number(existingRound), "fix round") : Math.max(0, ...existingIds.map((id) => /^fix-(\d+)-/.exec(id)?.[1]).filter(Boolean).map(Number)) + 1;
-  const newTasks: Task[] = [];
-  let conflictId: string | null = null;
-  if (sync === "conflict") {
-    const owner = ownerWithMostChanges(tasks, merged) || nonReview.metadata.task.owner;
-    const role = config.roles.find((role) => role.id === owner);
-    if (!role) throw new Error(`No configured role for conflict owner ${owner}.`);
-    conflictId = `fix-${round}-conflict`;
-    newTasks.push({ id: conflictId, title: `Resolve ${feature.branch} conflicts with ${defaultBranch}`, body: conflictBody(defaultBranch, feature.branch, notes, commentId), owner, model: role.model, priority: 0, dependsOn: [] });
-  }
-  const byOwner = new Map<string, Finding[]>();
-  if (findings.length) for (const finding of findings) {
-    const owner = ownerForFinding(finding, tasks, merged);
-    byOwner.set(owner, [...byOwner.get(owner) ?? [], finding]);
-  } else if (notes) byOwner.set(ownerWithMostChanges(tasks, merged), []);
-  const stale = review && string(record(pull.head, "PR head").sha, "PR head SHA") !== review.head ? ` The latest changes-requested review was for older head ${review.head.slice(0, 7)}; verify the finding still applies before changing code.` : "";
-  for (const [owner, owned] of byOwner) {
-    const role = config.roles.find((role) => role.id === owner);
-    if (!role) throw new Error(`No configured role for fix owner ${owner}.`);
-    newTasks.push({
-      id: `fix-${round}-${owner}`, title: `Address Crewbie review fixes for ${owner}`,
-      body: taskBody(owner, owned, notes, stale, commentId), owner, model: role.model, priority: 1,
-      dependsOn: conflictId ? [conflictId] : [],
-    });
-  }
+  const existingRound = already.map((candidate) => /^fix-(\d+)(?:-|$)/.exec(taskMetadata(String(candidate.body ?? ""))?.task.id ?? "")?.[1]).find(Boolean);
+  const round = existingRound ? integer(Number(existingRound), "fix round") : Math.max(0, ...existingIds.map((id) => /^fix-(\d+)(?:-|$)/.exec(id)?.[1]).filter(Boolean).map(Number)) + 1;
+  const owned = findings.map((finding) => ({ finding, owner: ownerForFinding(finding, tasks, merged) }));
+  const counts = new Map<string, number>();
+  for (const { owner } of owned) counts.set(owner, (counts.get(owner) ?? 0) + 1);
+  const owner = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? (ownerWithMostChanges(tasks, merged) || nonReview.metadata.task.owner);
+  const role = config.roles.find((candidate) => candidate.id === owner);
+  if (!role) throw new Error(`No configured role for fix owner ${owner}.`);
+  const stale = review && string(record(pull.head, "PR head").sha, "PR head SHA") !== review.head ? ` The latest changes-requested review was for older head ${review.head.slice(0, 7)}; verify each finding still applies before changing code.` : "";
+  const conflict = sync === "conflict" ? { defaultBranch, featureBranch: feature.branch } : null;
+  const newTasks: Task[] = [{
+    id: `fix-${round}`, title: `Crewbie fixes for feature PR #${number}${conflict ? ` (incl. ${defaultBranch} conflicts)` : ""}`,
+    body: fixBody(conflict, owned, notes, stale, commentId), owner, model: role.model, priority: 1, dependsOn: [],
+  }];
   const batch: Batch = approvedBatch({ schemaVersion: 1, id: feature.batch, spec: `Follow-up fixes requested on feature PR #${number}.`, sources: tasks[0]!.metadata.sources, tasks: newTasks, approval: null }, true);
   const created = await publishFixTasks(client, config, batch, digest, feature.branch, newTasks);
   if (priorReceipt && created.length === priorReceipt.issues.length && created.every((item) => priorReceipt.issues.includes(item.issue))
@@ -250,8 +227,8 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
     ref: defaultBranch, inputs: { issue_numbers: created.map((item) => item.issue).join(",") },
   });
   const summary = [
-    `Crewbie created ${created.length} fix task(s): ${created.map((item) => `#${item.issue} for crewbie-${item.owner}`).join(", ")}.`,
-    sync === "conflict" ? `The feature branch conflicts with ${defaultBranch}; fix tasks wait for the conflict-resolution task.` : sync === "current" ? `The feature branch was already up to date with ${defaultBranch}.` : `Merged ${defaultBranch} into ${feature.branch} before creating fix tasks.`,
+    `Crewbie created one fix task: ${created.map((item) => `#${item.issue} for crewbie-${item.owner}`).join(", ")}, covering ${findings.length} finding(s)${notes ? " and your notes" : ""}.`,
+    sync === "conflict" ? `The feature branch conflicts with ${defaultBranch}; the same task resolves that first.` : sync === "current" ? `The feature branch was already up to date with ${defaultBranch}.` : `Merged ${defaultBranch} into ${feature.branch} first.`,
     review && review.head !== string(record(pull.head, "PR head").sha, "PR head SHA") ? `The latest trusted changes-requested review was for older head ${review.head.slice(0, 7)}.` : "",
   ].filter(Boolean).join(" ");
   await postReceipt(client, config, number, commentId, created.map((item) => item.issue), summary);

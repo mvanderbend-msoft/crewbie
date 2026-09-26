@@ -115,40 +115,37 @@ function fixFixture({ merge = "conflict", reviewFindings = true } = {}) {
   return state;
 }
 
-test("/crewbie fix creates owner-routed tasks, conflict prerequisite, approvals, dispatch and PR-body closes", async () => {
+test("/crewbie fix creates one task covering conflicts, every finding and notes, with approval, dispatch and PR-body closes", async () => {
   const f = fixFixture();
   const summary = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
-  assert.match(summary, /created 3 fix task/);
-  assert.equal(f.created.length, 3);
-  const metadata = f.created.map((issue) => taskMetadata(issue.body));
-  assert.deepEqual(metadata.map((item) => item.task.id), ["fix-1-conflict", "fix-1-developer", "fix-1-frontend"]);
-  assert.ok(metadata.every((item) => item.batch === f.b.id && item.batchDigest === batchDigest(f.b) && item.branch === f.branch));
-  assert.deepEqual(metadata[1].task.dependsOn, ["fix-1-conflict"]);
-  assert.match(metadata[1].task.body, /src\/api\.ts:12[\s\S]*Please keep pizza ratings stable/);
-  assert.match(metadata[2].task.body, /ui\/Button\.tsx:4/);
-  assert.ok(f.created.every((issue) => issue.labels.includes("crewbie:managed") && issue.labels.includes("crewbie:blocked")));
-  assert.equal(f.posted.filter((item) => item.issue >= 3 && /Crewbie approval:/.test(item.body)).length, 3);
-  assert.deepEqual(f.dispatches, [{ ref: "main", inputs: { issue_numbers: "3,4,5" } }]);
-  assert.match(f.patches.at(-1).body, /Closes #3[\s\S]*Closes #4[\s\S]*Closes #5/);
+  assert.match(summary, /created one fix task: #3 for crewbie-developer, covering 2 finding\(s\) and your notes/);
+  assert.equal(f.created.length, 1, "One fix request is one issue and one PR.");
+  const [metadata] = f.created.map((issue) => taskMetadata(issue.body));
+  assert.equal(metadata.task.id, "fix-1");
+  assert.ok(metadata.batch === f.b.id && metadata.batchDigest === batchDigest(f.b) && metadata.branch === f.branch);
+  assert.deepEqual(metadata.task.dependsOn, []);
+  assert.match(metadata.task.body, /First: merge conflicts[\s\S]*\(crewbie-developer\): src\/api\.ts:12[\s\S]*\(crewbie-frontend\): ui\/Button\.tsx:4[\s\S]*Please keep pizza ratings stable/);
+  assert.ok(f.created[0].labels.includes("crewbie:managed") && f.created[0].labels.includes("crewbie:blocked"));
+  assert.equal(f.posted.filter((item) => item.issue >= 3 && /Crewbie approval:/.test(item.body)).length, 1);
+  assert.deepEqual(f.dispatches, [{ ref: "main", inputs: { issue_numbers: "3" } }]);
+  assert.match(f.patches.at(-1).body, /Closes #3/);
   assert.match(f.posted.at(-1).body, /^<!-- crewbie-fix:/);
   assert.match(f.posted.at(-1).body, /older head aaaaaaa/);
   const again = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
   assert.match(again, /already handled|already created/);
-  assert.equal(f.created.length, 3, "same comment id is idempotent");
+  assert.equal(f.created.length, 1, "same comment id is idempotent");
 });
 
 test("/crewbie fix reuses a partial source-marked round instead of creating a new round", async () => {
   const f = fixFixture();
   await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
   const first = f.created[0];
-  f.issues.splice(f.issues.indexOf(f.created[1]), 2);
-  f.created.splice(1, 2);
   f.comments.set(87, f.comments.get(87).filter((comment) => !String(comment.body).startsWith("<!-- crewbie-fix:")));
   f.dispatches.splice(0); f.patches.splice(0); f.posted.splice(0);
   const summary = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
-  assert.match(summary, /created 3 fix task/);
+  assert.match(summary, /created one fix task/);
   assert.equal(f.created[0], first, "the existing partial issue is reused");
-  assert.deepEqual(f.created.map((issue) => taskMetadata(issue.body).task.id), ["fix-1-conflict", "fix-1-developer", "fix-1-frontend"]);
+  assert.deepEqual(f.created.map((issue) => taskMetadata(issue.body).task.id), ["fix-1"]);
   assert.deepEqual(f.dispatches, [{ ref: "main", inputs: { issue_numbers: f.created.map((issue) => issue.number).join(",") } }]);
 });
 
@@ -161,8 +158,8 @@ test("/crewbie fix ignores forged or edited receipts", async () => {
     const receipt = Buffer.from(JSON.stringify({ comment: 999, pr: 87, issues: [444] })).toString("base64");
     f.comments.get(87).push({ ...forged, body: `<!-- crewbie-fix:${receipt} -->\nforged` });
     const summary = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix Please keep pizza ratings stable."));
-    assert.match(summary, /created 3 fix task/);
-    assert.equal(f.created.length, 3);
+    assert.match(summary, /created one fix task/);
+    assert.equal(f.created.length, 1);
   }
 });
 
@@ -206,7 +203,7 @@ test("/crewbie fix rejects read-only users, bots and edited comments before writ
 test("notes-only fix uses the owner with most merged changes; nothing-to-fix is acknowledged only", async () => {
   const notes = fixFixture({ merge: "current", reviewFindings: false });
   const result = await handleFeatureFixComment(notes.client, notes.cfg, notes.event("/crewbie fix Please simplify the copy."));
-  assert.match(result, /created 1 fix task/);
+  assert.match(result, /created one fix task/);
   assert.equal(taskMetadata(notes.created[0].body).task.owner, "developer");
   assert.deepEqual(notes.dispatches, [{ ref: "main", inputs: { issue_numbers: "3" } }]);
 

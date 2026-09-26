@@ -323,7 +323,7 @@ preferring an existing review specialist) that comments on each head of that
 feature PR. You test the feature branch and merge the feature PR yourself; Crewbie
 never merges it. A task PR that changes `.github/workflows/` is left for you to
 merge, unless each changed workflow file is identical to the default branch (as
-when a conflict task merges the default branch in). A failed start or session is relaunched by adding `crewbie:restart`.
+when a fix task merges the default branch in). A failed start or session is relaunched by adding `crewbie:restart`.
 Issues published before feature branches are no longer dispatched; finish them
 by hand.
 
@@ -382,11 +382,12 @@ rather than asking an unstructured comment to edit only `plan.md`.
 
 On a Crewbie **feature PR**, comment **`/crewbie fix`** with optional notes after
 a Crewbie changes-requested review. A write-access user's new, unedited comment
-creates paid follow-up task issues routed back to the owning specialists: Crewbie
-groups review findings by the task PRs that changed the affected files, publishes
-approved fix tasks against the same feature branch, dispatches them through the
-normal launch budgets, auto-merges their task PRs into the feature branch, and
-requests a fresh Crewbie review of the new feature-PR head.
+creates one paid fix task (one issue, one PR) on the same feature branch. It
+covers merge conflicts with the default branch first, then every review finding
+(each tagged with the specialist whose task changed that file) and your notes.
+The specialist owning most findings runs it. Crewbie dispatches it through the
+normal launch budgets, auto-merges its PR into the feature branch, and requests a
+fresh Crewbie review of the new feature-PR head.
 
 `/crewbie revise` on a feature PR does the same thing; `/crewbie revise` on a
 planning PR still requests a planning revision. If the feature branch cannot

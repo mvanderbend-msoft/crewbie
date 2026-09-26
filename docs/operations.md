@@ -919,18 +919,18 @@ Changing a task's kind invalidates its approval like other scope changes.
   changes-requested review. `/crewbie revise` has the same meaning on feature PRs
   and keeps its planning-revision meaning on planning PRs. Crewbie handles each
   comment ID once, first tries to merge the default branch into the feature branch
-  through the GitHub merges API, and creates a conflict-resolution task if GitHub
-  reports conflicts. Review findings are routed to the specialist whose merged
-  task PR changed the affected file; otherwise Crewbie falls back to directory
-  overlap, then to the first non-review task owner. Each owner gets one fix task,
-  notes-only requests get one task for the owner with the most merged changes,
-  and all launches still go through the normal dispatch and launch-allowance
-  checks. Conflict tasks are prerequisites for later fix tasks. Crewbie updates
-  the feature PR's `Closes #...` list for the new issues and dispatches the
-  guarded workflow; when the fix PRs merge into the feature branch, dispatch
-  requests another Crewbie review of the new head. The workflow-file auto-merge
-  guard is unchanged: a conflict-resolution or fix PR touching `.github/workflows/`
-  is left for a human merge.
+  through the GitHub merges API. Each request becomes exactly one fix task (one
+  issue, one PR): it resolves conflicts first when GitHub reports them, then
+  addresses every review finding and the notes. Each finding is tagged with the
+  specialist whose merged task PR changed the affected file (falling back to
+  directory overlap, then the first non-review task owner); the specialist with
+  the most findings runs the task, or for notes only the owner with the most
+  merged changes. Launches go through the normal dispatch and launch-allowance
+  checks. Crewbie adds the issue to the feature PR's `Closes #...` list and
+  dispatches the guarded workflow; when the fix PR merges into the feature branch,
+  dispatch requests another Crewbie review of the new head. A fix PR adding or
+  changing a workflow file (other than matching the default branch) is left for a
+  human merge.
 ## Nightly learning and bounded history
 
 Set `nightly.enabled` to true in a reviewed setup proposal and install it.
