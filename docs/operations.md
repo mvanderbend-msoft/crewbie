@@ -914,6 +914,23 @@ Changing a task's kind invalidates its approval like other scope changes.
   A failed review run is reported with its link and not retried automatically;
   re-run it from Actions. Patches that do not fit the Copilot CLI prompt are
   listed as not reviewed.
+- **Feature-PR fix comments.** A write-access human can comment `/crewbie fix`
+  on the feature PR, optionally followed by notes, after a Crewbie
+  changes-requested review. `/crewbie revise` has the same meaning on feature PRs
+  and keeps its planning-revision meaning on planning PRs. Crewbie handles each
+  comment ID once, first tries to merge the default branch into the feature branch
+  through the GitHub merges API, and creates a conflict-resolution task if GitHub
+  reports conflicts. Review findings are routed to the specialist whose merged
+  task PR changed the affected file; otherwise Crewbie falls back to directory
+  overlap, then to the first non-review task owner. Each owner gets one fix task,
+  notes-only requests get one task for the owner with the most merged changes,
+  and all launches still go through the normal dispatch and launch-allowance
+  checks. Conflict tasks are prerequisites for later fix tasks. Crewbie updates
+  the feature PR's `Closes #...` list for the new issues and dispatches the
+  guarded workflow; when the fix PRs merge into the feature branch, dispatch
+  requests another Crewbie review of the new head. The workflow-file auto-merge
+  guard is unchanged: a conflict-resolution or fix PR touching `.github/workflows/`
+  is left for a human merge.
 ## Nightly learning and bounded history
 
 Set `nightly.enabled` to true in a reviewed setup proposal and install it.

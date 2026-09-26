@@ -29,7 +29,7 @@ const sha = (value: unknown, label: string) => {
   return text;
 };
 
-async function closingTasks(client: GitHubApi, config: Config, pr: number): Promise<{ issue: Record<string, unknown>; metadata: TaskMetadata }[]> {
+export async function closingTasks(client: GitHubApi, config: Config, pr: number): Promise<{ issue: Record<string, unknown>; metadata: TaskMetadata }[]> {
   const [owner, name] = config.repository.split("/");
   const response = record(await client.request("POST", "/graphql", {
     query: "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){closingIssuesReferences(first:20){nodes{number}}}}}",
@@ -47,7 +47,7 @@ async function closingTasks(client: GitHubApi, config: Config, pr: number): Prom
   return tasks;
 }
 /** The plan behind a feature PR: a same-repository Crewbie feature branch into the default branch, closing that plan's tasks. */
-async function featureTasks(client: GitHubApi, config: Config, pull: Record<string, unknown>) {
+export async function featureTasks(client: GitHubApi, config: Config, pull: Record<string, unknown>) {
   const head = record(pull.head, "PR head"), base = record(pull.base, "PR base");
   const branch = String(head.ref ?? "");
   if (!branch.startsWith("crewbie/") || head.repo === null || record(head.repo, "head repository").full_name !== config.repository) return null;
@@ -165,7 +165,7 @@ export async function publishReview(root: string, client: GitHubApi, config: Con
   return `Posted the crewbie-${snapshot.role} review of PR #${snapshot.pr}: ${review.verdict}.`;
 }
 
-function reviewMarker(body: string): { run: number; pr: number; head: string; verdict: Verdict; partial: boolean } | null {
+export function reviewMarker(body: string): { run: number; pr: number; head: string; verdict: Verdict; partial: boolean } | null {
   const match = MARKER.exec(body);
   if (!match?.[1]) return null;
   try {
@@ -177,17 +177,26 @@ function reviewMarker(body: string): { run: number; pr: number; head: string; ve
 
 /** The newest review comment for this head, trusted only when the default-branch review workflow, started by a write-access user, posted it. */
 export async function trustedReview(client: GitHubApi, config: Config, pr: number, head: string, comments?: Record<string, unknown>[]): Promise<TrustedReview | null> {
+  return trustedReviewMatching(client, config, pr, (marker) => marker.head === head, comments);
+}
+
+/** The newest trusted Crewbie review comment for this feature PR, regardless of whether the head moved since. */
+export async function trustedLatestReview(client: GitHubApi, config: Config, pr: number, comments?: Record<string, unknown>[]): Promise<TrustedReview | null> {
+  return trustedReviewMatching(client, config, pr, () => true, comments);
+}
+
+async function trustedReviewMatching(client: GitHubApi, config: Config, pr: number, accept: (marker: NonNullable<ReturnType<typeof reviewMarker>>) => boolean, comments?: Record<string, unknown>[]): Promise<TrustedReview | null> {
   const all = comments ?? await client.list(`/repos/${config.repository}/issues/${pr}/comments`);
   const repository = record(await client.request("GET", `/repos/${config.repository}`), "repository");
   for (const comment of [...all].reverse()) {
     const marker = reviewMarker(String(comment.body ?? ""));
-    if (!marker || marker.pr !== pr || marker.head !== head) continue;
+    if (!marker || marker.pr !== pr || !accept(marker)) continue;
     if (comment.user === null || record(comment.user, "comment author").login !== ACTIONS_BOT || comment.created_at !== comment.updated_at) continue;
     const run = record(await client.request("GET", `/repos/${config.repository}/actions/runs/${marker.run}`), "review run");
     if (run.path !== REVIEW_PATH || run.event !== "workflow_dispatch" || run.head_branch !== repository.default_branch
-      || record(run.head_repository, "run repository").full_name !== config.repository || run.display_title !== reviewRunName(pr, head)
+      || record(run.head_repository, "run repository").full_name !== config.repository || run.display_title !== reviewRunName(pr, marker.head)
       || !await isWriter(client, config.repository, run.triggering_actor ?? run.actor)) continue;
-    return { verdict: marker.verdict, partial: marker.partial, head, url: String(comment.html_url ?? ""), body: String(comment.body).replace(MARKER, "").trim(), createdAt: String(comment.created_at) };
+    return { verdict: marker.verdict, partial: marker.partial, head: marker.head, url: String(comment.html_url ?? ""), body: String(comment.body).replace(MARKER, "").trim(), createdAt: String(comment.created_at) };
   }
   return null;
 }

@@ -26,6 +26,11 @@ export interface Work {
   pull?: Record<string, unknown>;
   nativeTask?: Record<string, unknown>;
 }
+export interface FeatureBodyItem {
+  issue: Record<string, unknown>;
+  metadata: NonNullable<ReturnType<typeof taskMetadata>>;
+  pull?: Record<string, unknown>;
+}
 export function renderDispatchResult(work: Work[], config: Config): string {
   if (!work.length) return [
     "# Crewbie dispatch", "",
@@ -410,6 +415,11 @@ async function featurePulls(client: GitHubApi, config: Config, work: Work[], bas
           if (error instanceof GitHubError && error.status === 422) { note = `${branch} has nothing to merge into ${base}, or GitHub refused the feature PR.`; setNote(items, branch, note); continue; }
           throw error;
         }
+      } else {
+        const body = featureBody(config, batch, branch, items);
+        if (feature.state === "open" && typeof feature.body === "string" && feature.body !== body) {
+          feature = record(await client.request("PATCH", `${prefix}/pulls/${integer(feature.number, "feature PR")}`, { body }), "feature PR");
+        }
       }
       note = opened + await featureReview(client, config, feature, branch);
     }
@@ -425,11 +435,11 @@ async function featureTitle(client: GitHubApi, config: Config, batch: string): P
   }
   return `Crewbie feature: ${batch}`;
 }
-function featureBody(config: Config, batch: string, branch: string, items: Work[]): string {
+export function featureBody(config: Config, batch: string, branch: string, items: FeatureBodyItem[]): string {
   const reviewer = reviewerFor(config);
   const sorted = [...items].sort((a, b) => integer(a.issue.number, "issue") - integer(b.issue.number, "issue"));
   return [
-    `Every task of plan \`${batch}\` merged into \`${branch}\`. Check out that branch to test the whole feature, then merge this PR yourself; Crewbie never merges it.${reviewer ? ` crewbie-${reviewer.role} reviews each new head.` : ""}`,
+    `Every task of plan \`${batch}\` merged into \`${branch}\`. Check out that branch to test the whole feature, then merge this PR yourself; Crewbie never merges it.${reviewer ? ` crewbie-${reviewer.role} reviews each new head.` : ""} Comment \`/crewbie fix\` to have the specialists address a changes-requested review.`,
     "", "## Tasks",
     ...sorted.map((item) => `- #${String(item.issue.number)} ${String(item.issue.title)}${item.pull ? ` (#${String(item.pull.number)})` : ""}`),
     "", ...sorted.map((item) => `Closes #${String(item.issue.number)}`),
@@ -437,7 +447,7 @@ function featureBody(config: Config, batch: string, branch: string, items: Work[
     "", `${FEATURE_MARKER}${batch} -->`,
   ].join("\n");
 }
-function sourceIssues(config: Config, items: Work[]): number[] {
+function sourceIssues(config: Config, items: FeatureBodyItem[]): number[] {
   const prefix = `https://github.com/${config.repository}/issues/`;
   const tasks = new Set(items.map((item) => integer(item.issue.number, "issue")));
   const numbers = items.flatMap((item) => item.metadata.sources.map((source) => source.uri))

@@ -230,6 +230,10 @@ add \`--apply --watch\`. The reviewer supplies pinned-head findings; the coordin
 posts real GitHub reviews, routes corrections to the original specialists, refreshes
 tester evidence when included, and re-reviews. Budget exhaustion, scope decisions
 and uncertain launches remain explicit blockers. Final merges stay human-owned.
+On a Crewbie feature PR, a write-access human can comment \`/crewbie fix\` (or
+\`/crewbie revise\` on that feature PR) to route a changes-requested Crewbie
+review back into specialist-owned fix tasks on the same feature branch; planning
+PR \`/crewbie revise\` remains the planning-revision path.
 
 ${WRITING}
 `;
@@ -293,6 +297,28 @@ ${setup}      - name: Reconcile approved work
         run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-dispatch
 `,
     ".github/workflows/crewbie-review.yml": reviewWorkflow(setup),
+    ".github/workflows/crewbie-fix.yml": `name: Crewbie feature fix
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+concurrency:
+  group: crewbie-fix-\${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  route:
+    if: \${{ github.event.issue.pull_request && github.event.comment.user.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+${setup}      - name: Route trusted feature PR fix request
+        env:
+          GH_TOKEN: \${{ secrets.CREWBIE_USER_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "Configure CREWBIE_USER_TOKEN for feature fix task publication."; exit 1; }
+          node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-fix
+`,
     ".github/workflows/crewbie-maintain.yml": `name: Crewbie improvement
 on:
   workflow_dispatch:

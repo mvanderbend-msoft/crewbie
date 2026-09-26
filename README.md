@@ -378,17 +378,20 @@ rather than asking an unstructured comment to edit only `plan.md`.
 
 ### Request implementation changes in a PR comment
 
-Mention **`@copilot`** on the implementation PR. GitHub documents that a PR created
-by a custom agent continues with that same custom agent. The follow-up starts
-another session and can consume AI credits. Review its changes before merging.
+On a Crewbie **feature PR**, comment **`/crewbie fix`** with optional notes after
+a Crewbie changes-requested review. A write-access user's new, unedited comment
+creates paid follow-up task issues routed back to the owning specialists: Crewbie
+groups review findings by the task PRs that changed the affected files, publishes
+approved fix tasks against the same feature branch, dispatches them through the
+normal launch budgets, auto-merges their task PRs into the feature branch, and
+requests a fresh Crewbie review of the new feature-PR head.
 
-For example, on a frontend implementation PR:
-
-> @copilot Please trim `.crewbie/team/frontend-engineer/hot.md` to the
-> non-obvious gotchas from this work, one or two lines each with a link (for
-> example, why persistence runs in an effect rather than the state updater).
-> Move API and contract details to the PR Handoff section. Do not make
-> application changes for this request.
+`/crewbie revise` on a feature PR does the same thing; `/crewbie revise` on a
+planning PR still requests a planning revision. If the feature branch cannot
+merge the current default branch, Crewbie first creates a conflict-resolution
+task. That specialist merges `origin/<default>` into their task branch, resolves
+the conflicts and opens the task PR back into the feature branch. If that PR
+touches `.github/workflows/`, the existing human-merge guard still applies.
 
 **Handoffs and memory are different.** Downstream contracts and integration notes
 go in the PR's Handoff section; dependent tasks read the merged code and PR. Hot

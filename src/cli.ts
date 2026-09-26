@@ -20,6 +20,7 @@ import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning, requestPlanningRevision } from "./specification/planning.js";
 import { prepareReview, publishReview } from "./execution/pr-review.js";
+import { handleFeatureFixComment } from "./execution/fix.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
 import { checkPrDescription } from "./specification/prose.js";
 import { api, requireWriter } from "./tracking/github.js";
@@ -394,6 +395,9 @@ async function main(): Promise<void> {
       if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `ready=${result.ready}\nmodel=${result.model}\n`);
       output.text(result.reason);
     } else output.text(await publishReview(root, github, config));
+  } else if (command === "internal-fix") {
+    if (!process.env.GITHUB_EVENT_PATH || process.env.GITHUB_EVENT_NAME !== "issue_comment") throw new Error("Feature fixes require a GitHub issue_comment event.");
+    output.text(await handleFeatureFixComment(github, config, await readJson(process.env.GITHUB_EVENT_PATH)));
   } else if (command === "internal-release-plan") {
     if (!values.pr) throw new Error("Choose a merged planning PR with --pr.");
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;

@@ -87,8 +87,8 @@ export function requireApproval(batch: Batch): void {
 export function issueDigest(title: string, body: string): string {
   return hash(JSON.stringify({ title, body }));
 }
-export function issueBody(batch: Batch, task: Task): string {
-  const metadata = JSON.stringify({ batch: batch.id, batchDigest: batchDigest(batch), sources: batch.sources, task, branch: featureBranch(batch) });
+export function issueBody(batch: Batch, task: Task, metadataOverride: { batchDigest?: string; branch?: string } = {}): string {
+  const metadata = JSON.stringify({ batch: batch.id, batchDigest: metadataOverride.batchDigest ?? batchDigest(batch), sources: batch.sources, task, branch: metadataOverride.branch ?? featureBranch(batch) });
   if (task.body.includes("<!-- crewbie-task:")) throw new Error("Task body contains a reserved metadata marker.");
   return `${task.body}\n\n## Context\n\n${batch.spec}\n\n${batch.sources.map((source) => `- ${source.uri} (revision: ${source.revision})`).join("\n")}\n\nUse the named Crewbie specialist. Link the resulting PR to this issue. Read and report the specialist's charter and relevant memory. Keep the PR description concise.\n\n<!-- crewbie-task:${Buffer.from(metadata).toString("base64")} -->`;
 }
