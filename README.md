@@ -382,12 +382,13 @@ rather than asking an unstructured comment to edit only `plan.md`.
 
 On a Crewbie **feature PR**, comment **`/crewbie fix`** with optional notes after
 a Crewbie changes-requested review. A write-access user's new, unedited comment
-creates one paid fix task (one issue, one PR) on the same feature branch. It
-covers merge conflicts with the default branch first, then every review finding
-(each tagged with the specialist whose task changed that file) and your notes.
-The specialist owning most findings runs it. Crewbie dispatches it through the
-normal launch budgets, auto-merges its PR into the feature branch, and requests a
-fresh Crewbie review of the new feature-PR head.
+creates one paid fix task per specialist on the same feature branch: each review
+finding goes to the specialist whose task changed that file, so every specialist
+fixes its own domain. If the feature branch conflicts with the default branch,
+the specialist with the most findings resolves that first and the others wait
+for it. Crewbie dispatches the tasks through the normal launch budgets,
+auto-merges their PRs into the feature branch, and requests a fresh Crewbie
+review of the new feature-PR head.
 
 `/crewbie revise` on a feature PR does the same thing; `/crewbie revise` on a
 planning PR still requests a planning revision. If the feature branch cannot

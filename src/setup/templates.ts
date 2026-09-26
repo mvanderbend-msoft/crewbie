@@ -232,7 +232,7 @@ tester evidence when included, and re-reviews. Budget exhaustion, scope decision
 and uncertain launches remain explicit blockers. Final merges stay human-owned.
 On a Crewbie feature PR, a write-access human can comment \`/crewbie fix\` (or
 \`/crewbie revise\` on that feature PR) to route a changes-requested Crewbie
-review, merge conflicts and notes into one fix task and PR on the same feature branch; planning
+review back into one fix task per specialist on the same feature branch (conflicts resolved first); planning
 PR \`/crewbie revise\` remains the planning-revision path.
 
 ${WRITING}

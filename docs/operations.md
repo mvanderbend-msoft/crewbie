@@ -919,15 +919,15 @@ Changing a task's kind invalidates its approval like other scope changes.
   changes-requested review. `/crewbie revise` has the same meaning on feature PRs
   and keeps its planning-revision meaning on planning PRs. Crewbie handles each
   comment ID once, first tries to merge the default branch into the feature branch
-  through the GitHub merges API. Each request becomes exactly one fix task (one
-  issue, one PR): it resolves conflicts first when GitHub reports them, then
-  addresses every review finding and the notes. Each finding is tagged with the
-  specialist whose merged task PR changed the affected file (falling back to
-  directory overlap, then the first non-review task owner); the specialist with
-  the most findings runs the task, or for notes only the owner with the most
-  merged changes. Launches go through the normal dispatch and launch-allowance
-  checks. Crewbie adds the issue to the feature PR's `Closes #...` list and
-  dispatches the guarded workflow; when the fix PR merges into the feature branch,
+  through the GitHub merges API. Each finding goes to the specialist whose merged
+  task PR changed the affected file (falling back to directory overlap, then the
+  first non-review task owner), and each specialist gets one fix task with only
+  its own findings plus the notes. Notes-only requests get one task for the owner
+  with the most merged changes. When GitHub reports conflicts, the task of the
+  specialist with the most findings resolves them first and the other fix tasks
+  depend on it. Launches go through the normal dispatch and launch-allowance
+  checks. Crewbie adds the issues to the feature PR's `Closes #...` list and
+  dispatches the guarded workflow; when the fix PRs merge into the feature branch,
   dispatch requests another Crewbie review of the new head. A fix PR adding or
   changing a workflow file (other than matching the default branch) is left for a
   human merge.
