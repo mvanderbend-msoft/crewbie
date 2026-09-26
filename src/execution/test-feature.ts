@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { access, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { GitHubError, integer, json, record, string, writeAtomic } from "../core.js";
 import type { Config } from "../config.js";
@@ -164,12 +165,12 @@ export function renderTestFeatureList(features: TestFeature[]): string {
 export async function suggestedStartCommand(root: string): Promise<string | null> {
   let manifest: { scripts?: Record<string, unknown> };
   try {
-    manifest = JSON.parse(await readFile(`${root}\\package.json`, "utf8")) as { scripts?: Record<string, unknown> };
+    manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { scripts?: Record<string, unknown> };
   } catch {
     return null;
   }
   const scripts = manifest.scripts ?? {};
-  const exists = async (path: string) => access(`${root}\\${path}`).then(() => true, () => false);
+  const exists = async (path: string) => access(join(root, path)).then(() => true, () => false);
   const runner = await exists("pnpm-lock.yaml") ? "pnpm" : await exists("yarn.lock") ? "yarn" : "npm";
   const run = (script: string) => runner === "npm" ? (script === "start" ? "npm start" : `npm run ${script}`)
     : runner === "pnpm" ? (script === "start" ? "pnpm start" : `pnpm run ${script}`)
