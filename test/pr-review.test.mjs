@@ -99,6 +99,9 @@ test("only managed task and feature PRs are reviewed", async (t) => {
   assert.match((await prepareReview(root, client, reviewConfig, 101, HEAD, 58)).reason, /not a Crewbie feature or task PR/);
   Object.assign(pull, { head: { ...pull.head, ref: BRANCH }, base: { ref: "crewbie/other" } });
   assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 59)).ready, false);
+  pull.head = { sha: HEAD, ref: "copilot/foundation" };
+  pull.base.ref = BRANCH;
+  assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 60)).ready, false, "Missing head repository is not a task PR.");
 });
 test("task PR review checks its own acceptance criteria and reports a blocking missed deliverable", async (t) => {
   const { root, pull, comments, client } = await setup(t);

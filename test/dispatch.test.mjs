@@ -604,7 +604,11 @@ test("a finished task PR merges only after its own checks and trusted acceptance
   work = await dispatch(fixture.client, cfg);
   assert.equal(fixture.merges.length, 0);
   assert.deepEqual(fixture.reviewRequests, [{ ref: "main", inputs: { pr: "101", head: HEAD } }]);
-  reviewRun(fixture, 55);
+  reviewRun(fixture, 55, HEAD, { status: "in_progress", conclusion: null });
+  work = await dispatch(fixture.client, cfg);
+  assert.equal(fixture.reviewRequests.length, 1, "Repeated dispatch must not request another review of a running head.");
+  assert.match(work[0].reason, /is reviewing/);
+  Object.assign(fixture.reviewRuns[0], { status: "completed", conclusion: "success" });
   reviewComment(fixture, cfg, 55, [{ severity: "blocking", path: "docs/CHANGELOG.md", line: 1, body: "Required entry is absent." }]);
   work = await dispatch(fixture.client, cfg);
   assert.equal(fixture.merges.length, 0, "A task with a missed deliverable cannot merge despite green CI.");

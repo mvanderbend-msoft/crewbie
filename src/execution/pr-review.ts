@@ -73,8 +73,9 @@ export async function featureTasks(client: GitHubApi, config: Config, pull: Reco
 /** Resolve a task PR from the managed issue's GitHub cross-reference, not from claims in the PR body. */
 async function taskForPull(client: GitHubApi, config: Config, pull: Record<string, unknown>) {
   const base = String(record(pull.base, "PR base").ref ?? "");
-  if (!base.startsWith("crewbie/") || record(pull.head, "PR head").repo === null
-    || record(record(pull.head, "PR head").repo, "head repository").full_name !== config.repository) return null;
+  const headRepo = record(pull.head, "PR head").repo;
+  if (!base.startsWith("crewbie/") || !headRepo || typeof headRepo !== "object"
+    || record(headRepo, "head repository").full_name !== config.repository) return null;
   const number = integer(pull.number, "PR");
   const url = `https://api.github.com/repos/${config.repository}/pulls/${number}`;
   const candidates = (await managedIssues(client, config.repository)).flatMap((issue) => {
@@ -202,7 +203,7 @@ export function renderReview(_config: Config, snapshot: Snapshot, review: Return
   const branch = snapshot.feature?.branch ?? snapshot.task!.branch;
   const next = snapshot.task
     ? review.verdict === "changes" ? `Push fixes to this task PR for a fresh review; Crewbie will not auto-merge it.${partial}`
-      : partial ? `Crewbie will not auto-merge this task PR; review the omitted patches and merge it yourself.${partial}`
+      : partial ? "Crewbie will not auto-merge this task PR; review the omitted patches and merge it yourself."
         : `Crewbie merges this task PR into \`${branch}\` after its checks pass.`
     : review.verdict === "changes"
       ? `Push fixes to \`${branch}\` and Crewbie reviews the new head, or merge anyway if you disagree. Crewbie never merges this PR.${partial}`
