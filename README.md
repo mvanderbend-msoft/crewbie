@@ -391,6 +391,9 @@ the specialist with the most findings resolves that first and the others wait
 for it. Crewbie dispatches the tasks through the normal launch budgets,
 auto-merges their PRs into the feature branch, and requests a fresh Crewbie
 review of the new feature-PR head.
+The generated fix job skips unrelated comments and non-collaborator authors
+before installing Crewbie; Crewbie still verifies repository write access before
+creating tasks. Start the comment with `/crewbie fix` (or `/crewbie revise`).
 
 `/crewbie revise` on a feature PR does the same thing; `/crewbie revise` on a
 planning PR still requests a planning revision. If the feature branch cannot
