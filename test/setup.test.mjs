@@ -193,6 +193,20 @@ test("generated workflows parse and never execute PR-head code", () => {
   assert.equal(report.jobs.report.steps.find((step) => step.name === "Build usage report").env.GH_TOKEN, "${{ github.token }}");
 });
 
+test("comment-triggered jobs prefilter trusted associations and fix commands", () => {
+  const files = workflows(false, true);
+  const planning = YAML.parse(files[".github/workflows/crewbie-plan.yml"]).jobs.prepare.if;
+  const fix = YAML.parse(files[".github/workflows/crewbie-fix.yml"]).jobs.route.if;
+  for (const condition of [planning, fix]) {
+    assert.match(condition, /github\.event\.issue\.pull_request/);
+    assert.match(condition, /github\.event\.comment\.user\.type != 'Bot'/);
+    assert.match(condition, /contains\(fromJSON\('\["OWNER","MEMBER","COLLABORATOR"\]'\), github\.event\.comment\.author_association\)/);
+  }
+  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/crewbie fix'\)/);
+  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/crewbie revise'\)/);
+  assert.doesNotMatch(planning, /startsWith\(github\.event\.comment\.body/, "Planning PR question replies need not start with a command.");
+});
+
 test("ready-label workflow has an exact package fallback when CREWBIE_PACKAGE is unset", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const workflow = YAML.parse(workflows(false, true)[".github/workflows/crewbie-plan.yml"]);
