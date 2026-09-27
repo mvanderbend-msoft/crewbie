@@ -817,6 +817,15 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
     reviewFixture.prComments[101].pop();
     assert.match((await autoMerge(user, config(), 101, HEAD)).reason, /review is disabled/);
     assert.equal(merges.length, 1);
+    const reviewComments = reviewFixture.prComments[101];
+    reviewFixture.prComments[101] = [];
+    const originalRequest = user.request;
+    user.request = (method, path, body) => path.endsWith("/pulls/101") && method === "GET"
+      ? { state: "open", draft: false, mergeable: false, head: { sha: HEAD }, base: { ref: BRANCH } }
+      : originalRequest(method, path, body);
+    assert.match((await autoMerge(user, cfg, 101, HEAD)).reason, /conflicts with its base branch/);
+    user.request = originalRequest;
+    reviewFixture.prComments[101] = reviewComments;
     CHECK_READER.client = { async request(method, path) { return path.includes("/check-runs") ? { total_count: 0, check_runs: [] } : { statuses: [] }; } };
     const bare = await autoMerge(user, config(), 101, HEAD);
     assert.equal(bare.merged, false, "A repository without CI must not auto-merge task PRs.");

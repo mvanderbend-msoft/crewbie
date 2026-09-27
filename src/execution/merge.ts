@@ -81,14 +81,14 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
   // No CI (including branch-filtered or approval-held runs) cannot prove a task's tests passed.
   if (!ran.length && !statuses.length) return { merged: false, reason: "No CI checks ran on this task head; verify its tests and merge it manually." };
+  if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };
+  if (pr.mergeable !== true) return { merged: false, reason: "GitHub is still computing mergeability; Crewbie retries on its next run." };
   const reviewer = reviewerFor(config);
   if (!reviewer) return { merged: false, reason: "Task acceptance review is disabled; review the task's criteria and merge it manually." };
   const review = await trustedReview(client, config, number, head);
   if (!review) return { merged: false, reason: await requestReview(client, config, number, head) };
   if (review.verdict !== "pass") return { merged: false, reason: `crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}; fix the task PR before it merges.` };
   if (review.partial) return { merged: false, reason: "The task review omitted patches; review them and merge manually." };
-  if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };
-  if (pr.mergeable !== true) return { merged: false, reason: "GitHub is still computing mergeability; Crewbie retries on its next run." };
   try {
     const result = record(await client.request("PUT", `${prefix}/pulls/${number}/merge`, { sha: head, merge_method: merge.method }), "merge result");
     if (result.merged !== true) return { merged: false, reason: `GitHub did not confirm the merge of PR #${number}.` };
