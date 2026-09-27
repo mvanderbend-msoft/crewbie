@@ -572,7 +572,8 @@ requires explicit opt-in.
 
 Completed native PRs receive a usage summary during dispatch reconciliation.
 **Observed tokens** aggregate identifiable main-session input/output log records
-across known sessions, with coverage and an evidence link. Missing/expired logs,
+across known sessions, including cached and uncached input-token counts when every
+session log exposes them, with coverage and an evidence link. Missing/expired logs,
 unreported subagent usage and incomplete session coverage are disclosed; these
 counts are not unique context tokens or an invoice. The preview Agent Tasks API
 reports `usage.amount` with a type but does not document its scaling, so **AI credits

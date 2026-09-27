@@ -4,7 +4,7 @@ import { collectPrUsage, parseUsageLog, renderPrUsage, UsageUnavailable } from "
 import { GitHubError } from "../dist/core.js";
 
 const session = (digit) => `${digit.repeat(8)}-${digit.repeat(4)}-${digit.repeat(4)}-${digit.repeat(4)}-${digit.repeat(12)}`;
-const log = (id, input = 10, output = 3) => `COPILOT_AGENT_SESSION_ID: ${id}\n[cca-engine] turn=1 assistant.usage: model=fixture input=${input} output=${output}\n`;
+const log = (id, input = 10, output = 3, cached) => `COPILOT_AGENT_SESSION_ID: ${id}\n[cca-engine] turn=1 assistant.usage: model=fixture input=${input} output=${output}${cached === undefined ? "" : ` input_cached=${cached}`}\n`;
 function fixture() {
   const pr = { id: 13, head: { ref: "copilot/feature" } };
   const state = { sessions: [session("a"), session("b")], denied: false };
@@ -25,21 +25,25 @@ function fixture() {
 }
 
 test("usage parsing deduplicates exact log repetition and rejects conflicting counts or session identity", () => {
-  assert.deepEqual(parseUsageLog(log(session("a")) + log(session("a"))), { sessionId: session("a"), inputTokens: 10, outputTokens: 3 });
+  assert.deepEqual(parseUsageLog(log(session("a")) + log(session("a"))), { sessionId: session("a"), inputTokens: 10, outputTokens: 3, cachedInputTokens: null, uncachedInputTokens: null });
   assert.equal(parseUsageLog(log(session("a")) + log(session("a"), 11)), null);
+  assert.equal(parseUsageLog(log(session("a"), 10, 3, 11)), null);
   assert.equal(parseUsageLog(log(session("a")) + log(session("b"))), null);
   assert.equal(parseUsageLog("[cca-engine] turn=1 assistant.usage: model=x input=1 output=2"), null);
 });
 
 test("PR usage aggregates attributable sessions and does not invent credit scaling", async () => {
   const f = fixture();
-  const result = await collectPrUsage(f.client, "example/project", f.pr, (_repo, run) => log(session(run === 1 ? "a" : "b")));
+  const result = await collectPrUsage(f.client, "example/project", f.pr, (_repo, run) => log(session(run === 1 ? "a" : "b"), 10, 3, 4));
   assert.equal(result.inputTokens, 20);
   assert.equal(result.outputTokens, 6);
+  assert.equal(result.cachedInputTokens, 8);
+  assert.equal(result.uncachedInputTokens, 12);
   assert.equal(result.credits, null);
   assert.equal(result.measuredSessions, 2);
   assert.equal(result.sources.length, 2);
   assert.match(renderPrUsage(result), /26 \(20 input \+ 6 output\)/);
+  assert.match(renderPrUsage(result), /Input cache:\*\* 8 cached \+ 12 uncached/);
   assert.match(renderPrUsage(result), /AI credits:\*\* unavailable/);
 });
 
