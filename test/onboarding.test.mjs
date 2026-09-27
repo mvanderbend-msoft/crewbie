@@ -246,7 +246,11 @@ test("prompt and parser share the exact eligible Markdown context list", async (
   assert.deepEqual(new Set(allowed), new Set(["AGENTS.md"]), "Project docs such as ADRs are not AI guidance context.");
   assert.match(prompt, /at most ten entries/);
   assert.match(prompt, /Source code and MCP configuration.*NOT contextPaths/);
-  assert.match(prompt, /early `## Commands` section.*copy-pasteable commands.*required flags.*`node --test`/s);
+  assert.match(prompt, /early `## Commands` section/);
+  assert.match(prompt, /copy-pasteable commands/);
+  assert.match(prompt, /required flags/);
+  assert.match(prompt, /`node --test`/);
+  assert.match(prompt, /Do not invent commands/);
   const review = response(report);
   review.roles[0].contextPaths = allowed;
   const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
