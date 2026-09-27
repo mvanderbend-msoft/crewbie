@@ -277,6 +277,17 @@ test("long planning summaries stay intact in plan.md and use complete sentences 
   assert.match(body, /Full summary.*plan\.md/);
 });
 
+test("a summary without a short complete sentence is linked, not clipped, in the PR", async (t) => {
+  const f = await planningFixture(t);
+  const summary = `${"word ".repeat(110).trim()}.`;
+  await preparePlanning(f.root, f.client, f.cfg, f.event);
+  await f.output({ ...f.candidate, summary });
+  await publishPlanning(f.root, f.client, f.cfg);
+  assert.ok(f.state.tree.find((entry) => entry.path.endsWith("/plan.md")).content.includes(summary));
+  assert.match(f.state.pulls[0].body, /## What changed\nFull summary: `[^`]+\/plan\.md`/);
+  assert.ok(!f.state.pulls[0].body.includes(summary));
+});
+
 test("published plans list team suggestions without writing team files", async (t) => {
   const f = await planningFixture(t);
   await preparePlanning(f.root, f.client, f.cfg, f.event);
