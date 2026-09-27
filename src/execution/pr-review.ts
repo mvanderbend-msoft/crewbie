@@ -22,6 +22,7 @@ const FEATURE_MARKER = "<!-- crewbie-feature:";
 export type Verdict = "pass" | "changes";
 export interface Finding { severity: "blocking" | "minor"; path: string; line: number | null; body: string }
 export interface TrustedReview { verdict: Verdict; partial: boolean; head: string; url: string; body: string; createdAt: string }
+/** Each review covers exactly one task PR or one feature PR. */
 interface Snapshot { schemaVersion: 1; pr: number; head: string; feature?: { batch: string; branch: string }; task?: { issue: number; branch: string }; role: string; runId: number; omitted: string[]; ci?: string }
 
 export function reviewRunName(pr: number, head: string): string { return `Crewbie review PR #${pr} at ${head}`; }

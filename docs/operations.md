@@ -44,7 +44,7 @@ The installed workflows use:
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
-| Config `review.enabled` / `review.role` | Have a configured role review each task PR against its own acceptance criteria before auto-merge and every head of a plan's feature PR in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist); an installed choice, including `enabled: false`, is kept (task PRs then require manual review and merge) |
+| Config `review.enabled` / `review.role` | Have a configured role review each task PR against its own acceptance criteria before auto-merge and every head of a plan's feature PR in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist) and preserves the installed choice. When `enabled` is `false`, task PRs are not auto-merged; review and merge them manually. |
 | Config `merge.method` | How task PRs merge into the feature branch: `merge` (default), `squash` or `rebase`. Legacy `merge.mode` and `merge.minConfidence` are ignored |
 | Config `local.start` | Optional local app start command used by `crewbie test` after it checks out a feature branch, for example `npm run dev` |
 
