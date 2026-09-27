@@ -43,10 +43,11 @@ test("scoped concrete guidance, necessary standalone context and explicit gates 
 });
 
 test("generic-only agent charters are advisory, not a claim of measured harm", async (t) => {
-  const root = await fixture(t, { ".github/agents/developer.agent.md": "---\nname: Developer\ndescription: Implements changes\n---\n# Instructions\n\nYou are a senior software engineer.\nWrite high-quality code and tests.\nBe thorough.\n" });
+  const root = await fixture(t, { ".github/agents/developer.agent.md": "---\nname: Developer\ndescription: Implements changes\n---\nYou are a senior software engineer.\nWrite high-quality code and tests.\nBe thorough.\n" });
   const result = await assess(root);
   assert.equal(result.instructionQuality.signals[0].code, "generic-only");
   assert.equal(result.instructionQuality.signals[0].level, "advisory");
+  assert.equal(result.instructionQuality.signals[0].line, 5);
   assert.match(result.instructionQuality.interpretation, /does not.*prove these individual patterns/);
 });
 
