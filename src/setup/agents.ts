@@ -1,7 +1,7 @@
 import { parseDocument, isMap, isSeq } from "yaml";
 import { agentArchivePath, type Config, type Role } from "../config.js";
 import { agentPrompt, optionalText, safePath } from "../core.js";
-import { MANAGED_END, profile } from "./templates.js";
+import { MANAGED_END, profile, toolsFor } from "./templates.js";
 import { removeAutoLoadedPointers } from "./auto-loaded.js";
 
 export async function roleProfile(root: string, role: Role, config: Config): Promise<string> {
@@ -23,6 +23,7 @@ export function adoptedProfile(role: Role, config: Config, original: string): st
   if (document.has("tools") && !isSeq(document.get("tools"))) throw new Error(`Preserve tool restrictions by converting ${role.sourceAgent}'s tools to a reviewed YAML list before adoption.`);
   document.set("name", `crewbie-${role.id}`);
   if (!document.has("description")) document.set("description", role.purpose);
+  if (!document.has("tools")) document.set("tools", toolsFor(role));
   // Assignment and an inherited frontmatter model must not disagree.
   if (document.has("model")) document.set("model", role.model);
   const handoffs = document.get("handoffs");

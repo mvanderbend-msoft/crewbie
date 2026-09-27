@@ -28,6 +28,11 @@ export const PR_TEMPLATE = `## What changed
 export const MANAGED_START = "<!-- crewbie:managed:start (Crewbie refreshes this block on update; your text outside it is kept) -->";
 export const MANAGED_END = "<!-- crewbie:managed:end -->";
 
+export function toolsFor(role: Role): string[] {
+  if (["coordinator", "reviewer", "improver"].includes(role.id)) return ["read", "search"];
+  return ["read", "search", "edit", "execute"];
+}
+
 export function profile(role: Role, config: Config): string {
   // Copilot attaches these itself; listing them again only repeats context.
   const guidance = (role.contextPaths ?? []).filter((path) => !autoLoadedGuidance(path));
@@ -85,6 +90,8 @@ Change only approved guidance/memory paths. Preserve policy and accepted decisio
   return `---
 name: crewbie-${role.id}
 description: ${JSON.stringify(role.purpose)}
+tools:
+${toolsFor(role).map((tool) => `  - ${tool}`).join("\n")}
 ---
 # ${role.id}
 

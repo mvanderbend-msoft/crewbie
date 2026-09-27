@@ -129,6 +129,9 @@ unrelated combined role. After approval, originals move into
 `.crewbie/agent-archive/` as backup provenance. Their **complete original instructions
 remain inside the active Crewbie charter**, alongside Crewbie context and handoff
 rules; tool restrictions, descriptions and professional persona are preserved.
+New charters declare role-scoped Copilot tools: planning, review and improvement
+roles are limited to repository reading and search, while implementation roles also
+receive editing and command execution.
 The selected model and adopted handoff targets are synchronized. Adopted
 instructions are never truncated. Crewbie applies no word limit to charters
 because no evidence supports one. It stops only at GitHub's documented

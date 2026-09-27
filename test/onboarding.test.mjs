@@ -2,16 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import YAML from "yaml";
 import { assess } from "../dist/setup/assessment.js";
 import { parseSetupReview, proposeSetup, renderSetupReview, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
 import { initCommand as runInit, installSetup } from "../dist/setup/init.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
+import { adoptedProfile } from "../dist/setup/agents.js";
 import { profile } from "../dist/setup/templates.js";
 import { setupLabels } from "../dist/tracking/issues.js";
 import { config, fixture } from "./helpers.mjs";
 import { GitHubError } from "../dist/core.js";
 
 const initCommand = (root, options, io) => runInit(root, { "model-policy": "fixed", ...options }, io);
+const frontmatter = (text) => YAML.parse(/^---\n([\s\S]*?)\n---/.exec(text)[1]);
 
 test("economy, balanced and quality profiles persist reviewed choices with a non-code capability floor", async (t) => {
   for (const profile of ["economy", "balanced", "quality"]) {
@@ -571,6 +574,7 @@ test("adopted agents become Crewbie specialists and originals are archived, not 
   assert.ok(charter.includes(original.split("---\n").at(-1)), "The complete original instructions belong in the active charter.");
   assert.doesNotMatch(charter, /\bedit\b|\bexecute\b/);
   assert.match(charter, /agent-archive\/github\/agents\/frontend-engineer.agent.md/);
+  assert.deepEqual(frontmatter(charter).tools, ["read", "search"]);
   assert.match(charter, /define a persona or voice, write every PR description/);
   assert.deepEqual(await installation(root, proposal), []);
 });
@@ -619,6 +623,12 @@ test("agent decisions must match the adopted roster and account for every existi
   const report = await assess(root), review = response(report);
   assert.throws(() => parseSetupReview(JSON.stringify({ ...review, agentDecisions: [] }), report, "", "chosen-model"), /every existing agent/);
   assert.throws(() => parseSetupReview(JSON.stringify({ ...review, agentDecisions: [{ ...review.agentDecisions[0], action: "adopt" }] }), report, "", "chosen-model"), /does not match/);
+});
+
+test("adopted agents without tools receive the role's scoped tool list", () => {
+  const role = { id: "reviewer", purpose: "Review implementation.", model: "", sourceAgent: ".github/agents/reviewer.agent.md" };
+  const charter = adoptedProfile(role, config(), "---\nname: Reviewer\n---\nReview every change.");
+  assert.deepEqual(frontmatter(charter).tools, ["read", "search"]);
 });
 test("init writes a readable assessment and applies the actual approved instruction edits", async (t) => {
   const root = await fixture(t, { "AGENTS.md": "Preserve IDs.", "src/catalogue.ts": "export const pageSize = 20;" });

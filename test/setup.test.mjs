@@ -11,6 +11,10 @@ import { agentPrompt, bounded, hash, safePath } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
 import { fixture, config } from "./helpers.mjs";
 
+function frontmatter(text) {
+  return YAML.parse(/^---\n([\s\S]*?)\n---/.exec(text)[1]);
+}
+
 test("brownfield assessment reuses guidance, sends no project files to the LLM, and executes no scripts", async (t) => {
   const root = await fixture(t, {
     "package.json": JSON.stringify({ scripts: { test: "MUST-NOT-EXECUTE" } }),
@@ -64,9 +68,12 @@ test("assessment proposes a small specialist team and installs dormant learning 
 test("specialists have distinct duties and an actionable scoped memory handoff", () => {
   for (const role of ["developer", "tester", "reviewer", "coordinator", "improver"]) {
     const text = profile({ id: role, purpose: `${role} purpose.`, model: "" }, config());
+    const tools = frontmatter(text).tools;
     agentPrompt(text, role);
     assert.match(text, /\.crewbie\/instructions\.md/);
     assert.match(text, new RegExp(`Identify yourself as .crewbie-${role}`));
+    assert.ok(Array.isArray(tools) && tools.length, `${role} has scoped tools`);
+    if (["reviewer", "coordinator", "improver"].includes(role)) assert.deepEqual(tools, ["read", "search"]);
   }
   assert.match(SHARED_INSTRUCTIONS, /always in scope/i);
   assert.match(SHARED_INSTRUCTIONS, /work branch/);
