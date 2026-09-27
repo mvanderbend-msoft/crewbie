@@ -308,7 +308,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   route:
-    if: \${{ github.event.issue.pull_request && github.event.comment.user.type != 'Bot' }}
+    if: \${{ github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && (startsWith(github.event.comment.body, '/crewbie fix') || startsWith(github.event.comment.body, '/crewbie revise')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

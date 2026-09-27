@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
-    if: \${{ (github.event_name == 'issues' && github.event.label.name == '${PLANNING_LABEL}') || github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot') }}
+    if: \${{ (github.event_name == 'issues' && github.event.label.name == '${PLANNING_LABEL}') || github.event_name == 'workflow_dispatch' || (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
