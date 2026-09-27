@@ -1,7 +1,7 @@
 import { parseDocument, isMap, isSeq } from "yaml";
 import { agentArchivePath, type Config, type Role } from "../config.js";
 import { agentPrompt, optionalText, safePath } from "../core.js";
-import { MANAGED_END, profile } from "./templates.js";
+import { charterTools, MANAGED_END, profile } from "./templates.js";
 import { removeAutoLoadedPointers } from "./auto-loaded.js";
 
 export async function roleProfile(root: string, role: Role, config: Config): Promise<string> {
@@ -21,6 +21,7 @@ export function adoptedProfile(role: Role, config: Config, original: string): st
   const document = parseDocument(header ? header[1]! : `name: crewbie-${role.id}\n`, { uniqueKeys: true });
   if (document.errors.length || !isMap(document.contents)) throw new Error(`Agent frontmatter must be a valid YAML mapping: ${role.sourceAgent}`);
   if (document.has("tools") && !isSeq(document.get("tools"))) throw new Error(`Preserve tool restrictions by converting ${role.sourceAgent}'s tools to a reviewed YAML list before adoption.`);
+  if (!document.has("tools")) document.set("tools", charterTools(role));
   document.set("name", `crewbie-${role.id}`);
   if (!document.has("description")) document.set("description", role.purpose);
   // Assignment and an inherited frontmatter model must not disagree.

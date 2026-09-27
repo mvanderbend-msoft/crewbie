@@ -76,6 +76,15 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
   assert.match(profile({ id: "reviewer", purpose: "Review.", model: "" }, config()), /findings.*evidence/i);
 });
 
+test("generated charters declare only the tools their role needs", () => {
+  for (const role of ["coordinator", "improver"]) {
+    const charter = YAML.parse(profile({ id: role, purpose: `${role} purpose.`, model: "" }, config()));
+    assert.deepEqual(charter.tools, ["read", "search"]);
+  }
+  const specialist = YAML.parse(profile({ id: "developer", purpose: "Develop.", model: "" }, config()));
+  assert.deepEqual(specialist.tools, ["read", "search", "edit", "execute"]);
+});
+
 test("domain charters contain distinct checks, invariants and reviewed repository guidance", () => {
   const frontend = profile({ id: "frontend", purpose: "User interface.", model: "approved-model", checks: ["npm run build"], nonNegotiables: ["Preserve unsaved product edits."] }, config());
   const backend = profile({ id: "backend", purpose: "Services.", model: "approved-model" }, config());

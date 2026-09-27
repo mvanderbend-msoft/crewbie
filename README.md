@@ -238,7 +238,9 @@ use the following crew; a smaller project should need fewer implementation roles
 | **Reviewer** | GitHub cloud agent | Independent findings tied to the exact commits reviewed. |
 | **Improver** | Scheduled GitHub Actions | Bounded, evidence-backed guidance proposals; opt-in execution. |
 
-Each agent profile **is its charter**, with its own bounded history. Shared
+Each agent profile **is its charter**, with its own bounded history. Generated
+charters declare only the Copilot tools needed for their role; the coordinator
+and improver are limited to repository reading and search. Shared
 working rules live once in `.crewbie\instructions.md`. Reviewed `checks` and
 `nonNegotiables` can add repository-specific requirements without repeating
 generic boilerplate. A provisioned role does not run on every task.
