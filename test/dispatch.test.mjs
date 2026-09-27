@@ -811,7 +811,7 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
     assert.match(outcome.reason, /every check passed/);
     const partial = renderReview(cfg, { schemaVersion: 1, pr: 101, head: HEAD, task: { issue: 1, branch: BRANCH },
       role: "developer", runId: 55, omitted: ["src/hidden.ts"] }, parseReview('{"verdict":"pass","summary":"Partial.","findings":[]}'));
-    assert.match(partial, /will not auto-merge this task PR; review the omitted patches and merge it yourself/);
+    assert.match(partial, /will not auto-merge this task PR; review the omitted patches and merge it into `crewbie\/feature-[0-9a-f]{8}` yourself/);
     reviewFixture.prComments[101].push({ user: { login: "github-actions[bot]" }, created_at: "new", updated_at: "new", body: partial });
     assert.match((await autoMerge(user, cfg, 101, HEAD)).reason, /omitted patches/);
     reviewFixture.prComments[101].pop();

@@ -79,6 +79,7 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   const ran = runs.check_runs.map((run) => record(run, "check run")).filter((run) => run.conclusion !== "action_required");
   const waiting = checksPassed(ran, statuses);
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
+  // No CI (including branch-filtered or approval-held runs) cannot prove a task's tests passed.
   if (!ran.length && !statuses.length) return { merged: false, reason: "No CI checks ran on this task head; verify its tests and merge it manually." };
   const reviewer = reviewerFor(config);
   if (!reviewer) return { merged: false, reason: "Task acceptance review is disabled; review the task's criteria and merge it manually." };
