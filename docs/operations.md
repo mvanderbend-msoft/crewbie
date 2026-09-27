@@ -944,8 +944,8 @@ Changing a task's kind invalidates its approval like other scope changes.
   and keeps its planning-revision meaning on planning PRs. The fix job prefilters
   comments for `/crewbie` and an OWNER, MEMBER or COLLABORATOR association;
   Crewbie still checks the exact command, non-bot identity and actual write access.
-  Crewbie handles each
-  comment ID once, first tries to merge the default branch into the feature branch
+  Crewbie handles each comment ID once, first tries to merge the default
+  branch into the feature branch
   through the GitHub merges API. Each finding goes to the specialist whose merged
   task PR changed the affected file (falling back to directory overlap, then the
   first non-review task owner), and each specialist gets one fix task with only
