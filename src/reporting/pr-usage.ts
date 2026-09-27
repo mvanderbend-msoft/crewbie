@@ -6,7 +6,7 @@ import { cloudTasks } from "../tracking/native.js";
 export interface PrUsage {
   sessions: number; measuredSessions: number; inputTokens: number | null; outputTokens: number | null;
   cachedInputTokens: number | null; uncachedInputTokens: number | null;
-  credits: null; sources: string[]; warnings: string[];
+  credits: null; sources: string[]; warnings: string[]; coverageIncomplete: boolean;
   /** Wall-clock minutes of completed workflow runs on the PR head branch (agent sessions and CI); not billed minutes. */
   actionsMinutes: number | null; actionsRuns: number;
 }
@@ -19,6 +19,7 @@ export function parseUsageLog(log: string): { sessionId: string; inputTokens: nu
   for (const match of log.matchAll(/\[cca-engine\] turn=(\d+) assistant\.usage: model=\S+ input=(\d+) output=(\d+)(?: input_cached=(\d+))?(?=\s|$)/g)) {
     const cachedInput = match[4] === undefined ? null : integer(Number(match[4]), "cached input tokens", 0, Number.MAX_SAFE_INTEGER);
     const value = { input: integer(Number(match[2]), "input tokens", 0, Number.MAX_SAFE_INTEGER), output: integer(Number(match[3]), "output tokens", 0, Number.MAX_SAFE_INTEGER), cachedInput };
+    // A cache hit is part of input usage, so an invalid split cannot contribute totals.
     if (cachedInput !== null && cachedInput > value.input) return null;
     const prior = turns.get(match[1]!);
     if (prior && (prior.input !== value.input || prior.output !== value.output || prior.cachedInput !== value.cachedInput)) return null;
@@ -42,7 +43,7 @@ function actionsLog(repository: string, runId: number): string {
 }
 
 export async function collectPrUsage(client: GitHubApi, repository: string, pr: Record<string, unknown>, readLog = actionsLog): Promise<PrUsage> {
-  const result: PrUsage = { sessions: 0, measuredSessions: 0, inputTokens: null, outputTokens: null, cachedInputTokens: null, uncachedInputTokens: null, credits: null, sources: [], warnings: [], actionsMinutes: null, actionsRuns: 0 };
+  const result: PrUsage = { sessions: 0, measuredSessions: 0, inputTokens: null, outputTokens: null, cachedInputTokens: null, uncachedInputTokens: null, credits: null, sources: [], warnings: [], coverageIncomplete: false, actionsMinutes: null, actionsRuns: 0 };
   const head = string(record(pr.head, "PR head").ref, "PR branch");
   try { await actionsTime(client, repository, head, result); }
   catch (error) {
@@ -51,7 +52,7 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
   }
   try {
     const native = await cloudTasks(client, repository);
-    if (native.warning) { result.warnings.push(native.warning); return result; }
+    if (native.warning) { coverageWarning(result, native.warning); return result; }
     const sessions = new Set<string>();
     for (const task of native.tasks) {
       if (!Array.isArray(task.artifacts) || !task.artifacts.some((raw) => {
@@ -61,8 +62,8 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
       const id = string(task.id, "task ID");
       if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("Invalid native task ID.");
       const detail = record(await client.request("GET", `/agents/repos/${repository}/tasks/${id}`), "native task");
-      if (!Array.isArray(detail.sessions)) { result.warnings.push("Native session detail is unavailable."); continue; }
-      if (detail.session_count !== detail.sessions.length) result.warnings.push("Native session coverage is incomplete.");
+      if (!Array.isArray(detail.sessions)) { coverageWarning(result, "Native session detail is unavailable."); continue; }
+      if (detail.session_count !== detail.sessions.length) coverageWarning(result, "Native session coverage is incomplete.");
       for (const raw of detail.sessions) {
         const session = record(raw, "native session");
         const sessionId = string(session.id, "session ID");
@@ -71,7 +72,7 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
       }
     }
     result.sessions = sessions.size;
-    if (!sessions.size) { result.warnings.push("No attributable native sessions found."); return result; }
+    if (!sessions.size) { coverageWarning(result, "No attributable native sessions found."); return result; }
     const measured = new Set<string>(), runs = new Set<number>();
     let cacheSplitComplete = true;
     for (let page = 1; page <= 100; page++) {
@@ -90,10 +91,10 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
         try { usage = parseUsageLog(readLog(repository, id)); }
         catch (error) {
           if (!(error instanceof UsageUnavailable)) throw error;
-          result.warnings.push(error.message); continue;
+          coverageWarning(result, error.message); continue;
         }
-        if (!usage || !sessions.has(usage.sessionId)) { result.warnings.push(`Run ${id} has no verifiable session-token record.`); continue; }
-        if (measured.has(usage.sessionId)) { result.warnings.push("Multiple runs reference one session; repeated session usage was excluded."); continue; }
+        if (!usage || !sessions.has(usage.sessionId)) { coverageWarning(result, `Run ${id} has no verifiable session-token record.`); continue; }
+        if (measured.has(usage.sessionId)) { coverageWarning(result, "Multiple runs reference one session; repeated session usage was excluded."); continue; }
         measured.add(usage.sessionId);
         result.measuredSessions = measured.size;
         result.inputTokens = (result.inputTokens ?? 0) + usage.inputTokens;
@@ -103,13 +104,13 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
           result.cachedInputTokens = (result.cachedInputTokens ?? 0) + usage.cachedInputTokens;
           result.uncachedInputTokens = (result.uncachedInputTokens ?? 0) + usage.uncachedInputTokens;
         }
-        if (!Number.isSafeInteger(result.inputTokens + result.outputTokens)) throw new Error("PR token totals exceed safe integer limits.");
+        if (!Number.isSafeInteger(result.inputTokens + result.outputTokens) || !Number.isSafeInteger(result.cachedInputTokens ?? 0) || !Number.isSafeInteger(result.uncachedInputTokens ?? 0)) throw new Error("PR token totals exceed safe integer limits.");
         result.sources.push(`https://github.com/${repository}/actions/runs/${id}`);
       }
       if (response.workflow_runs.length < 100) break;
-      if (page === 100) result.warnings.push("Actions run coverage exceeded the pagination bound.");
+      if (page === 100) coverageWarning(result, "Actions run coverage exceeded the pagination bound.");
     }
-    if (measured.size !== sessions.size) result.warnings.push("Some native sessions have missing, unsupported or pending logs.");
+    if (measured.size !== sessions.size) coverageWarning(result, "Some native sessions have missing, unsupported or pending logs.");
     if (!cacheSplitComplete) {
       result.cachedInputTokens = null;
       result.uncachedInputTokens = null;
@@ -119,11 +120,16 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
     return result;
   } catch (error) {
     if (error instanceof GitHubError && [403, 404, 410].includes(error.status)) {
-      result.warnings.push(`Usage coverage is unavailable (HTTP ${error.status}).`);
+      coverageWarning(result, `Usage coverage is unavailable (HTTP ${error.status}).`);
       return result;
     }
     throw error;
   }
+}
+
+function coverageWarning(result: PrUsage, warning: string): void {
+  result.warnings.push(warning);
+  result.coverageIncomplete = true;
 }
 
 const RUN_PAGES = 10;
@@ -154,5 +160,5 @@ export function renderPrUsage(usage: PrUsage): string {
     : `${usage.inputTokens + usage.outputTokens} (${usage.inputTokens} input + ${usage.outputTokens} output)`;
   const cache = usage.cachedInputTokens === null || usage.uncachedInputTokens === null ? "unavailable"
     : `${usage.cachedInputTokens} cached + ${usage.uncachedInputTokens} uncached`;
-  return `**Observed tokens:** ${tokens}; **Input cache:** ${cache}; ${usage.sessions ? `${usage.measuredSessions}/${usage.sessions} known sessions` : "session coverage unavailable"}. **AI credits:** unavailable (API scaling unverified). **Actions time:** ${usage.actionsMinutes === null ? "unavailable" : `${usage.actionsMinutes} min wall-clock across ${usage.actionsRuns} runs (not billed minutes)`}. Main-session log counts, not an invoice or unique-context count; unreported subagent/tool usage is excluded.${usage.sources.length ? ` [Evidence](${usage.sources[0]})` : ""}${usage.warnings.some((warning) => !warning.startsWith("AI-credit") && !warning.startsWith("Cache-token")) ? " Coverage incomplete; inspect session logs." : ""}`;
+  return `**Observed tokens:** ${tokens}; **Input cache:** ${cache}; ${usage.sessions ? `${usage.measuredSessions}/${usage.sessions} known sessions` : "session coverage unavailable"}. **AI credits:** unavailable (API scaling unverified). **Actions time:** ${usage.actionsMinutes === null ? "unavailable" : `${usage.actionsMinutes} min wall-clock across ${usage.actionsRuns} runs (not billed minutes)`}. Main-session log counts, not an invoice or unique-context count; unreported subagent/tool usage is excluded.${usage.sources.length ? ` [Evidence](${usage.sources[0]})` : ""}${usage.coverageIncomplete ? " Coverage incomplete; inspect session logs." : ""}`;
 }
