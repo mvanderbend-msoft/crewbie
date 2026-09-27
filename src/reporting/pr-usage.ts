@@ -6,8 +6,9 @@ import { cloudTasks } from "../tracking/native.js";
 export interface PrUsage {
   sessions: number; measuredSessions: number; inputTokens: number | null; outputTokens: number | null;
   cachedInputTokens: number | null; uncachedInputTokens: number | null;
+  credits: null; sources: string[]; warnings: string[];
   /** True only when token/session coverage, rather than an informational measurement, is incomplete. */
-  credits: null; sources: string[]; warnings: string[]; coverageIncomplete: boolean;
+  coverageIncomplete: boolean;
   /** Wall-clock minutes of completed workflow runs on the PR head branch (agent sessions and CI); not billed minutes. */
   actionsMinutes: number | null; actionsRuns: number;
 }
