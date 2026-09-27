@@ -131,7 +131,7 @@ export async function assessInstructions(root: string, paths: readonly string[])
         recommendation: "Review relevance and domain scope. Keep necessary shared policy; move justified domain rules behind scoped instructions or nested AGENTS.md, with source reductions and destination edits reviewed together." });
     }
     const frontmatter = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text)?.[0];
-    const frontmatterEndLine = frontmatter === undefined ? 0 : lines.indexOf("---", 1) + 1;
+    const frontmatterEndLine = frontmatter === undefined ? 0 : lines.findIndex((line, index) => index > 0 && line.trim() === "---") + 1;
     const semantic = lines.map((line, index) => ({ text: line.replace(/^\s*[-*]\s*/, "").trim(), line: index + 1 }))
       .filter((line) => line.line > frontmatterEndLine)
       .filter((line) => line.text && !line.text.startsWith("#") && !line.text.startsWith("<!--"));
