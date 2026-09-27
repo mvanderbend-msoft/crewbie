@@ -77,11 +77,12 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
 });
 
 test("generated charters declare only the tools their role needs", () => {
+  const frontmatter = (charter) => YAML.parse(/^---\n([\s\S]*?)\n---/.exec(charter)[1]);
   for (const role of ["coordinator", "improver"]) {
-    const charter = YAML.parse(profile({ id: role, purpose: `${role} purpose.`, model: "" }, config()));
+    const charter = frontmatter(profile({ id: role, purpose: `${role} purpose.`, model: "" }, config()));
     assert.deepEqual(charter.tools, ["read", "search"]);
   }
-  const specialist = YAML.parse(profile({ id: "developer", purpose: "Develop.", model: "" }, config()));
+  const specialist = frontmatter(profile({ id: "developer", purpose: "Develop.", model: "" }, config()));
   assert.deepEqual(specialist.tools, ["read", "search", "edit", "execute"]);
 });
 

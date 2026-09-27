@@ -28,8 +28,12 @@ export const PR_TEMPLATE = `## What changed
 export const MANAGED_START = "<!-- crewbie:managed:start (Crewbie refreshes this block on update; your text outside it is kept) -->";
 export const MANAGED_END = "<!-- crewbie:managed:end -->";
 
+const READ_ONLY_ROLES = new Set(["coordinator", "improver"]);
+const READ_ONLY_TOOLS = ["read", "search"];
+const WORKING_TOOLS = ["read", "search", "edit", "execute"];
+
 export function charterTools(role: Role): string[] {
-  return ["coordinator", "improver"].includes(role.id) ? ["read", "search"] : ["read", "search", "edit", "execute"];
+  return [...(READ_ONLY_ROLES.has(role.id) ? READ_ONLY_TOOLS : WORKING_TOOLS)];
 }
 
 export function profile(role: Role, config: Config): string {
