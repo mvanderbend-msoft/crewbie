@@ -941,9 +941,9 @@ Changing a task's kind invalidates its approval like other scope changes.
 - **Feature-PR fix comments.** A write-access human can comment `/crewbie fix`
   on the feature PR, optionally followed by notes, after a Crewbie
   changes-requested review. `/crewbie revise` has the same meaning on feature PRs
-  and keeps its planning-revision meaning on planning PRs. The fix job starts
-  only for comments beginning with either command from an OWNER, MEMBER or
-  COLLABORATOR who is not a bot; Crewbie still checks actual write access.
+  and keeps its planning-revision meaning on planning PRs. The fix job prefilters
+  comments for `/crewbie` and an OWNER, MEMBER or COLLABORATOR association;
+  Crewbie still checks the exact command, non-bot identity and actual write access.
   Crewbie handles each
   comment ID once, first tries to merge the default branch into the feature branch
   through the GitHub merges API. Each finding goes to the specialist whose merged

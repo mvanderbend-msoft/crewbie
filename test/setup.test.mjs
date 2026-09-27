@@ -202,8 +202,7 @@ test("comment-triggered jobs prefilter trusted associations and fix commands", (
     assert.match(condition, /github\.event\.comment\.user\.type != 'Bot'/);
     assert.match(condition, /contains\(fromJSON\('\["OWNER","MEMBER","COLLABORATOR"\]'\), github\.event\.comment\.author_association\)/);
   }
-  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/crewbie fix'\)/);
-  assert.match(fix, /startsWith\(github\.event\.comment\.body, '\/crewbie revise'\)/);
+  assert.match(fix, /contains\(github\.event\.comment\.body, '\/crewbie'\)/);
   assert.doesNotMatch(planning, /startsWith\(github\.event\.comment\.body/, "Planning PR question replies need not start with a command.");
 });
 
