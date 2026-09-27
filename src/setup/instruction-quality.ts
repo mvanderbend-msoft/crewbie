@@ -131,7 +131,7 @@ export async function assessInstructions(root: string, paths: readonly string[])
         recommendation: "Review relevance and domain scope. Keep necessary shared policy; move justified domain rules behind scoped instructions or nested AGENTS.md, with source reductions and destination edits reviewed together." });
     }
     const frontmatter = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text)?.[0];
-    const frontmatterEndLine = frontmatter === undefined ? 0 : (frontmatter.match(/\n/g) ?? []).length;
+    const frontmatterEndLine = frontmatter === undefined ? 0 : lines.indexOf("---", 1) + 1;
     const semantic = lines.map((line, index) => ({ text: line.replace(/^\s*[-*]\s*/, "").trim(), line: index + 1 }))
       .filter((line) => line.line > frontmatterEndLine)
       .filter((line) => line.text && !line.text.startsWith("#") && !line.text.startsWith("<!--"));
@@ -213,16 +213,18 @@ export async function assessInstructions(root: string, paths: readonly string[])
         }
         if (!line.includes("--if-present")) {
           const npmScripts = [...line.matchAll(/\bnpm\s+run\s+([a-zA-Z0-9:_-]+)/g)];
-          if (npmScripts.length && !scopedManifests.length) {
-            add({ code: "missing-package-manifest", level: "warning", path, line: index + 1,
-              detail: "A literal npm run command has no package.json in this instruction scope to establish its working directory or script.",
-              recommendation: "Verify the command's working directory. Add the relevant package manifest to the repository or make the guidance name the intended package location." });
-          } else if (scopedManifests.every((manifest) => scripts.has(manifest))) {
-            for (const match of npmScripts) {
-              if (scopedManifests.some((manifest) => scripts.get(manifest)!.has(match[1]!))) continue;
-              add({ code: "missing-npm-script", level: "warning", path, line: index + 1,
-                detail: "A literal npm run command names no script in any inspected package manifest within this instruction scope.",
-                recommendation: "Verify the command and working directory against the current manifest. Correct stale guidance instead of creating a script solely to satisfy it." });
+          if (npmScripts.length) {
+            if (!scopedManifests.length) {
+              add({ code: "missing-package-manifest", level: "warning", path, line: index + 1,
+                detail: "A literal npm run command has no package.json in this instruction scope to establish its working directory or script.",
+                recommendation: "Verify the command's working directory. Add the relevant package manifest to the repository or make the guidance name the intended package location." });
+            } else if (scopedManifests.every((manifest) => scripts.has(manifest))) {
+              for (const match of npmScripts) {
+                if (scopedManifests.some((manifest) => scripts.get(manifest)!.has(match[1]!))) continue;
+                add({ code: "missing-npm-script", level: "warning", path, line: index + 1,
+                  detail: "A literal npm run command names no script in any inspected package manifest within this instruction scope.",
+                  recommendation: "Verify the command and working directory against the current manifest. Correct stale guidance instead of creating a script solely to satisfy it." });
+              }
             }
           }
         }
