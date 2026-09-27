@@ -6,6 +6,7 @@ import { cloudTasks } from "../tracking/native.js";
 export interface PrUsage {
   sessions: number; measuredSessions: number; inputTokens: number | null; outputTokens: number | null;
   cachedInputTokens: number | null; uncachedInputTokens: number | null;
+  /** True only when token/session coverage, rather than an informational measurement, is incomplete. */
   credits: null; sources: string[]; warnings: string[]; coverageIncomplete: boolean;
   /** Wall-clock minutes of completed workflow runs on the PR head branch (agent sessions and CI); not billed minutes. */
   actionsMinutes: number | null; actionsRuns: number;
@@ -17,10 +18,11 @@ export function parseUsageLog(log: string): { sessionId: string; inputTokens: nu
   if (sessions.size !== 1) return null;
   const turns = new Map<string, { input: number; output: number; cachedInput: number | null }>();
   for (const match of log.matchAll(/\[cca-engine\] turn=(\d+) assistant\.usage: model=\S+ input=(\d+) output=(\d+)(?: input_cached=(\d+))?(?=\s|$)/g)) {
-    const cachedInput = match[4] === undefined ? null : integer(Number(match[4]), "cached input tokens", 0, Number.MAX_SAFE_INTEGER);
-    const value = { input: integer(Number(match[2]), "input tokens", 0, Number.MAX_SAFE_INTEGER), output: integer(Number(match[3]), "output tokens", 0, Number.MAX_SAFE_INTEGER), cachedInput };
-    // A cache hit is part of input usage, so an invalid split cannot contribute totals.
-    if (cachedInput !== null && cachedInput > value.input) return null;
+    const reportedCachedInput = match[4] === undefined ? null : integer(Number(match[4]), "cached input tokens", 0, Number.MAX_SAFE_INTEGER);
+    const input = integer(Number(match[2]), "input tokens", 0, Number.MAX_SAFE_INTEGER);
+    // A cache hit is part of input usage; an invalid split does not invalidate total token telemetry.
+    const cachedInput = reportedCachedInput !== null && reportedCachedInput <= input ? reportedCachedInput : null;
+    const value = { input, output: integer(Number(match[3]), "output tokens", 0, Number.MAX_SAFE_INTEGER), cachedInput };
     const prior = turns.get(match[1]!);
     if (prior && (prior.input !== value.input || prior.output !== value.output || prior.cachedInput !== value.cachedInput)) return null;
     turns.set(match[1]!, value);

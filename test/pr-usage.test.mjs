@@ -27,7 +27,7 @@ function fixture() {
 test("usage parsing deduplicates exact log repetition and rejects conflicting counts or session identity", () => {
   assert.deepEqual(parseUsageLog(log(session("a")) + log(session("a"))), { sessionId: session("a"), inputTokens: 10, outputTokens: 3, cachedInputTokens: null, uncachedInputTokens: null });
   assert.equal(parseUsageLog(log(session("a")) + log(session("a"), 11)), null);
-  assert.equal(parseUsageLog(log(session("a"), 10, 3, 11)), null);
+  assert.deepEqual(parseUsageLog(log(session("a"), 10, 3, 11)), { sessionId: session("a"), inputTokens: 10, outputTokens: 3, cachedInputTokens: null, uncachedInputTokens: null });
   assert.equal(parseUsageLog(log(session("a")) + log(session("b"))), null);
   assert.equal(parseUsageLog("[cca-engine] turn=1 assistant.usage: model=x input=1 output=2"), null);
 });
