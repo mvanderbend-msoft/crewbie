@@ -1,5 +1,6 @@
-import { mergeFor, type Config } from "../config.js";
+import { mergeFor, reviewerFor, type Config } from "../config.js";
 import { GitHubError, integer, record, string } from "../core.js";
+import { requestReview, trustedReview } from "./pr-review.js";
 import type { GitHubApi } from "../tracking/github.js";
 
 /** Copilot leaves finished PRs as drafts; Crewbie marks them ready once the session completed and attribution ran. */
@@ -75,11 +76,16 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   }
   const combined = record(await checks.request("GET", `${prefix}/commits/${head}/status`), "commit status");
   const statuses = Array.isArray(combined.statuses) ? combined.statuses.map((status) => record(status, "commit status")) : [];
-  // Crewbie assumes no CI and no Actions settings: checks that ran must pass, but none running (no CI, branch filters or
-  // runs held for approval) does not block, because the human-merged feature PR into the default branch is the gate.
   const ran = runs.check_runs.map((run) => record(run, "check run")).filter((run) => run.conclusion !== "action_required");
   const waiting = checksPassed(ran, statuses);
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
+  if (!ran.length && !statuses.length) return { merged: false, reason: "No CI checks ran on this task head; verify its tests and merge it manually." };
+  const reviewer = reviewerFor(config);
+  if (!reviewer) return { merged: false, reason: "Task acceptance review is disabled; review the task's criteria and merge it manually." };
+  const review = await trustedReview(client, config, number, head);
+  if (!review) return { merged: false, reason: await requestReview(client, config, number, head) };
+  if (review.verdict !== "pass") return { merged: false, reason: `crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}; fix the task PR before it merges.` };
+  if (review.partial) return { merged: false, reason: "The task review omitted patches; review them and merge manually." };
   if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };
   if (pr.mergeable !== true) return { merged: false, reason: "GitHub is still computing mergeability; Crewbie retries on its next run." };
   try {
@@ -91,6 +97,5 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
     }
     throw error;
   }
-  const verified = ran.length || statuses.length ? "every check passed" : "no checks ran on it; the feature PR is where it gets tested";
-  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)} into ${string(record(pr.base, "PR base").ref, "base branch")}: the session completed and ${verified}.` };
+  return { merged: true, reason: `Auto-merged ${head.slice(0, 7)} into ${string(record(pr.base, "PR base").ref, "base branch")}: the session completed, every check passed and the task review passed.` };
 }

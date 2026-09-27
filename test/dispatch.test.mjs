@@ -585,7 +585,7 @@ function reviewComment(fixture, cfg, runId, findings, { head = HEAD, login = "gi
   (fixture.prComments[101] ??= []).push({ user: { type: "Bot", login }, created_at: `r${runId}`, updated_at: `r${runId}`, body, html_url: "https://comment" });
 }
 
-test("a finished task PR of a feature plan merges into the feature branch once every check passes, without a review", async () => {
+test("a finished task PR merges only after its own checks and trusted acceptance review pass", async () => {
   const cfg = reviewing({ maxActive: 1 });
   const fixture = githubFixture();
   await dispatch(fixture.client, cfg);
@@ -602,10 +602,21 @@ test("a finished task PR of a feature plan merges into the feature branch once e
   fixture.checkRuns[0] = { ...fixture.checkRuns[0], status: "completed", conclusion: "success" };
   fixture.checkRuns.push({ id: 5, name: "ci", status: "completed", conclusion: "action_required", app: { slug: "github-actions" } });
   work = await dispatch(fixture.client, cfg);
+  assert.equal(fixture.merges.length, 0);
+  assert.deepEqual(fixture.reviewRequests, [{ ref: "main", inputs: { pr: "101", head: HEAD } }]);
+  reviewRun(fixture, 55);
+  reviewComment(fixture, cfg, 55, [{ severity: "blocking", path: "docs/CHANGELOG.md", line: 1, body: "Required entry is absent." }]);
+  work = await dispatch(fixture.client, cfg);
+  assert.equal(fixture.merges.length, 0, "A task with a missed deliverable cannot merge despite green CI.");
+  assert.match(work[0].reason, /requested changes/);
+  fixture.prComments[101] = [];
+  reviewRun(fixture, 56);
+  reviewComment(fixture, cfg, 56, []);
+  work = await dispatch(fixture.client, cfg);
   assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD, merge_method: "squash" }]);
   assert.equal(work[0].state, "done");
   assert.match(work[0].reason, /into crewbie\/feature-[0-9a-f]{8}/);
-  assert.equal(fixture.reviewRequests.length, 0, "Task PRs are not reviewed.");
+  assert.equal(fixture.reviewRequests.length, 1, "Task review runs once for this head.");
   assert.equal(fixture.featurePulls.length, 0, "The feature PR waits for every task.");
   assert.equal(work.find((item) => item.issue.number === 2).reason, `Waiting for foundation to merge into ${BRANCH}.`);
 });
@@ -765,11 +776,20 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
   const { autoMerge, CHECK_READER } = await import("../dist/execution/merge.js");
   const merges = [];
   let files = [];
-  const user = { async list(path) { assert.match(path, /\/pulls\/101\/files$/); return files; }, async request(method, path, body) {
+  const cfg = reviewing();
+  const reviewFixture = githubFixture();
+  reviewRun(reviewFixture, 55);
+  reviewComment(reviewFixture, cfg, 55, []);
+  const user = { async list(path) {
+    if (path.endsWith("/issues/101/comments")) return reviewFixture.prComments[101];
+    assert.match(path, /\/pulls\/101\/files$/); return files;
+  }, async request(method, path, body) {
     if (path.includes("/check-runs") || path.endsWith("/status")) throw new GitHubError(403, "Resource not accessible by personal access token");
     if (method === "GET" && path.endsWith("/pulls/101")) return { state: "open", draft: false, mergeable: true, head: { sha: HEAD }, base: { ref: BRANCH } };
     if (method === "PUT" && path.endsWith("/pulls/101/merge")) { merges.push(body); return { merged: true }; }
     if (method === "GET" && path === "/repos/example/project") return { default_branch: "main" };
+    if (method === "GET" && path.endsWith("/actions/runs/55")) return reviewFixture.reviewRuns[0];
+    if (path.includes("/collaborators/")) return { permission: "write" };
     if (method === "GET" && path === "/repos/example/project/contents/.github/workflows/ci.yml?ref=main") return { sha: "main-blob" };
     if (method === "GET" && path.startsWith("/repos/example/project/contents/")) throw new GitHubError(404, null);
     throw new Error(`Unexpected ${method} ${path}`);
@@ -780,22 +800,30 @@ test("auto-merge reads checks with the job's checks token, so the user credentia
     return path.includes("/check-runs") ? { total_count: 1, check_runs: [{ id: 1, name: "build", status: "completed", conclusion: "success", app: { slug: "github-actions" } }] } : { statuses: [] };
   } };
   try {
-    const outcome = await autoMerge(user, config({ merge: { method: "squash" } }), 101, HEAD);
+    const outcome = await autoMerge(user, cfg, 101, HEAD);
     assert.equal(outcome.merged, true, outcome.reason);
     assert.deepEqual(merges, [{ sha: HEAD, merge_method: "squash" }]);
     assert.equal(reads.length, 2);
     assert.match(outcome.reason, /every check passed/);
+    const partial = renderReview(cfg, { schemaVersion: 1, pr: 101, head: HEAD, task: { issue: 1, branch: BRANCH },
+      role: "developer", runId: 55, omitted: ["src/hidden.ts"] }, parseReview('{"verdict":"pass","summary":"Partial.","findings":[]}'));
+    reviewFixture.prComments[101].push({ user: { login: "github-actions[bot]" }, created_at: "new", updated_at: "new", body: partial });
+    assert.match((await autoMerge(user, cfg, 101, HEAD)).reason, /omitted patches/);
+    reviewFixture.prComments[101].pop();
+    assert.match((await autoMerge(user, config(), 101, HEAD)).reason, /review is disabled/);
+    assert.equal(merges.length, 1);
     CHECK_READER.client = { async request(method, path) { return path.includes("/check-runs") ? { total_count: 0, check_runs: [] } : { statuses: [] }; } };
     const bare = await autoMerge(user, config(), 101, HEAD);
-    assert.equal(bare.merged, true, "A repository without CI still gets its task PRs merged into the feature branch.");
-    assert.match(bare.reason, /no checks ran on it; the feature PR is where it gets tested/);
+    assert.equal(bare.merged, false, "A repository without CI must not auto-merge task PRs.");
+    assert.match(bare.reason, /No CI checks ran/);
     files = [{ filename: ".github/workflows/ci.yml", status: "modified", sha: "agent-blob" }];
     const guarded = await autoMerge(user, config(), 101, HEAD);
     assert.equal(guarded.merged, false);
     assert.match(guarded.reason, /changes \.github\/workflows\/ci\.yml; review and merge it yourself/);
-    assert.equal(merges.length, 2, "Workflow changes are never auto-merged: they run with secrets on the feature branch.");
+    assert.equal(merges.length, 1, "Workflow changes are never auto-merged: they run with secrets on the feature branch.");
+    CHECK_READER.client = { async request(method, path) { return path.includes("/check-runs") ? { total_count: 1, check_runs: [{ id: 1, name: "build", status: "completed", conclusion: "success" }] } : { statuses: [] }; } };
     files = [{ filename: ".github/workflows/ci.yml", status: "modified", sha: "main-blob" }, { filename: ".github/workflows/old.yml", status: "removed", sha: "x" }];
-    const synced = await autoMerge(user, config(), 101, HEAD);
+    const synced = await autoMerge(user, cfg, 101, HEAD);
     assert.equal(synced.merged, true, "Workflow files identical to the default branch (merged in from it) do not need a person.");
     files = [{ filename: ".github/workflows/new.yml", status: "added", sha: "agent-blob" }];
     assert.equal((await autoMerge(user, config(), 101, HEAD)).merged, false, "A workflow the default branch lacks is still guarded.");

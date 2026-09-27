@@ -561,11 +561,11 @@ function labelsOf(issue: Record<string, unknown>): string[] {
   return issue.labels.map((label) => typeof label === "string" ? label : String(record(label, "label").name));
 }
 const activeSessions = (work: Work[]) => work.filter((other) => other.claimed && other.state !== "done" && other.sessionComplete !== true && other.sessionEnded !== true).length;
-/** After a completed session Crewbie marks the task PR ready and merges it into its feature branch once every check passed. */
+/** After a completed session Crewbie marks the task PR ready and merges it once its checks and task review pass. */
 async function afterSession(client: GitHubApi, config: Config, item: Work): Promise<string> {
   const pull = item.pull!;
   const lead = await markReady(client, pull) ? "Crewbie marked the PR ready for review. " : "";
-  // Copilot asks the assigning person to review every finished PR; task PRs merge without one, so only the feature PR asks.
+  // Copilot asks the assigning person to review every finished PR; task PRs receive a Crewbie review, not a human request.
   const people = (Array.isArray(pull.requested_reviewers) ? pull.requested_reviewers : []).map((user) => String(record(user, "requested reviewer").login));
   if (people.length) await client.request("DELETE", `/repos/${config.repository}/pulls/${integer(pull.number, "PR number")}/requested_reviewers`, { reviewers: people });
   const outcome = await autoMerge(client, config, integer(pull.number, "PR number"), string(record(pull.head, "PR head").sha, "PR head SHA"));
