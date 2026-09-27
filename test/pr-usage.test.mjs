@@ -47,6 +47,15 @@ test("PR usage aggregates attributable sessions and does not invent credit scali
   assert.match(renderPrUsage(result), /AI credits:\*\* unavailable/);
 });
 
+test("PR usage does not report a partial cache split as incomplete session coverage", async () => {
+  const f = fixture();
+  const result = await collectPrUsage(f.client, "example/project", f.pr, (_repo, run) => log(session(run === 1 ? "a" : "b"), 10, 3, run === 1 ? 4 : undefined));
+  assert.equal(result.cachedInputTokens, null);
+  assert.equal(result.uncachedInputTokens, null);
+  assert.ok(result.warnings.includes("Cache-token split was not exposed by every session log."));
+  assert.doesNotMatch(renderPrUsage(result), /Coverage incomplete/);
+});
+
 test("missing logs or denied telemetry stay explicitly partial/unknown, never zero", async () => {
   const f = fixture();
   const partial = await collectPrUsage(f.client, "example/project", f.pr, (_repo, run) => {

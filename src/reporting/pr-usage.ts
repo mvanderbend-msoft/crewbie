@@ -99,7 +99,7 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
         result.inputTokens = (result.inputTokens ?? 0) + usage.inputTokens;
         result.outputTokens = (result.outputTokens ?? 0) + usage.outputTokens;
         if (usage.cachedInputTokens === null || usage.uncachedInputTokens === null) cacheSplitComplete = false;
-        else if (cacheSplitComplete) {
+        else {
           result.cachedInputTokens = (result.cachedInputTokens ?? 0) + usage.cachedInputTokens;
           result.uncachedInputTokens = (result.uncachedInputTokens ?? 0) + usage.uncachedInputTokens;
         }
@@ -113,7 +113,7 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
     if (!cacheSplitComplete) {
       result.cachedInputTokens = null;
       result.uncachedInputTokens = null;
-      result.warnings.push("Cached-versus-uncached input tokens were not exposed by every session log.");
+      result.warnings.push("Cache-token split was not exposed by every session log.");
     }
     result.warnings.push("AI-credit amount scaling is undocumented in the task API; credits are not inferred from tokens or legacy multipliers.");
     return result;
@@ -154,5 +154,5 @@ export function renderPrUsage(usage: PrUsage): string {
     : `${usage.inputTokens + usage.outputTokens} (${usage.inputTokens} input + ${usage.outputTokens} output)`;
   const cache = usage.cachedInputTokens === null || usage.uncachedInputTokens === null ? "unavailable"
     : `${usage.cachedInputTokens} cached + ${usage.uncachedInputTokens} uncached`;
-  return `**Observed tokens:** ${tokens}; **Input cache:** ${cache}; ${usage.sessions ? `${usage.measuredSessions}/${usage.sessions} known sessions` : "session coverage unavailable"}. **AI credits:** unavailable (API scaling unverified). **Actions time:** ${usage.actionsMinutes === null ? "unavailable" : `${usage.actionsMinutes} min wall-clock across ${usage.actionsRuns} runs (not billed minutes)`}. Main-session log counts, not an invoice or unique-context count; unreported subagent/tool usage is excluded.${usage.sources.length ? ` [Evidence](${usage.sources[0]})` : ""}${usage.warnings.some((warning) => !warning.startsWith("AI-credit")) ? " Coverage incomplete; inspect session logs." : ""}`;
+  return `**Observed tokens:** ${tokens}; **Input cache:** ${cache}; ${usage.sessions ? `${usage.measuredSessions}/${usage.sessions} known sessions` : "session coverage unavailable"}. **AI credits:** unavailable (API scaling unverified). **Actions time:** ${usage.actionsMinutes === null ? "unavailable" : `${usage.actionsMinutes} min wall-clock across ${usage.actionsRuns} runs (not billed minutes)`}. Main-session log counts, not an invoice or unique-context count; unreported subagent/tool usage is excluded.${usage.sources.length ? ` [Evidence](${usage.sources[0]})` : ""}${usage.warnings.some((warning) => !warning.startsWith("AI-credit") && !warning.startsWith("Cache-token")) ? " Coverage incomplete; inspect session logs." : ""}`;
 }
