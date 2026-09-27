@@ -6,6 +6,7 @@ import YAML from "yaml";
 import { assess } from "../dist/setup/assessment.js";
 import { setupPrompt } from "../dist/setup/onboarding.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
+import { adoptedProfile } from "../dist/setup/agents.js";
 import { workflows, profile, SHARED_INSTRUCTIONS, SKILL } from "../dist/setup/templates.js";
 import { agentPrompt, bounded, hash, safePath } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
@@ -84,6 +85,12 @@ test("generated charters declare only the tools their role needs", () => {
   }
   const specialist = frontmatter(profile({ id: "developer", purpose: "Develop.", model: "" }, config()));
   assert.deepEqual(specialist.tools, ["read", "search", "edit", "execute"]);
+  const adopted = frontmatter(adoptedProfile(
+    { id: "coordinator", purpose: "Coordinate.", model: "", sourceAgent: ".github/agents/coordinator.agent.md" },
+    config(),
+    "---\nname: coordinator\ndescription: Coordinate.\n---\nCoordinate work.\n",
+  ));
+  assert.deepEqual(adopted.tools, ["read", "search"]);
 });
 
 test("domain charters contain distinct checks, invariants and reviewed repository guidance", () => {
