@@ -258,6 +258,7 @@ export function parsePlan(value: unknown, config: Config, source: Source): Plan 
 
 function prSummary(summary: string, path: string): string {
   if (words(summary) <= 100) return summary;
+  // Only publish whole sentences within the PR budget; the plan retains every word.
   const sentences: string[] = [];
   for (const sentence of summary.trim().split(/(?<=[.!?])\s+/u)) {
     if (!/[.!?]$/u.test(sentence) || words([...sentences, sentence].join(" ")) > 100) break;
