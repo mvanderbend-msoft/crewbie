@@ -193,6 +193,19 @@ test("generated workflows parse and never execute PR-head code", () => {
   assert.equal(report.jobs.report.steps.find((step) => step.name === "Build usage report").env.GH_TOKEN, "${{ github.token }}");
 });
 
+test("feature fix workflow routes only commands from human collaborators", () => {
+  const flow = YAML.parse(workflows()[".github/workflows/crewbie-fix.yml"]);
+  assert.deepEqual(flow.on.issue_comment.types, ["created"]);
+  const condition = flow.jobs.route.if;
+  assert.match(condition, /github\.event\.issue\.pull_request/);
+  assert.match(condition, /github\.event\.comment\.user\.type == 'User'/);
+  for (const role of ["OWNER", "MEMBER", "COLLABORATOR"]) {
+    assert.match(condition, new RegExp(`github\\.event\\.comment\\.author_association == '${role}'`));
+  }
+  assert.match(condition, /startsWith\(github\.event\.comment\.body, '\/crewbie fix'\)/);
+  assert.match(condition, /startsWith\(github\.event\.comment\.body, '\/crewbie revise'\)/);
+});
+
 test("ready-label workflow has an exact package fallback when CREWBIE_PACKAGE is unset", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const workflow = YAML.parse(workflows(false, true)[".github/workflows/crewbie-plan.yml"]);
