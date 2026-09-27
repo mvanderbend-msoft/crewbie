@@ -314,8 +314,8 @@ jobs:
           && (github.event.comment.author_association == 'OWNER'
               || github.event.comment.author_association == 'MEMBER'
               || github.event.comment.author_association == 'COLLABORATOR')
-          && (startsWith(github.event.comment.body, '/crewbie fix')
-              || startsWith(github.event.comment.body, '/crewbie revise')) }}
+          && (contains(github.event.comment.body, '/crewbie fix')
+              || contains(github.event.comment.body, '/crewbie revise')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

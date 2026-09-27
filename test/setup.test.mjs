@@ -202,8 +202,8 @@ test("feature fix workflow routes only commands from human collaborators", () =>
   for (const role of ["OWNER", "MEMBER", "COLLABORATOR"]) {
     assert.match(condition, new RegExp(`github\\.event\\.comment\\.author_association == '${role}'`));
   }
-  assert.match(condition, /startsWith\(github\.event\.comment\.body, '\/crewbie fix'\)/);
-  assert.match(condition, /startsWith\(github\.event\.comment\.body, '\/crewbie revise'\)/);
+  assert.match(condition, /contains\(github\.event\.comment\.body, '\/crewbie fix'\)/);
+  assert.match(condition, /contains\(github\.event\.comment\.body, '\/crewbie revise'\)/);
 });
 
 test("ready-label workflow has an exact package fallback when CREWBIE_PACKAGE is unset", async () => {
