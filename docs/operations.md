@@ -387,6 +387,10 @@ managed labels or bypass human execution approval to force a launch.
 
 The label **`crewbie:ready-for-planning`** is separate from the execution-state
 label `crewbie:ready`. It authorizes coordinator planning, not application work.
+The coordinator aims for a summary of at most 100 words. If it writes more,
+the complete summary stays in `plan.md`; the planning PR shows only complete
+sentences that fit within 100 words and points to the full plan. If no complete
+sentence fits, the PR points directly to `plan.md`.
 Enable it in a reviewed setup proposal:
 
 ```json

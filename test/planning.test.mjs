@@ -259,8 +259,22 @@ test("model output supports clarification and team suggestions, but cannot chang
   assert.throws(() => parsePlan({ ...custom, batch: null }, f.cfg, source), /clarification/);
   assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, approval: { digest: "fake", execute: true } } }, f.cfg, source), /cannot approve/);
   assert.throws(() => parsePlan({ ...custom, batch: { ...custom.batch, tasks: [{ ...task("wrong-model"), model: "other-model" }] } }, f.cfg, source), /owner\/model/);
-  assert.throws(() => parsePlan({ ...custom, summary: "word ".repeat(101) }, f.cfg, source), /100 words/);
   assert.throws(() => parsePlan({ ...custom, summary: "-----BEGIN PRIVATE KEY-----" }, f.cfg, source), /secret/);
+});
+
+test("long planning summaries stay intact in plan.md and use complete sentences in the PR", async (t) => {
+  const f = await planningFixture(t);
+  const sentences = ["first", "second", "third"].map((label) => `${label} ${"word ".repeat(44).trim()}.`);
+  const summary = sentences.join(" ");
+  await preparePlanning(f.root, f.client, f.cfg, f.event);
+  await f.output({ ...f.candidate, summary });
+  await publishPlanning(f.root, f.client, f.cfg);
+  const plan = f.state.tree.find((entry) => entry.path.endsWith("/plan.md")).content;
+  const body = f.state.pulls[0].body;
+  assert.ok(plan.includes(summary));
+  assert.ok(body.includes(sentences.slice(0, 2).join(" ")));
+  assert.ok(!body.includes(sentences[2]));
+  assert.match(body, /Full summary.*plan\.md/);
 });
 
 test("published plans list team suggestions without writing team files", async (t) => {
