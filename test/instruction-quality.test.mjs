@@ -52,7 +52,7 @@ test("generic-only agent charters are advisory, not a claim of measured harm", a
 });
 
 test("npm guidance without a scoped package manifest is reported", async (t) => {
-  const root = await fixture(t, { "AGENTS.md": "Run `npm run test`.\n" });
+  const root = await fixture(t, { "AGENTS.md": "Run `npm run lint` then `npm run test`.\n" });
   const quality = (await assess(root)).instructionQuality;
   assert.deepEqual(quality.signals.map((signal) => signal.code), ["missing-package-manifest"]);
   assert.equal(quality.signals[0].line, 1);
