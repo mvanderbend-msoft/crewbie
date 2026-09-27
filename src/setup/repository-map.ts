@@ -54,18 +54,21 @@ export function promptMap(map: RepositoryMap): { directories: string[]; director
 const REFERENCE = /(?<![\w/.:@~-])((?:\.{0,2}[\w@-][\w.@-]*\/)+(?:[\w.*@-]*[\w*])?\/?)(?![\w/(])/g;
 const PROSE = /^(?:and\/or|either\/or|input\/output|read\/write|yes\/no|on\/off|true\/false|client\/server|ci\/cd|i\/o|n\/a|w\/o|pass\/fail|get\/set|frontend\/backend|front-end\/back-end|pros\/cons|[a-z]+\/[a-z]+)$/i;
 
-/** Repository-relative path references in generated text: backticked code spans, and path-shaped words outside prose pairs. */
-export function pathReferences(text: string): string[] {
+/**
+ * Repository-relative path references in generated text: backticked code spans, and path-shaped words outside prose pairs.
+ * Module specifiers (node:x/y, @scope/pkg), placeholders (NNNN, <name>) and slash-joined words are not paths.
+ * An extensionless span counts only when its first segment is one of `roots`, the repository's top-level directories.
+ */
+export function pathReferences(text: string, roots: ReadonlySet<string> = new Set()): string[] {
   const found = new Set<string>();
   const spans = [...text.matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!.trim());
-  const withoutUrls = text.replace(/(?<![\w+.-])[a-z][\w+.-]{0,30}:\/\/\S+/gi, " ");
+  const withoutUrls = text.replace(/`[^`\n]+`/g, " ").replace(/(?<![\w+.-])[a-z][\w+.-]{0,30}:\/\/\S+/gi, " ");
   for (const [candidate, strict] of [...spans.map((span) => [span, true] as const), ...[...withoutUrls.matchAll(REFERENCE)].map((match) => [match[1]!, false] as const)]) {
     const path = candidate.replace(/^\.\//, "").replace(/[.,;:)]+$/, "");
-    if (!path.includes("/") || path.startsWith("/") || /\s|:\/\/|^[\w-]+\/[\w-]+#\d+$/.test(path) || path.startsWith("..")) continue;
+    if (!path.includes("/") || path.startsWith("/") || path.startsWith("@") || path.startsWith("..") || /[\s:<>{}]|^[\w-]+\/[\w-]+#\d+$|N{3,}|X{3,}|\.\.\./.test(path)) continue;
     const last = path.replace(/\/$/, "").split("/").at(-1)!;
-    // Outside code spans, only unmistakable paths: a file with an extension, a trailing slash, a glob, or three or more segments.
-    if (!strict && PROSE.test(path)) continue;
-    if (!strict && !(/\.[\w]+$/.test(last) || path.endsWith("/") || path.includes("*") || path.split("/").length >= 3)) continue;
+    const unmistakable = /\.[A-Za-z0-9]+$/.test(last) || path.endsWith("/") || path.includes("*");
+    if (strict ? !unmistakable && !roots.has(path.split("/")[0]!) : PROSE.test(path) || !(unmistakable || (path.split("/").length >= 3 && roots.has(path.split("/")[0]!)))) continue;
     found.add(path);
   }
   return [...found];
@@ -78,13 +81,16 @@ export function pathExists(map: RepositoryMap, reference: string): boolean {
   if (!base) return true;
   const files = map.files ?? [];
   if (glob !== -1) return files.some((file) => file.startsWith(base)) || map.directories.some((dir) => dir.startsWith(base));
-  return files.includes(base) || map.directories.includes(base) || files.some((file) => file.startsWith(`${base}/`));
+  if (files.includes(base) || map.directories.includes(base) || files.some((file) => file.startsWith(`${base}/`))) return true;
+  // Guidance inside a workspace often cites paths relative to that workspace (src/render.js for frontend/src/render.js).
+  return files.some((file) => file.endsWith(`/${base}`) || file.includes(`/${base}/`));
 }
 
 /** Cited paths absent from the working tree, excluding files the proposal itself creates. */
 export function missingPaths(map: RepositoryMap, text: string, created: string[] = []): string[] {
   if (map.truncated || !map.files) return [];
-  return pathReferences(text).filter((path) => !GENERATED.test(path) && !created.includes(path.replace(/\/$/, "")) && !pathExists(map, path));
+  const roots = new Set(map.directories.filter((dir) => !dir.includes("/")));
+  return pathReferences(text, roots).filter((path) => !GENERATED.test(path) && !created.includes(path.replace(/\/$/, "")) && !pathExists(map, path));
 }
 
 /** Workspaces that no role names by path or directory name. */

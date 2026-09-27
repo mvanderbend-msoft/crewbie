@@ -15,8 +15,13 @@ test("the repository map lists directories and manifest workspaces without conte
 });
 
 test("path references ignore prose pairs, URLs and routes but catch code spans and path-shaped words", () => {
-  const refs = pathReferences("Own `src/legacy/` and src/billing/invoice.ts, see https://example.com/a/b.ts, and/or input/output, route /api/users, frontend/backend, `packages/web`.");
+  const refs = pathReferences("Own `src/legacy/` and src/billing/invoice.ts, see https://example.com/a/b.ts, and/or input/output, route /api/users, frontend/backend, `packages/web`.", new Set(["packages"]));
   assert.deepEqual(refs.sort(), ["packages/web", "src/billing/invoice.ts", "src/legacy/"]);
+});
+
+test("module specifiers, placeholders, slash-joined words and workspace-relative paths are not reported", () => {
+  assert.deepEqual(missingPaths(map, "Use `node:assert/strict`, `@shop/shared`, `add/list/complete`, `Status/Context/Decision`, `docs/adr/NNNN-title.md`, `src/<module>.ts` and `src/main.tsx`."), []);
+  assert.deepEqual(missingPaths(map, "`packages/mobile` and `src/billing/gone.ts`"), ["packages/mobile", "src/billing/gone.ts"]);
 });
 
 test("path extraction stays linear on pathological input", () => {
