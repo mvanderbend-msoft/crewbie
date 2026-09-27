@@ -42,12 +42,19 @@ test("scoped concrete guidance, necessary standalone context and explicit gates 
   assert.deepEqual(result.instructionQuality.inspected, ["AGENTS.md", "frontend/AGENTS.md"]);
 });
 
-test("generic-only instructions are advisory, not a claim of measured harm", async (t) => {
-  const root = await fixture(t, { "AGENTS.md": "# Instructions\n\nWrite clean and maintainable code.\nFollow best practices.\nRun tests.\n" });
+test("generic-only agent charters are advisory, not a claim of measured harm", async (t) => {
+  const root = await fixture(t, { ".github/agents/developer.agent.md": "---\nname: Developer\ndescription: Implements changes\n---\n# Instructions\n\nYou are a senior software engineer.\nWrite high-quality code and tests.\nBe thorough.\n" });
   const result = await assess(root);
   assert.equal(result.instructionQuality.signals[0].code, "generic-only");
   assert.equal(result.instructionQuality.signals[0].level, "advisory");
   assert.match(result.instructionQuality.interpretation, /does not.*prove these individual patterns/);
+});
+
+test("npm guidance without a scoped package manifest is reported", async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Run `npm run test`.\n" });
+  const quality = (await assess(root)).instructionQuality;
+  assert.deepEqual(quality.signals.map((signal) => signal.code), ["missing-package-manifest"]);
+  assert.equal(quality.signals[0].line, 1);
 });
 
 test("instruction length is an advisory scope-review signal, not a quality gate, and limits disclose coverage", async (t) => {

@@ -589,8 +589,9 @@ still identify value in non-standard coding practices. These are study-specific
 observations, not a universal instruction ban or proof that a particular number
 of words is harmful.
 
-Crewbie's documentation/profile overlap, generic-advice, unverified-link,
-npm-script, broad-root-scope and unconditional full-suite signals are **engineering heuristics**,
+Crewbie's documentation/profile overlap, generic-advice (including generic
+agent charters), unverified-link, npm-script/package-manifest, broad-root-scope
+and unconditional full-suite signals are **engineering heuristics**,
 not validated causal rules from the paper. They identify concrete material for
 human review. Necessary standalone context and explicit merge/compliance gates
 should be retained. Contradictions, domain relevance and actual benefit still
