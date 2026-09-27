@@ -77,16 +77,17 @@ async function taskForPull(client: GitHubApi, config: Config, pull: Record<strin
     || record(record(pull.head, "PR head").repo, "head repository").full_name !== config.repository) return null;
   const number = integer(pull.number, "PR");
   const url = `https://api.github.com/repos/${config.repository}/pulls/${number}`;
-  const matches = [];
-  for (const issue of await managedIssues(client, config.repository)) {
+  const candidates = (await managedIssues(client, config.repository)).flatMap((issue) => {
     const metadata = taskMetadata(String(issue.body ?? ""));
-    if (!metadata || metadata.branch !== base) continue;
+    return metadata?.branch === base ? [{ issue, metadata }] : [];
+  });
+  const matches = (await Promise.all(candidates.map(async ({ issue, metadata }) => {
     const events = await client.list(`/repos/${config.repository}/issues/${integer(issue.number, "task issue")}/timeline`);
-    if (events.some((event) => {
+    return events.some((event) => {
       const source = event.source && typeof event.source === "object" ? (event.source as { issue?: { pull_request?: { url?: unknown } } }).issue : null;
       return event.event === "cross-referenced" && source?.pull_request?.url === url;
-    })) matches.push({ issue, metadata });
-  }
+    }) ? { issue, metadata } : null;
+  }))).filter((match) => match !== null);
   if (matches.length > 1) throw new Error(`Task PR #${number} cross-references multiple managed tasks on ${base}; nothing was reviewed.`);
   if (!matches.length) return null;
   return matches[0]!;
@@ -201,7 +202,8 @@ export function renderReview(_config: Config, snapshot: Snapshot, review: Return
   const branch = snapshot.feature?.branch ?? snapshot.task!.branch;
   const next = snapshot.task
     ? review.verdict === "changes" ? `Push fixes to this task PR for a fresh review; Crewbie will not auto-merge it.${partial}`
-      : `Crewbie merges this task PR into \`${branch}\` after its checks pass${partial ? "; review the omitted patches and merge it yourself" : ""}.`
+      : partial ? `Crewbie will not auto-merge this task PR; review the omitted patches and merge it yourself.${partial}`
+        : `Crewbie merges this task PR into \`${branch}\` after its checks pass.`
     : review.verdict === "changes"
       ? `Push fixes to \`${branch}\` and Crewbie reviews the new head, or merge anyway if you disagree. Crewbie never merges this PR.${partial}`
       : `Test the feature on \`${branch}\`, then merge this PR yourself; Crewbie never merges it.${partial}`;
