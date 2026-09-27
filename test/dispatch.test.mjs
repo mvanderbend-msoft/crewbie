@@ -652,6 +652,21 @@ test("once every task merged, one feature PR closes them all; the reviewer revie
   assert.match(work[0].reason, /Feature PR #900 merged into main/);
   assert.equal(fixture.merges.length, 0, "Crewbie never merges the feature PR.");
 });
+test("the feature PR copies each task PR's Checks as they are after the merge, not an earlier snapshot", async () => {
+  const fixture = githubFixture();
+  fixture.branches.add(BRANCH);
+  for (const issue of [1, 2, 3]) {
+    fixture.claims.add(issue);
+    const pull = { id: 1000 + issue, number: 100 + issue, state: "closed", merged_at: "then", user: { login: "Copilot" } };
+    let reads = 0;
+    Object.defineProperty(pull, "body", { enumerable: true, get: () => reads++ ? `## Checks\n- task ${issue} tests passed` : "## What changed\n- [ ] WIP" });
+    fixture.pulls.set(issue, pull);
+  }
+  await dispatch(fixture.client, config());
+  const body = fixture.featurePulls[0].body;
+  for (const issue of [1, 2, 3]) assert.match(body, new RegExp(`- task ${issue} tests passed`));
+  assert.doesNotMatch(body, /No Checks section/);
+});
 
 test("feature PR body updates only managed task closes and preserves human edits", async () => {
   const fixture = githubFixture();

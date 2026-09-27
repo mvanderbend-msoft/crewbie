@@ -421,7 +421,7 @@ async function featurePulls(client: GitHubApi, config: Config, work: Work[], bas
       let opened = "";
       if (!feature) {
         try {
-          feature = record(await client.request("POST", `${prefix}/pulls`, { title: await featureTitle(client, config, batch), head: branch, base, body: featureBody(config, batch, branch, items) }), "feature PR");
+          feature = record(await client.request("POST", `${prefix}/pulls`, { title: await featureTitle(client, config, batch), head: branch, base, body: featureBody(config, batch, branch, await currentPulls(client, config, items)) }), "feature PR");
           opened = `Opened feature PR #${String(feature.number)}. ${await requestRequesters(client, config, feature, items)}`;
         } catch (error) {
           if (error instanceof GitHubError && error.status === 422) { note = `${branch} has nothing to merge into ${base}, or GitHub refused the feature PR.`; setNote(items, branch, note); continue; }
@@ -429,7 +429,7 @@ async function featurePulls(client: GitHubApi, config: Config, work: Work[], bas
         }
       } else {
         const current = typeof feature.body === "string" ? feature.body : "";
-        const body = updateFeatureBody(config, batch, items, current);
+        const body = hasManagedTaskSet(current, items) ? current : updateFeatureBody(config, batch, await currentPulls(client, config, items), current);
         if (feature.state === "open" && body !== current) {
           feature = record(await client.request("PATCH", `${prefix}/pulls/${integer(feature.number, "feature PR")}`, { body }), "feature PR");
         }
@@ -461,6 +461,12 @@ async function requestRequesters(client: GitHubApi, config: Config, pull: Record
     if (error instanceof GitHubError && error.status === 422) return "";
     throw error;
   }
+}
+/** Task PRs as they are now: a specialist often finalizes its PR body seconds before the merge this run just made. */
+async function currentPulls(client: GitHubApi, config: Config, items: Work[]): Promise<Work[]> {
+  return Promise.all(items.map(async (item) => item.pull
+    ? { ...item, pull: record(await client.request("GET", `/repos/${config.repository}/pulls/${integer(item.pull.number, "task PR")}`), "task PR") }
+    : item));
 }
 function setNote(items: Work[], branch: string, note: string): void { for (const item of items) item.reason = `Merged into ${branch}. ${note}`; }
 async function featureTitle(client: GitHubApi, config: Config, batch: string): Promise<string> {
