@@ -21,6 +21,7 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0])), BRANCH = m
       throw new Error(`Unexpected list ${path}`);
     },
     async request(method, path, body) {
+      if (method === "GET" && path.includes("/git/matching-refs/")) return this.list(path);
       if (method !== "GET" && path !== "/graphql") state.writes.push({ method, path, body });
       if (path === "/user") return { type: "User", login: state.user };
       if (path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
@@ -79,7 +80,7 @@ test("persistent reservations are shared, capped at exactly three attempts, and 
 
 test("each launch that Copilot verifiably could not start is not counted as an attempt", async () => {
   const f = fixture();
-  const task = f.metadata.task.id, ledger = (issue, n) => `refs/tags/crewbie/launches/${f.metadata.batch}/${task}/${issue}/${n}`;
+  const task = f.metadata.task.id, ledger = (issue, n) => `refs/crewbie/launches/${f.metadata.batch}/${task}/${issue}/${n}`;
   for (const [issue, n] of [[16, 1], [24, 2], [39, 3]]) f.state.refs.add(ledger(issue, n));
   const failure = { user: { type: "Bot", login: "Copilot" }, body: "The agent encountered an error and was unable to start working on this issue: Please try again later." };
   f.state.comments["39"] = [failure];
@@ -94,9 +95,25 @@ test("each launch that Copilot verifiably could not start is not counted as an a
   assert.equal((await launchAllowance(f.client, config(), f.metadata, 46)).taskUsed, 2, "Every verified start failure releases one launch.");
 });
 
+test("ledger refs live outside refs/tags so push CI never fires, while legacy tag refs keep counting", async () => {
+  const f = fixture();
+  const legacy = `refs/tags/crewbie/launches/${f.metadata.batch}/${f.metadata.task.id}/1/1`;
+  f.state.refs.add(legacy);
+  f.state.refs.add("refs/tags/crewbie/paused");
+  assert.match((await launchAllowance(f.client, config(), f.metadata, 1)).blocked, /paused/);
+  await setLaunchPause(f.client, config(), false, true);
+  assert.equal(f.state.refs.has("refs/tags/crewbie/paused"), false, "Resuming clears a pause written by an earlier release.");
+  await withDispatchLock(f.client, config(), () => reserveLaunch(f.client, config(), f.metadata, 1, "a".repeat(40)));
+  assert.equal((await launchAllowance(f.client, config(), f.metadata, 1)).taskUsed, 2, "The legacy launch still consumes allowance.");
+  const created = f.state.writes.filter((write) => write.method === "POST" && write.path.endsWith("/git/refs")).map((write) => write.body.ref);
+  assert.ok(created.length >= 2);
+  for (const ref of created) assert.match(ref, /^refs\/crewbie\//, "Neither a branch nor a tag, so repository push workflows ignore it.");
+  assert.ok(f.state.refs.has(`refs/crewbie/launches/${f.metadata.batch}/${f.metadata.task.id}/1/2`), "Numbering continues after the legacy launch.");
+});
+
 test("pre-upgrade attempts need a human-attested baseline that consumes rather than resets allowance", async () => {
   const f = fixture();
-  f.state.refs.add("refs/tags/crewbie/claims/1");
+  f.state.refs.add("refs/crewbie/claims/1");
   assert.match((await launchAllowance(f.client, config(), f.metadata, 1)).blocked, /pre-ledger claim/);
   assert.match(await baselineLaunches(f.client, config(), 1, 2, false), /YOUR attestation/);
   assert.equal(f.state.writes.length, 0);

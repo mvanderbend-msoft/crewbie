@@ -7,6 +7,7 @@ import { attributePull } from "./attribution.js";
 import { issueDigest, taskMetadata } from "../specification/batch.js";
 import { hasApproval, setStatus } from "../tracking/issues.js";
 import { isWriter, requireWriter, type GitHubApi } from "../tracking/github.js";
+import { createLedger, ledgerHas, listLedger } from "../tracking/refs.js";
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { checkLaunchModels, launchAllowance, listCopilotModels, reserveLaunch, type DiscoverModels } from "./controls.js";
@@ -235,10 +236,9 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
       }
     }
     let active = snapshot.tasks.filter((task) => !terminal.has(String(task.state))).length;
-    const claims = await client.request("GET", `/repos/${config.repository}/git/matching-refs/tags/crewbie/claims/`);
-    if (!Array.isArray(claims)) throw new Error("Invalid repository launch-claim ledger.");
+    const claims = await listLedger(client, config.repository, "claims/");
     for (const raw of claims) {
-      const match = /^refs\/tags\/crewbie\/claims\/(\d+)$/.exec(string(record(raw, "claim").ref, "claim ref"));
+      const match = /^claims\/(\d+)$/.exec(raw.name);
       if (!match) throw new Error("Unexpected repository launch claim.");
       const number = integer(Number(match[1]), "claimed issue");
       if (number === plan.reviewer.issue && state.reviewer?.id && snapshot.tasks.some((task) => task.id === state.reviewer!.id)) continue;
@@ -271,11 +271,7 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
       await reserveLaunch(client, config, current, number, baseSha);
       job.launching = true;
       await persist();
-      try { await client.request("GET", `/repos/${config.repository}/git/ref/tags/crewbie/claims/${number}`); }
-      catch (error) {
-        if (!(error instanceof GitHubError && error.status === 404)) throw error;
-        await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/tags/crewbie/claims/${number}`, sha: baseSha });
-      }
+      if (!await ledgerHas(client, config.repository, `claims/${number}`)) await createLedger(client, config.repository, `claims/${number}`, baseSha);
       const result = record(await client.request("POST", `/agents/repos/${config.repository}/tasks`, {
         custom_agent: `crewbie-${owner}`, model, create_pull_request: !pr,
         base_ref: pr ? string(record(pr.base, "base").ref, "base ref") : base,

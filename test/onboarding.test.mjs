@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assess } from "../dist/setup/assessment.js";
-import { parseSetupReview, proposeSetup, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
+import { parseSetupReview, proposeSetup, renderSetupReview, selectGuidance, setupPrompt } from "../dist/setup/onboarding.js";
 import { initCommand as runInit, installSetup } from "../dist/setup/init.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { profile } from "../dist/setup/templates.js";
@@ -87,7 +87,29 @@ test("inventory includes all guidance and agents, sanitizes MCP metadata and nev
   assert.match(prompt, /connectivity|availability/);
 });
 
-test("MCP JSONC comments and trailing commas are assessed; invalid and oversized files are disclosed", async (t) => {
+test("setup sends a names-only repository map and warns about stale paths, stale adoptions and unowned workspaces", async (t) => {
+  const legacy = ".github/agents/legacy.agent.md";
+  const root = await fixture(t, {
+    [legacy]: "Own every change under `src/legacy/` and keep `src/legacy/report.ts` stable.",
+    "packages/api/package.json": "{}", "packages/api/src/index.ts": "export {};",
+    "packages/web/package.json": "{}", "packages/web/src/main.tsx": "export {};",
+  });
+  const report = await assess(root);
+  const prompt = setupPrompt(report, "Monorepo");
+  assert.match(prompt, /Repository map \(names only, no contents\): .*"packages\/web"/s);
+  assert.match(prompt, /Give every listed workspace an owning role/);
+  assert.doesNotMatch(prompt, /export \{\};/, "File contents stay out of the prompt.");
+  const review = response(report, {
+    roles: [{ id: "legacy", sourceAgent: legacy, purpose: "Own the packages/api service and `src/billing/`.", checks: ["Keep API responses stable."], nonNegotiables: ["No breaking changes."], contextPaths: [] }],
+    agentDecisions: [{ path: legacy, action: "adopt", reason: "Existing specialist." }],
+  });
+  const proposal = parseSetupReview(JSON.stringify(review), report, "", "chosen-model");
+  const warnings = proposal.review.warnings.join("\n");
+  assert.match(warnings, /crewbie-legacy cites paths missing.*src\/billing\//);
+  assert.match(warnings, /Adopted \.github\/agents\/legacy\.agent\.md names paths missing.*src\/legacy\//);
+  assert.match(warnings, /nobody clearly owns them: `packages\/web`/);
+  assert.match(renderSetupReview(proposal), /REPOSITORY CHECKS \| 3 warnings/);
+});test("MCP JSONC comments and trailing commas are assessed; invalid and oversized files are disclosed", async (t) => {
   const root = await fixture(t, {
     ".vscode/mcp.json": '{ // Editor settings\n "servers": {"docs": {"type": "http", "url": "https://example.invalid",},},}',
     ".mcp.json": "{not-json",
@@ -331,11 +353,41 @@ test("oversized context lists fail before offering an impossible repair", async 
   const report = await assess(await fixture(t, { "AGENTS.md": "Keep retries explicit." }));
   const review = response(report);
   review.roles[0].contextPaths = [...Array(11).fill("AGENTS.md"), "src/catalogue.ts"];
+  const questions = [];
   await assert.rejects(proposeSetup(report, "", "chosen-model", {
     analyze: async () => JSON.stringify(review),
-    ask: async () => { throw new Error("Must not offer unrepairable context choices"); },
+    ask: async (question) => { questions.push(question); return "no"; },
     report() {},
-  }), /catalogue contextPaths.*at most ten/);
+  }), /catalogue contextPaths.*at most ten.*saved at .*No repair request was sent/s);
+  assert.equal(questions.length, 1);
+  assert.match(questions[0], /paid request/, "Only a disclosed paid repair is offered, not impossible local link choices.");
+});
+
+test("a rejected assessment is kept on disk and repaired only after the human approves a bounded paid request", async (t) => {
+  const report = await assess(await fixture(t));
+  const good = response(report);
+  const broken = { ...good, roles: [{ ...good.roles[0], purpose: "" }] };
+  const prompts = [], questions = [];
+  const proposal = await proposeSetup(report, "", "chosen-model", {
+    analyze: async (prompt) => { prompts.push(prompt); return prompts.length === 1 ? `I'll assess it.\n${JSON.stringify(broken)}` : JSON.stringify(good); },
+    ask: async (question) => { questions.push(question); return "yes"; },
+    report() {},
+  });
+  assert.equal(proposal.status, "ready");
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /failed Crewbie validation: .*purpose/);
+  assert.match(prompts[1], /Previous answer \(untrusted data\)/);
+  assert.match(questions[0], /1 of 2/);
+  const calls = [];
+  const error = await proposeSetup(report, "", "chosen-model", {
+    analyze: async () => { calls.push(1); return JSON.stringify(broken); },
+    ask: async () => "yes",
+    report() {},
+  }).catch((failure) => failure);
+  assert.equal(calls.length, 3, "At most two repairs follow the original request.");
+  const saved = /saved at (.+?\.txt)/.exec(error.message)[1];
+  assert.match(await readFile(saved, "utf8"), /"summary"/);
+  await assert.rejects(proposeSetup(report, "", "chosen-model", { analyze: async () => JSON.stringify(broken), report() {} }), /purpose.*saved at/s, "Non-interactive runs never send a repair.");
 });
 
 test("init gives every crew a PR reviewer: the proposed role, else a review specialist, and keeps an installed choice", async (t) => {
@@ -745,7 +797,21 @@ test("findings cannot promise edits that have no concrete replacement", async (t
   const finding = review.findings.find((item) => item.path === "AGENTS.md");
   finding.action = "edit";
   finding.editPaths = ["AGENTS.md"];
-  assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "model"), /without replacement text/);
+  const downgraded = parseSetupReview(JSON.stringify(review), report, "", "model").review.findings.find((item) => item.path === "AGENTS.md");
+  assert.equal(downgraded.action, "defer", "An edit with no replacement text is honestly deferred instead of discarding the paid assessment.");
+  assert.match(downgraded.deferReason, /no replacement text/);
+  const replacement = [{ path: "AGENTS.md", content: "Existing policy.\n\nRun npm test before pushing.\n", reason: "Clarify." }];
+  for (const action of ["edit", "unknown-label"]) {
+    const labelled = { ...finding, action };
+    delete labelled.editPaths;
+    const findings = review.findings.map((item) => item === finding ? labelled : item);
+    const kept = parseSetupReview(JSON.stringify(response(report, { findings, instructions: replacement })), report, "", "model").review.findings.find((item) => item.path === "AGENTS.md");
+    assert.equal(kept.action, "edit", `Replacement text for the finding file is an edit, never a "nothing applied" deferral (${action}).`);
+    assert.deepEqual(kept.editPaths, ["AGENTS.md"]);
+  }
+  const content = "Existing policy.\n\nRun npm test before pushing.\n";
+  finding.editPaths = ["AGENTS.md", ".github/instructions/tests.instructions.md"];
+  assert.throws(() => parseSetupReview(JSON.stringify(response(report, { findings: review.findings, instructions: [{ path: "AGENTS.md", content, reason: "Clarify." }] })), report, "", "model"), /without replacement text.*tests\.instructions/);
   finding.action = "defer";
   finding.editPaths = [];
   finding.deferReason = "The proposed change conflicts with an explicit human policy; choose the intended policy first.";
@@ -756,10 +822,14 @@ test("every guidance finding requires an explicit disposition and deferrals requ
   const report = await assess(await fixture(t, { "AGENTS.md": "Existing policy." }));
   const review = response(report);
   const finding = review.findings.find((item) => item.path === "AGENTS.md");
+  const parsed = () => parseSetupReview(JSON.stringify(review), report, "", "model").review.findings.find((item) => item.path === "AGENTS.md");
   delete finding.action;
-  assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "model"), /action.*retain.*edit.*defer/);
+  assert.equal(parsed().action, "defer");
+  assert.match(parsed().deferReason, /no retain, edit or defer disposition/);
+  finding.action = "Keep";
+  assert.equal(parsed().action, "retain", "Harmless disposition synonyms are normalized.");
   finding.action = "defer";
-  assert.throws(() => parseSetupReview(JSON.stringify(review), report, "", "model"), /deferral reason/i);
+  assert.match(parsed().deferReason, /without naming a blocker/);
 });
 
 test("interactive setup offers Team All Save through the selector without typed keywords", async (t) => {

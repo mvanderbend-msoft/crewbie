@@ -6,6 +6,7 @@ import { optionalText, safePath, textHash } from "../core.js";
 import { assessInstructions, instructionFile, type InstructionQuality } from "./instruction-quality.js";
 import { assessTeam, type TeamAssessment } from "./team.js";
 import { inventory, type Inventory } from "./inventory.js";
+import { repositoryMap, type RepositoryMap } from "./repository-map.js";
 
 export interface Assessment {
   schemaVersion: 1;
@@ -19,6 +20,8 @@ export interface Assessment {
   team: TeamAssessment;
   inventory: Inventory;
   installedRoles: Role[];
+  /** Names-only working-tree map; absent in proposals saved before it existed. */
+  repository?: RepositoryMap;
 }
 export async function assess(root: string): Promise<Assessment> {
   const absolute = await realpath(resolve(root));
@@ -57,7 +60,7 @@ export async function assess(root: string): Promise<Assessment> {
       : "No selected static warning was found. This is not a quality certification; review repository-specific value and the disclosed inspection coverage.",
   });
   return {
-    schemaVersion: 1, findings, instructionQuality, team, inventory: context, installedRoles: installed?.roles ?? [],
+    schemaVersion: 1, findings, instructionQuality, team, inventory: context, installedRoles: installed?.roles ?? [], repository: repositoryMap(paths),
     configBeforeHash: installedText === null ? null : textHash(installedText),
     questions: [
       "Which existing constraints are intentional, and which are legacy debt?",

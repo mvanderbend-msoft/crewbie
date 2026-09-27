@@ -130,6 +130,7 @@ test("publication retries reuse issues and approvals; bot labels get an explicit
       throw new Error(`Unexpected list ${path}`);
     },
     async request(method, path, body) {
+      if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null);
       requests.push({ method, path, body });
       if (path === "/user") return { login: "maintainer", type: "User" };
       if (path.includes("/collaborators/")) return { permission: "write" };
@@ -271,9 +272,10 @@ test("reapprove moves open tasks to the owner's configured model and approves th
   const client = {
     async list(path) { return comments[Number(path.match(/issues\/(\d+)\/comments/)[1])] ?? []; },
     async request(method, path, body) {
+      if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null);
       if (path === "/user") return { type: "User", login };
       if (path.includes("/collaborators/")) return { permission: login === "maintainer" ? "write" : "read" };
-      if (path.includes("/git/ref/tags/crewbie/claims/1")) return { object: { sha: "x" } };
+      if (path.includes("/git/ref/crewbie/claims/1")) return { object: { sha: "x" } };
       const number = Number(path.match(/issues\/(\d+)/)?.[1]);
       if (method === "GET") return structuredClone(issues[number]);
       writes.push({ method, path });

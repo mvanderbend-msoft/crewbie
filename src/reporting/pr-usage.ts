@@ -6,6 +6,8 @@ import { cloudTasks } from "../tracking/native.js";
 export interface PrUsage {
   sessions: number; measuredSessions: number; inputTokens: number | null; outputTokens: number | null;
   credits: null; sources: string[]; warnings: string[];
+  /** Wall-clock minutes of completed workflow runs on the PR head branch (agent sessions and CI); not billed minutes. */
+  actionsMinutes: number | null; actionsRuns: number;
 }
 export class UsageUnavailable extends Error {}
 
@@ -37,7 +39,13 @@ function actionsLog(repository: string, runId: number): string {
 }
 
 export async function collectPrUsage(client: GitHubApi, repository: string, pr: Record<string, unknown>, readLog = actionsLog): Promise<PrUsage> {
-  const result: PrUsage = { sessions: 0, measuredSessions: 0, inputTokens: null, outputTokens: null, credits: null, sources: [], warnings: [] };
+  const result: PrUsage = { sessions: 0, measuredSessions: 0, inputTokens: null, outputTokens: null, credits: null, sources: [], warnings: [], actionsMinutes: null, actionsRuns: 0 };
+  const head = string(record(pr.head, "PR head").ref, "PR branch");
+  try { await actionsTime(client, repository, head, result); }
+  catch (error) {
+    if (!(error instanceof GitHubError && [403, 404, 410].includes(error.status))) throw error;
+    result.warnings.push(`Actions run time is unavailable (HTTP ${error.status}).`);
+  }
   try {
     const native = await cloudTasks(client, repository);
     if (native.warning) { result.warnings.push(native.warning); return result; }
@@ -62,13 +70,14 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
     result.sessions = sessions.size;
     if (!sessions.size) { result.warnings.push("No attributable native sessions found."); return result; }
     const measured = new Set<string>(), runs = new Set<number>();
-    const head = string(record(pr.head, "PR head").ref, "PR branch");
     for (let page = 1; page <= 100; page++) {
       const response = record(await client.request("GET", `/repos/${repository}/actions/runs?event=dynamic&branch=${encodeURIComponent(head)}&per_page=100&page=${page}`), "Actions runs");
       if (!Array.isArray(response.workflow_runs)) throw new Error("Actions returned invalid run coverage.");
       for (const raw of response.workflow_runs) {
         const run = record(raw, "Actions run");
-        if (!Array.isArray(run.pull_requests) || !run.pull_requests.some((pull) => record(pull, "run pull request").id === pr.id)) continue;
+        // Copilot session runs carry no pull_requests link; the branch query attributes them and the log's session ID verifies it.
+        const pulls = Array.isArray(run.pull_requests) ? run.pull_requests : [];
+        if (pulls.length ? !pulls.some((pull) => record(pull, "run pull request").id === pr.id) : run.head_branch !== head) continue;
         const id = integer(run.id, "Actions run");
         if (runs.has(id)) throw new Error("Actions pagination repeated a run.");
         runs.add(id);
@@ -103,8 +112,31 @@ export async function collectPrUsage(client: GitHubApi, repository: string, pr: 
   }
 }
 
+const RUN_PAGES = 10;
+async function actionsTime(client: GitHubApi, repository: string, head: string, result: PrUsage): Promise<void> {
+  let milliseconds = 0;
+  const seen = new Set<number>();
+  for (let page = 1; page <= RUN_PAGES; page++) {
+    const response = record(await client.request("GET", `/repos/${repository}/actions/runs?branch=${encodeURIComponent(head)}&status=completed&per_page=100&page=${page}`), "Actions runs");
+    if (!Array.isArray(response.workflow_runs)) throw new Error("Actions returned invalid run coverage.");
+    for (const raw of response.workflow_runs) {
+      const run = record(raw, "Actions run");
+      const id = integer(run.id, "Actions run");
+      if (seen.has(id) || run.head_branch !== head || run.status !== "completed") continue;
+      const started = Date.parse(String(run.run_started_at ?? run.created_at)), ended = Date.parse(String(run.updated_at));
+      if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) { result.warnings.push(`Run ${id} has no usable timing.`); continue; }
+      seen.add(id);
+      milliseconds += ended - started;
+    }
+    if (response.workflow_runs.length < 100) break;
+    if (page === RUN_PAGES) result.warnings.push("Actions run time exceeded the pagination bound; minutes are a lower bound.");
+  }
+  result.actionsRuns = seen.size;
+  result.actionsMinutes = Math.round(milliseconds / 6_000) / 10;
+}
+
 export function renderPrUsage(usage: PrUsage): string {
   const tokens = usage.inputTokens === null || usage.outputTokens === null ? "unavailable"
     : `${usage.inputTokens + usage.outputTokens} (${usage.inputTokens} input + ${usage.outputTokens} output)`;
-  return `**Observed tokens:** ${tokens}; ${usage.sessions ? `${usage.measuredSessions}/${usage.sessions} known sessions` : "session coverage unavailable"}. **AI credits:** unavailable (API scaling unverified). Main-session log counts, not an invoice or unique-context count; unreported subagent/tool usage is excluded.${usage.sources.length ? ` [Evidence](${usage.sources[0]})` : ""}${usage.warnings.some((warning) => !warning.startsWith("AI-credit")) ? " Coverage incomplete; inspect session logs." : ""}`;
+  return `**Observed tokens:** ${tokens}; ${usage.sessions ? `${usage.measuredSessions}/${usage.sessions} known sessions` : "session coverage unavailable"}. **AI credits:** unavailable (API scaling unverified). **Actions time:** ${usage.actionsMinutes === null ? "unavailable" : `${usage.actionsMinutes} min wall-clock across ${usage.actionsRuns} runs (not billed minutes)`}. Main-session log counts, not an invoice or unique-context count; unreported subagent/tool usage is excluded.${usage.sources.length ? ` [Evidence](${usage.sources[0]})` : ""}${usage.warnings.some((warning) => !warning.startsWith("AI-credit")) ? " Coverage incomplete; inspect session logs." : ""}`;
 }

@@ -275,6 +275,24 @@ headers and URLs are withheld. Servers are not started or connectivity-tested.
 Personal/global and ignored settings are not read. MCP configuration changes
 remain recommendations for manual review, not automatic credential-bearing edits.
 
+From alpha.44 the assessment and hosted planning also receive a names-only
+repository map: directories to depth 4 and workspaces (directories with their own
+package or project manifest). No file contents are added. Crewbie then checks the
+proposal locally against the full list of file names and reports advisory
+**Repository checks**: role text, adopted agents, proposed guidance or a
+constitution that cite missing paths, and workspaces no role names. Plans get a
+**Plan checks** section in `plan.md` and the planning PR: HTTP status codes and
+quantities a task states that the source issue does not (and issue values no task
+carries), overlapping acceptance criteria between implementation tasks, and task
+paths not in the repository.
+
+Model answers are parsed tolerantly: a prose preamble or fenced block around the
+JSON is accepted, finding dispositions accept harmless synonyms (keep, update), and
+an unknown disposition or an edit without replacement text becomes an explicit
+deferral instead of discarding the paid assessment. Other validation failures save
+the redacted answer to a temporary file and, in interactive init only, offer at
+most two disclosed paid repair requests; nothing is retried without a yes.
+
 Interactive init discovers the account's enabled model catalogue through the
 official Copilot SDK and presents numbered choices with IDs and available billing
 multipliers. Invalid selections reprompt; `q` cancels. Discovery failure stops
@@ -814,20 +832,22 @@ Timeout is checked between reconciliations; in-flight API calls retain their
 normal request timeout. Stopping the watcher does not cancel remote sessions.
 Resume with the same approved command after inspecting the reported condition.
 
-The dispatcher obtains an atomic `crewbie/dispatch-lock` Git tag, and a
-`crewbie/claims/<issue-number>` tag before each assignment. When another Crewbie
+The dispatcher obtains an atomic `refs/crewbie/dispatch-lock` Git ref, and a
+`refs/crewbie/claims/<issue-number>` ref before each assignment. When another Crewbie
 run holds the lock (for example, the dispatch and plan-release workflows both fire
 on a planning merge), the run waits up to five minutes. If the lock is still held
-and no Crewbie workflow is running, delete the tag and rerun. These hold no
-transcripts or secrets. Claims deliberately survive unknown network outcomes;
+and no Crewbie workflow is running, delete it with
+`gh api -X DELETE repos/OWNER/REPO/git/refs/crewbie/dispatch-lock` and rerun. These
+hold no transcripts or secrets. Claims deliberately survive unknown network outcomes;
 repeated runs do not blindly start another paid session. Claims also identify
 already-running work when a workflow restarts.
 
-These operational tags produce GitHub push events. Limit application/setup
-workflows to their intended branches, or exclude `crewbie/**` from tag triggers.
-GitHub does not evaluate path filters for tag pushes: a workflow with only
-`push.paths` can otherwise run on every lock update. Keep release-tag workflows
-scoped to their release namespace.
+These operational refs (lock, pause, claims and the launch ledger) live under
+`refs/crewbie/`, which is neither a branch nor a tag, so they never trigger a
+repository's `on: push` workflows. Releases up to 0.1.0-alpha.43 wrote them as
+`refs/tags/crewbie/*` tags, which fired push CI; those legacy tags are still read,
+so existing claims and launch allowances keep counting. Once no pre-upgrade claim
+is open, you may delete the legacy `crewbie/*` tags.
 
 If a runner dies while holding the dispatcher lock, an administrator must
 confirm no dispatch is active and remove only that reserved lock ref.

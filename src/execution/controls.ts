@@ -3,11 +3,12 @@ import { GitHubError, integer, record, slug, string } from "../core.js";
 import { taskMetadata } from "../specification/batch.js";
 import { requireWriter, type GitHubApi } from "../tracking/github.js";
 import { listCopilotModels, type ModelChoice } from "../setup/copilot.js";
+import { createLedger, deleteLedger, ledgerHas, ledgerRef, listLedger } from "../tracking/refs.js";
 
 type Metadata = NonNullable<ReturnType<typeof taskMetadata>>;
 export type DiscoverModels = () => Promise<ModelChoice[]>;
 export { listCopilotModels };
-const PAUSE = "tags/crewbie/paused";
+const PAUSE = "paused";
 
 export { RESTART_LABEL } from "../config.js";
 export const RESTART_MARKER = "<!-- crewbie-restart:";
@@ -30,26 +31,25 @@ export function copilotStartFailures(comments: Record<string, unknown>[]): numbe
   return comments.filter(isStartFailure).length;
 }
 
-const LOCK_REF = "tags/crewbie/dispatch-lock";
+const LOCK = "dispatch-lock";
 export const LOCK_WAIT = { attempts: 60, delayMs: 5_000 };
 
 export async function withDispatchLock<T>(client: GitHubApi, config: Config, action: () => Promise<T>): Promise<T> {
   requireExecution(config);
   const sha = await defaultHead(client, config);
-  const prefix = `/repos/${config.repository}`;
   // Dispatch and plan-release workflows both fire on a planning merge; wait for the short-lived holder instead of failing.
   for (let attempt = 1; ; attempt++) {
-    try { await client.request("POST", `${prefix}/git/refs`, { ref: `refs/${LOCK_REF}`, sha }); break; }
+    try { await createLedger(client, config.repository, LOCK, sha); break; }
     catch (error) {
       if (!(error instanceof GitHubError) || error.status !== 422) throw error;
       if (attempt >= LOCK_WAIT.attempts) {
-        throw new Error(`Another Crewbie run still holds refs/${LOCK_REF} after ${Math.round(LOCK_WAIT.attempts * LOCK_WAIT.delayMs / 1000)}s. Nothing was launched. If no Crewbie workflow is running, delete that tag and rerun this workflow.`);
+        throw new Error(`Another Crewbie run still holds ${ledgerRef(LOCK)} after ${Math.round(LOCK_WAIT.attempts * LOCK_WAIT.delayMs / 1000)}s. Nothing was launched. If no Crewbie workflow is running, delete it (gh api -X DELETE repos/${config.repository}/git/${ledgerRef(LOCK)}) and rerun this workflow.`);
       }
       await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT.delayMs));
     }
   }
   try { return await action(); }
-  finally { await client.request("DELETE", `${prefix}/git/refs/${LOCK_REF}`); }
+  finally { await deleteLedger(client, config.repository, LOCK); }
 }
 async function defaultHead(client: GitHubApi, config: Config): Promise<string> {
   const prefix = `/repos/${config.repository}`;
@@ -59,16 +59,15 @@ async function defaultHead(client: GitHubApi, config: Config): Promise<string> {
   return string(record(current.commit, "commit").sha, "base commit");
 }
 export async function launchesPaused(client: GitHubApi, config: Config): Promise<boolean> {
-  try { await client.request("GET", `/repos/${config.repository}/git/ref/${PAUSE}`); return true; }
-  catch (error) { if (error instanceof GitHubError && error.status === 404) return false; throw error; }
+  return ledgerHas(client, config.repository, PAUSE);
 }
 export async function setLaunchPause(client: GitHubApi, config: Config, paused: boolean, apply: boolean): Promise<string> {
   if (!apply) return `Preview: ${paused ? "pause" : "resume"} future Crewbie implementation/review launches repository-wide. Running sessions are not stopped; allowances and approvals are not reset. Repeat with --apply.`;
   await requireWriter(client, config.repository);
   return withDispatchLock(client, config, async () => {
     if (await launchesPaused(client, config) !== paused) {
-      if (paused) await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/${PAUSE}`, sha: await defaultHead(client, config) });
-      else await client.request("DELETE", `/repos/${config.repository}/git/refs/${PAUSE}`);
+      if (paused) await createLedger(client, config.repository, PAUSE, await defaultHead(client, config));
+      else await deleteLedger(client, config.repository, PAUSE, true);
     }
     return `${paused ? "Paused" : "Resumed"} future Crewbie launches. Running sessions, launch allowances and approvals are unchanged. No agents were started.`;
   });
@@ -81,11 +80,11 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
   const batch = slug(metadata.batch, "batch"), task = slug(metadata.task.id, "task");
   integer(issue, "issue");
   const prefix = `/repos/${config.repository}`;
-  const refs = await client.list(`${prefix}/git/matching-refs/tags/crewbie/launches/${batch}/`);
+  const refs = await listLedger(client, config.repository, `launches/${batch}/`);
   const entries = [];
   for (const raw of refs) {
-    const ref = string(raw.ref, "launch ref");
-    const match = /^refs\/tags\/crewbie\/launches\/([a-z][a-z0-9-]{0,63})\/([a-z][a-z0-9-]{0,63})\/(\d+)\/(\d+|baseline)$/.exec(ref);
+    const ref = raw.ref;
+    const match = /^launches\/([a-z][a-z0-9-]{0,63})\/([a-z][a-z0-9-]{0,63})\/(\d+)\/(\d+|baseline)$/.exec(raw.name);
     if (!match || match[1] !== batch) throw new Error("Invalid launch ledger; do not reset it to bypass limits.");
     const issue = integer(Number(match[3]), "ledger issue");
     let attempts = 1;
@@ -118,9 +117,9 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
   else if (result.taskUsed >= limits.maxAttemptsPerTask) result.blocked = `Task attempt allowance exhausted (${result.taskUsed}/${limits.maxAttemptsPerTask}); initial and uncertain requests count; verified start failures do not.`;
   if (result.blocked) return result;
   // Older claims have no reliable continuation count. Never present a partial history as a lifetime cap.
-  const claims = await client.list(`${prefix}/git/matching-refs/tags/crewbie/claims/`);
+  const claims = await listLedger(client, config.repository, "claims/");
   for (const raw of claims) {
-    const match = /^refs\/tags\/crewbie\/claims\/(\d+)$/.exec(string(raw.ref, "claim ref"));
+    const match = /^claims\/(\d+)$/.exec(raw.name);
     if (!match) throw new Error("Invalid claim ledger.");
     const number = integer(Number(match[1]), "claimed issue");
     if (entries.some((entry) => entry.issue === number)) continue;
@@ -141,12 +140,12 @@ export async function baselineLaunches(client: GitHubApi, config: Config, issue:
   integer(issue, "issue"); integer(attempts, "historical attempts", 1, 10000);
   const prefix = `/repos/${config.repository}`;
   const inspect = async () => {
-    await client.request("GET", `${prefix}/git/ref/tags/crewbie/claims/${issue}`);
+    if (!await ledgerHas(client, config.repository, `claims/${issue}`)) throw new Error(`Issue #${issue} has no Crewbie launch claim.`);
     const original = record(await client.request("GET", `${prefix}/issues/${issue}`), "claimed issue");
     const metadata = taskMetadata(string(original.body, "issue body"));
     if (!metadata) throw new Error("Claimed issue has no Crewbie metadata.");
-    const path = `tags/crewbie/launches/${metadata.batch}/${metadata.task.id}/${issue}/`;
-    if ((await client.list(`${prefix}/git/matching-refs/${path}`)).length) throw new Error("Launch history already exists for this issue; baselines cannot overwrite or refund attempts.");
+    const path = `launches/${metadata.batch}/${metadata.task.id}/${issue}/`;
+    if ((await listLedger(client, config.repository, path)).length) throw new Error("Launch history already exists for this issue; baselines cannot overwrite or refund attempts.");
     return { metadata, path };
   };
   const prior = await inspect();
@@ -159,7 +158,7 @@ export async function baselineLaunches(client: GitHubApi, config: Config, issue:
     const tag = record(await client.request("POST", `${prefix}/git/tags`, {
       tag: `${fresh.path}baseline`, message: JSON.stringify(baseline), object: await defaultHead(client, config), type: "commit",
     }), "baseline tag");
-    await client.request("POST", `${prefix}/git/refs`, { ref: `refs/${fresh.path}baseline`, sha: string(tag.sha, "baseline SHA") });
+    await createLedger(client, config.repository, `${fresh.path}baseline`, string(tag.sha, "baseline SHA"));
     return `Recorded the human-attested baseline of ${attempts} attempts for #${issue}. No history reset, paid launch or model change occurred. Run preflight again.`;
   });
 }
@@ -168,11 +167,9 @@ export async function reserveLaunch(client: GitHubApi, config: Config, metadata:
   if (allowance.blocked) throw new Error(allowance.blocked);
   if (initial && allowance.issueUsed > 0) throw new Error("Initial launch already reserved; inspect its outcome instead of retrying.");
   // Refunded start failures lower the count, so number after the highest existing ref rather than reuse one.
-  const existing = await client.list(`/repos/${config.repository}/git/matching-refs/tags/crewbie/launches/${allowance.batch}/${allowance.task}/`);
-  const highest = Math.max(0, ...existing.map((raw) => Number(/\/(\d+)$/.exec(string(raw.ref, "launch ref"))?.[1] ?? 0)));
-  await client.request("POST", `/repos/${config.repository}/git/refs`, {
-    ref: `refs/tags/crewbie/launches/${allowance.batch}/${allowance.task}/${issue}/${Math.max(allowance.taskUsed, highest) + 1}`, sha: baseSha,
-  });
+  const existing = await listLedger(client, config.repository, `launches/${allowance.batch}/${allowance.task}/`);
+  const highest = Math.max(0, ...existing.map((raw) => Number(/\/(\d+)$/.exec(raw.name)?.[1] ?? 0)));
+  await createLedger(client, config.repository, `launches/${allowance.batch}/${allowance.task}/${issue}/${Math.max(allowance.taskUsed, highest) + 1}`, baseSha);
   return allowance;
 }
 const PROBE_BRANCH = "crewbie/model-check-never-exists";

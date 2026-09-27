@@ -320,7 +320,9 @@ every task merged, Crewbie opens one feature PR into the default branch that clo
 all of the plan's issues and requests review from whoever labeled the PRD for
 planning (unless that person is the PR's author). Init picks a Crewbie reviewer role (`review.role`,
 preferring an existing review specialist) that comments on each head of that
-feature PR. You test the feature branch and merge the feature PR yourself; Crewbie
+feature PR. The reviewer reads that head's CI results from GitHub's Checks API: a
+failing check blocks, and a PR description without a test narrative does not. The
+feature PR body collects each task PR's own Checks section. You test the feature branch and merge the feature PR yourself; Crewbie
 never merges it. A task PR that changes `.github/workflows/` is left for you to
 merge, unless each changed workflow file is identical to the default branch (as
 when a fix task merges the default branch in). A failed start or session is relaunched by adding `crewbie:restart`.
@@ -578,8 +580,14 @@ remain unavailable** rather than dividing by a guessed factor. Planning CLI
 metrics likewise remain unavailable. Native telemetry and Actions-log access are
 needed; no new paid inference is used to collect usage.
 
-Use `crewbie status --pr 13 --json` for the observed counts, evidence URLs and
-coverage warnings without editing the PR. If GitHub requires **Approve and run
+Copilot session runs carry no pull-request link, so they are attributed by the
+PR head branch and verified by the session ID in their log. **Actions time** sums
+the wall-clock duration of completed workflow runs on that branch (agent sessions
+and CI); it is not the billed-minutes figure, which depends on runner type and
+rounding.
+
+Use `crewbie status --pr 13 --json` for the observed counts, Actions time,
+evidence URLs and coverage warnings without editing the PR. If GitHub requires **Approve and run
 workflows** for a Copilot PR, automated metadata updates wait for that permission.
 
 Instruction assessment also flags copied documentation, repeated charter

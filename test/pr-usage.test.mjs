@@ -62,3 +62,18 @@ test("duplicate sessions cannot double-count usage", async () => {
   f.state.sessions = [session("a"), session("a")];
   await assert.rejects(collectPrUsage(f.client, "example/project", f.pr), /Duplicate native session/);
 });
+test("Copilot session runs without a pull_requests link are attributed by branch, and Actions time is reported", async () => {
+  const f = fixture();
+  const timed = (id, extra) => ({ id, status: "completed", head_branch: "copilot/feature", run_started_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:03:00Z", ...extra });
+  const inner = f.client.request;
+  f.client.request = async (method, path) => path.includes("/actions/runs?") ? { workflow_runs: [
+    timed(1, { event: "dynamic", pull_requests: [] }), timed(2, { event: "dynamic", pull_requests: [] }),
+    timed(3, { event: "dynamic", pull_requests: [], head_branch: "copilot/other" }), timed(4, { event: "push", pull_requests: [{ id: 13 }], updated_at: "2026-01-01T00:01:30Z" }),
+  ] } : inner(method, path);
+  const result = await collectPrUsage(f.client, "example/project", f.pr, (_repo, run) => log(session(run === 1 ? "a" : "b")));
+  assert.equal(result.measuredSessions, 2);
+  assert.equal(result.inputTokens, 20);
+  assert.equal(result.actionsRuns, 3, "Only runs on the PR head branch count.");
+  assert.equal(result.actionsMinutes, 7.5);
+  assert.match(renderPrUsage(result), /Actions time:\*\* 7\.5 min wall-clock across 3 runs \(not billed minutes\)/);
+});

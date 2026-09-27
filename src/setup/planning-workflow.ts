@@ -165,9 +165,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     permissions:
+      checks: read
       contents: read
       issues: read
       pull-requests: read
+      statuses: read
     outputs:
       ready: \${{ steps.context.outputs.ready }}
       model: \${{ steps.context.outputs.model }}

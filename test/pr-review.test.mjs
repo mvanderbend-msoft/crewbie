@@ -4,7 +4,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseConfig } from "../dist/config.js";
 import { featureBranch, issueBody, parseBatch } from "../dist/specification/batch.js";
-import { parseReview, prepareReview, publishReview } from "../dist/execution/pr-review.js";
+import { ciEvidence, parseReview, prepareReview, publishReview } from "../dist/execution/pr-review.js";
+import { GitHubError } from "../dist/core.js";
 import { config, batch, fixture } from "./helpers.mjs";
 
 const HEAD = "c".repeat(40);
@@ -23,6 +24,17 @@ test("the verdict follows the findings, so a blocking finding can never pass", (
   const review = parseReview('```json\n{"verdict":"pass","summary":"Fine.","findings":[{"severity":"blocking","path":"a.ts","line":1,"body":"Crashes."}]}\n```');
   assert.equal(review.verdict, "changes");
   assert.throws(() => parseReview('{"verdict":"ship it","summary":"x","findings":[]}'), /pass or changes/);
+  assert.equal(parseReview('I reviewed the diff.\n\n```json\n{"verdict":"pass","summary":"Fine.","findings":[]}\n```\n').summary, "Fine.", "A prose preamble does not discard a paid review.");
+});
+
+test("reviewer CI evidence reports failures, missing CI and unreadable checks without guessing", async (t) => {
+  const { client, ci } = await setup(t);
+  ci.runs.push({ id: 4, name: "e2e", status: "completed", conclusion: "failure" });
+  assert.match((await ciEvidence(client, reviewConfig, HEAD)).summary, /Check e2e is failure/);
+  ci.runs = []; ci.statuses = [];
+  assert.equal((await ciEvidence(client, reviewConfig, HEAD)).summary, "No CI checks ran on this head.");
+  ci.denied = true;
+  assert.match((await ciEvidence(client, reviewConfig, HEAD)).summary, /could not be read \(HTTP 403\)/);
 });
 
 async function setup(t) {
@@ -33,6 +45,7 @@ async function setup(t) {
   const b = parseBatch(batch(), config());
   const pull = { number: 101, state: "open", title: "Crewbie feature", body: "What/why", head: { sha: HEAD, ref: BRANCH, repo: { full_name: "example/project" } }, base: { ref: "main" } };
   const comments = [];
+  const ci = { runs: [{ id: 1, name: "test", status: "completed", conclusion: "success" }, { id: 2, name: "lint", status: "completed", conclusion: "failure" }, { id: 3, name: "lint", status: "completed", conclusion: "success" }], statuses: [] };
   const client = {
     async list(path) {
       if (path === "/repos/example/project/issues?state=all&labels=crewbie%3Amanaged") {
@@ -46,13 +59,15 @@ async function setup(t) {
       if (path === "/graphql") return { data: { repository: { pullRequest: { closingIssuesReferences: { nodes: [{ number: 1 }, { number: 2 }, { number: 3 }] } } } } };
       if (path === "/repos/example/project") return { default_branch: "main" };
       if (path.endsWith("/pulls/101")) return structuredClone(pull);
+      if (path.endsWith(`/commits/${HEAD}/check-runs?per_page=100`)) { if (ci.denied) throw new GitHubError(403, null); return { total_count: ci.runs.length, check_runs: ci.runs }; }
+      if (path.endsWith(`/commits/${HEAD}/status`)) return { statuses: ci.statuses };
       const issue = /\/issues\/([123])$/.exec(path);
       if (issue) return { number: Number(issue[1]), body: issueBody(b, b.tasks[Number(issue[1]) - 1]) };
       if (method === "POST" && path.endsWith("/issues/101/comments")) { comments.push({ body: body.body }); return {}; }
       throw new Error(`Unexpected request: ${method} ${path}`);
     },
   };
-  return { root, pull, comments, client };
+  return { root, pull, comments, client, ci };
 }
 
 test("review preparation uses the reviewer's charter and the API diff; publication posts one verified-head comment per run", async (t) => {
@@ -63,10 +78,12 @@ test("review preparation uses the reviewer's charter and the API diff; publicati
   assert.equal(prepared.model, "approved-model");
   const prompt = await readFile(join(root, ".crewbie-review-prompt.txt"), "utf8");
   assert.match(prompt, /voice your charter gives you[\s\S]*grumpy but precise[\s\S]*Implement foundation[\s\S]*--- src\/a\.ts \(modified, \+2 -1\)\n@@/);
+  assert.match(prompt, /CI on head ccccccc: All 2 CI checks passed\. \(lint: success; test: success\)/, "Only the newest run of a re-run check counts.");
+  assert.match(prompt, /Never block only because the PR description lacks a test narrative/);
   await writeFile(join(root, ".crewbie-review-output.txt"), JSON.stringify({ verdict: "changes", summary: "Hmph.", findings: [{ severity: "blocking", path: "src/a.ts", line: 2, body: "Handle null." }] }));
   assert.match(await publishReview(root, client, reviewConfig), /changes/);
   assert.equal(comments.length, 1);
-  assert.match(comments[0].body, /^<!-- crewbie-review:[A-Za-z0-9+/=]+ -->\n## Crewbie review · crewbie-developer[\s\S]*changes requested[\s\S]*\*\*Blocking\*\* `src\/a\.ts:2`: Handle null\.[\s\S]*Push fixes to `crewbie\/feature-[0-9a-f]{8}`/);
+  assert.match(comments[0].body, /^<!-- crewbie-review:[A-Za-z0-9+/=]+ -->\n## Crewbie review · crewbie-developer[\s\S]*changes requested[\s\S]*\*\*CI on this head \(GitHub Checks API\):\*\* All 2 CI checks passed\.[\s\S]*\*\*Blocking\*\* `src\/a\.ts:2`: Handle null\.[\s\S]*Push fixes to `crewbie\/feature-[0-9a-f]{8}`/);
   assert.match(await publishReview(root, client, reviewConfig), /already posted/);
   assert.equal(comments.length, 1);
   pull.head.sha = "d".repeat(40);

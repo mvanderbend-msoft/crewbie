@@ -69,6 +69,10 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     if (role.modelReason) lines.push(`**Model proposal (${role.complexity ?? "unclassified"}):** ${role.modelReason}`, "");
     if (role.nonNegotiables?.length) lines.push("**Boundaries**", ...role.nonNegotiables.map((rule) => `- ${rule}`), "");
   }
+  if (review && Array.isArray(review.warnings) && review.warnings.length) {
+    lines.push("## Repository checks", "", "Crewbie compared the proposal with the working tree (names only). These are advisory and change nothing.", "",
+      ...review.warnings.map((warning) => `- ${string(warning, "repository warning")}`), "");
+  }
   if (review && Array.isArray(review.agentDecisions) && review.agentDecisions.length) {
     lines.push("## Existing agent decisions", "");
     for (const raw of review.agentDecisions) {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dispatch as runDispatch, linkedPull, preflight, renderDispatchResult } from "../dist/execution/dispatch.js";
+import { dispatch as runDispatch, linkedPull, preflight, renderDispatchResult, taskChecks } from "../dist/execution/dispatch.js";
 import { GitHubError } from "../dist/execution/github.js";
 import { approvedBatch, batchDigest, featureBranch, issueBody, issueDigest, parseBatch, taskMetadata } from "../dist/specification/batch.js";
 import { watchBatch } from "../dist/execution/watch.js";
@@ -27,8 +27,8 @@ function githubFixture(input = batch()) {
     get locked() { return locked; },
     client: {
       async list(path) {
-        if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
-        if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
+        if (path.includes("/git/matching-refs/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
+        if (path.endsWith("/git/matching-refs/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/crewbie/claims/${number}` }));
         if (path.endsWith("/labels")) return ["managed", "ready-for-planning", "restart", "blocked", "ready", "running", "review", "failed", "done", "owner:developer"].map((name) => ({ name: `crewbie:${name}` }));
         if (path.includes("/issues?")) { const state = /state=(\w+)/.exec(path)?.[1] ?? "open", since = /since=([^&]+)/.exec(path)?.[1]; return structuredClone(issues.filter((issue) => (state === "all" || (issue.state ?? "open") === state) && !(since && issue.updated_at && issue.updated_at < since))); }
         const events = /\/issues\/(\d+)\/events$/.exec(path);
@@ -55,9 +55,10 @@ function githubFixture(input = batch()) {
         throw new Error(`Unexpected list: ${path}`);
       },
       async request(method, path, body) {
+        if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null); if (method === "GET" && path.includes("/git/matching-refs/crewbie/")) return this.list(path);
         if (path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
         if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (fixture.modelChecks ??= []).push(body.model); throw new GitHubError(fixture.probeStatus ?? (fixture.rejectedModels?.includes(body.model) ? 400 : 412), null); }
-        if (path.endsWith("/git/ref/tags/crewbie/paused")) {
+        if (path.endsWith("/git/ref/crewbie/paused")) {
           if (!fixture.paused) throw new GitHubError(404, null);
           return {};
         }
@@ -95,9 +96,9 @@ function githubFixture(input = batch()) {
         if (path === "/repos/example/project") return { default_branch: "main" };
         if (path === "/repos/example/project/issues/73") return fixture.sourceIssue;
         if (path.endsWith("/branches/main")) return { commit: { sha: "base-sha" } };
-        if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
+        if (path.endsWith("/git/matching-refs/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/crewbie/claims/${number}` }));
         if (path.includes("/contents/.github/agents/")) return { sha: "profile-sha", type: "file" };
-        if (path.includes("/git/ref/tags/crewbie/claims/")) {
+        if (path.includes("/git/ref/crewbie/claims/")) {
           if (!claims.has(Number(path.split("/").at(-1)))) throw new GitHubError(404, null);
           return {};
         }
@@ -221,7 +222,7 @@ test("batch cap, pause and uncertain reservations stop paid assignments without 
   await runDispatch(paused.client, config(), undefined, undefined, async () => { throw new Error("Should not discover models when paused"); });
   assert.equal(paused.assignments.length, 0);
   const uncertain = githubFixture();
-  uncertain.launches.add("refs/tags/crewbie/launches/feature/foundation/1/1");
+  uncertain.launches.add("refs/crewbie/launches/feature/foundation/1/1");
   const remaining = await dispatch(uncertain.client, config());
   assert.match(remaining[0].reason, /already reserved/);
   assert.ok(!uncertain.claims.has(1));
@@ -533,9 +534,10 @@ test("dispatch lock waits for a concurrent holder and reports a stuck lock", asy
   let busy = 2, held = false;
   const client = {
     async request(method, path, body) {
+      if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null); if (method === "GET" && path.includes("/git/matching-refs/crewbie/")) return this.list(path);
       if (path === "/repos/example/project") return { default_branch: "main" };
       if (path.endsWith("/branches/main")) return { commit: { sha: "base-sha" } };
-      if (method === "POST" && body?.ref === "refs/tags/crewbie/dispatch-lock") {
+      if (method === "POST" && body?.ref === "refs/crewbie/dispatch-lock") {
         if (busy-- > 0) throw new GitHubError(422, "locked");
         held = true; return {};
       }
@@ -547,7 +549,7 @@ test("dispatch lock waits for a concurrent holder and reports a stuck lock", asy
     assert.equal(await withDispatchLock(client, config(), async () => { assert.equal(held, true); return "ran"; }), "ran");
     assert.equal(held, false);
     busy = 10;
-    await assert.rejects(withDispatchLock(client, config(), async () => "never"), /still holds refs\/tags\/crewbie\/dispatch-lock/);
+    await assert.rejects(withDispatchLock(client, config(), async () => "never"), /still holds refs\/crewbie\/dispatch-lock/);
   } finally { Object.assign(LOCK_WAIT, saved); }
 });
 
@@ -558,7 +560,7 @@ test("a replanned batch launches its new issue despite a superseded closed issue
   const old = parseBatch(batch(), config());
   const task = old.tasks[0];
   fixture.issues.push({ number: 99, state: "closed", title: task.title, body: issueBody(old, task), labels: ["crewbie:managed", "crewbie:failed", `crewbie:owner:${task.owner}`] });
-  fixture.launches.add(`refs/tags/crewbie/launches/${old.id}/${task.id}/99/1`);
+  fixture.launches.add(`refs/crewbie/launches/${old.id}/${task.id}/99/1`);
   await dispatch(fixture.client, config());
   const launched = fixture.assignments.map((body) => Number(body.agent_assignment.custom_instructions.match(/issue #(\d+)/)[1]));
   assert.ok(launched.includes(1), `revised task issue #1 should launch; launched ${launched}`);
@@ -678,7 +680,12 @@ test("feature PR body updates only managed task closes and preserves human edits
   await dispatch(fixture.client, config());
   assert.equal(fixture.prPatches.length, 1, "unchanged task issue set is not rewritten");
 });
-test("a plan still in progress opens no feature PR, and a closed feature PR is not reopened", async () => {
+test("task PR Checks sections carry into the feature PR without closing keywords or comments", () => {
+  assert.equal(taskChecks({ number: 7, body: "## What changed\nX\n## Checks\n<!-- hidden -->\nnpm test: 12 passed.\nFixes #3\n## Why\nY" }), "npm test: 12 passed.");
+  assert.equal(taskChecks({ number: 7, body: "## Checks\nnpm test passed.\nFixes: #4\nCloses other/repo#9\nResolves https://github.com/o/r/issues/2" }), "npm test passed.", "Every closing-keyword form is dropped.");
+  assert.equal(taskChecks({ number: 7, body: "## What changed\nX" }), null);
+  assert.match(taskChecks({ number: 7, body: `### Tests\n${"a".repeat(2000)}` }), /truncated; see PR #7/);
+});test("a plan still in progress opens no feature PR, and a closed feature PR is not reopened", async () => {
   const fixture = githubFixture();
   fixture.branches.add(BRANCH);
   for (const issue of [1, 2, 3]) {

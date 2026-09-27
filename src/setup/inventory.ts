@@ -24,7 +24,7 @@ export async function inventory(root: string, paths: string[]): Promise<Inventor
     && /\.(?:[cm]?[jt]sx?|py|go|rs|java|cs|rb|php|swift|kt|tf|bicep|vue|svelte)$/.test(path));
   const result: Inventory = {
     mode: implementation.length ? "brownfield" : "greenfield", files: [], mcp: [], omitted: [],
-    scope: "AI guidance only: agent instructions, custom agents, constitution and MCP metadata, bounded to 256 KB of text. Application code, READMEs, manifests and other project files are not read. Ignored files and personal/global MCP settings are not read. MCP configurations are inspected, never launched; arguments, URLs, headers and credential values are withheld. Builds and server availability are unverified.",
+    scope: "AI guidance only: agent instructions, custom agents, constitution and MCP metadata, bounded to 256 KB of text. Application code, READMEs, manifests and other project files are not read; only their names are mapped (directories and workspaces) to check cited paths. Ignored files and personal/global MCP settings are not read. MCP configurations are inspected, never launched; arguments, URLs, headers and credential values are withheld. Builds and server availability are unverified.",
   };
   const mcpPaths = paths.filter((path) => /(^|\/)(?:mcp\.json|mcp-config\.json|\.mcp\.json)$/.test(path) || path === ".vscode/settings.json");
   const guidance = paths.filter((path) => instructionFile(path) || /^\.crewbie\/agent-archive\/(?:github|claude)\/agents\/.*\.md$/.test(path) || /(^|\/)constitution\.md$/i.test(path));

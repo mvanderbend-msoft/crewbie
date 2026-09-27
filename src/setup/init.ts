@@ -163,7 +163,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield") {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
-    report(`\n1. Assess\n  Model: ${model}\n  Reviewing instructions, agents, constitution and MCP metadata only; application code and project files are not read.\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
+    report(`\n1. Assess\n  Model: ${model}\n  Reviewing instructions, agents, constitution and MCP metadata; application code and project files are not read, only their names are mapped to check cited paths.\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
     const propose = () => proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
       models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,

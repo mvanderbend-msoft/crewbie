@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import YAML from "yaml";
 import { parseConfig, PLANNING_LABEL } from "../dist/config.js";
-import { GitHubError, hash } from "../dist/core.js";
+import { GitHubError, hash, modelJson } from "../dist/core.js";
 import { preparePlanning, publishPlanning, parsePlan, requestPlanningRevision } from "../dist/specification/planning.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { workflows } from "../dist/setup/templates.js";
@@ -44,6 +44,7 @@ async function planningFixture(t, automatic = false) {
       throw new Error(`Unexpected list ${path}`);
     },
     async request(method, path, body) {
+      if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null);
       if (method !== "GET") state.writes.push({ method, path, body });
       if (method === "GET" && path === "/user") return sender;
       if (method === "GET" && path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
@@ -86,13 +87,13 @@ async function planningFixture(t, automatic = false) {
       }
       if (method === "POST" && path === `${prefix}/actions/workflows/crewbie-plan.yml/dispatches`) return null;
       if (method === "POST" && path === `${prefix}/git/refs`) {
-        if (body.ref === "refs/tags/crewbie/dispatch-lock") {
+        if (body.ref === "refs/crewbie/dispatch-lock") {
           if (state.lock) throw new GitHubError(409, null);
           state.lock = true;
         } else state.branch = true;
         return {};
       }
-      if (method === "DELETE" && path === `${prefix}/git/refs/tags/crewbie/dispatch-lock`) { state.lock = false; return null; }
+      if (method === "DELETE" && path === `${prefix}/git/refs/crewbie/dispatch-lock`) { state.lock = false; return null; }
       if (method === "POST" && path === `${prefix}/labels`) { state.labels.push(body); return body; }
       if (method === "POST" && path === `${prefix}/issues`) {
         const issue = { ...body, number: 100 + state.executionIssues.length, state: "open" };
@@ -141,7 +142,19 @@ async function planningFixture(t, automatic = false) {
   return { cfg, root, event, state, client, candidate, output, merge };
 }
 
-test("ready label loads the actual coordinator charter/history and proposes owners without authorizing execution", async (t) => {
+test("model JSON survives prose preambles and fences, and names truncated output", () => {
+  assert.deepEqual(modelJson('{"a":1}', "X"), { a: 1 });
+  assert.deepEqual(modelJson('I\'ll inspect the repo first.\n\n```json\n{"a":1}\n```\nDone.', "X"), { a: 1 });
+  assert.deepEqual(modelJson('Planning-only run. {"a":{"b":"}"}} trailing', "X"), { a: { b: "}" } });
+  assert.throws(() => modelJson('Sure: {"a":[1,2', "Planning output"), /Planning output.*truncated/s);
+  assert.throws(() => modelJson("no json here", "Planning output"), /Planning output/);
+});
+test("planning publication accepts a model answer that starts with prose", async (t) => {
+  const f = await planningFixture(t);
+  await preparePlanning(f.root, f.client, f.cfg, f.event);
+  await writeFile(join(f.root, ".crewbie-planning-output.txt"), `Repository source isn't needed for this plan.\n\n\`\`\`json\n${JSON.stringify(f.candidate)}\n\`\`\`\n`);
+  assert.match(await publishPlanning(f.root, f.client, f.cfg), /pull\/13/);
+});test("ready label loads the actual coordinator charter/history and proposes owners without authorizing execution", async (t) => {
   const f = await planningFixture(t);
   const prepared = await preparePlanning(f.root, f.client, f.cfg, f.event);
   assert.equal(prepared.ready, true);
@@ -153,6 +166,9 @@ test("ready label loads the actual coordinator charter/history and proposes owne
   assert.match(prompt, /only writes the plan/);
   assert.match(prompt, /Attachments|attachments have NOT been fetched/);
   assert.match(prompt, /frontend/);
+  assert.match(prompt, /Repository map \(names only, no contents\): \{\s*"directories"/);
+  assert.match(prompt, /values .* verbatim into every task/);
+  assert.match(prompt, /exactly one owning task/);
   assert.equal(f.state.writes.length, 0, "Preparation has no remote write capability.");
   await f.output();
   assert.match(await publishPlanning(f.root, f.client, f.cfg), /pull\/13/);
@@ -688,6 +704,7 @@ test("a planning PR edited during publication is never overwritten", async (t) =
   const racingClient = {
     ...f.client,
     async request(method, path, body) {
+      if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null);
       const result = structuredClone(await f.client.request(method, path, body));
       if (method === "GET" && path === "/repos/example/project/pulls/13" && ++reads === 2) result.body += "\nHuman edit.";
       return result;

@@ -4,6 +4,7 @@ import { GitHubError, hash, integer, record, string } from "../core.js";
 import { checkPrDescription } from "../specification/prose.js";
 import { batchDigest, issueBody, issueDigest, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
 import { isWriter, requireWriter, type GitHubApi } from "./github.js";
+import { ledgerHas } from "./refs.js";
 import { verifySources } from "./sources.js";
 import type { AdoApi } from "./ado.js";
 
@@ -57,9 +58,7 @@ export async function reapproveIssues(client: GitHubApi, config: Config, issues:
     const next = body.replace(/<!-- crewbie-task:[A-Za-z0-9+/=]+ -->/, `<!-- crewbie-task:${Buffer.from(JSON.stringify(payload)).toString("base64")} -->`);
     const comments = await client.list(`/repos/${config.repository}/issues/${number}/comments`);
     if (next === body && await approvedIn(client, comments, config, issue)) { lines.push(`#${number}: already approved for crewbie-${role.id} on ${role.model}; nothing to change.`); continue; }
-    let claimed = true;
-    try { await client.request("GET", `/repos/${config.repository}/git/ref/tags/crewbie/claims/${number}`); }
-    catch (error) { if (error instanceof GitHubError && error.status === 404) claimed = false; else throw error; }
+    const claimed = await ledgerHas(client, config.repository, `claims/${number}`);
     changes.push({ number, body: next, title, claimed });
     lines.push(`#${number}: ${next === body ? "re-approve" : `model ${metadata.task.model} -> ${role.model}`} for crewbie-${role.id}${claimed ? `; add ${RESTART_LABEL} afterwards to relaunch it` : ""}.`);
   }

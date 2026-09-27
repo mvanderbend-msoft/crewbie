@@ -80,6 +80,43 @@ export async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, "utf8")) as unknown;
 }
 
+/**
+ * Parses a model's JSON answer without another paid request, tolerating the prose preambles and Markdown fences
+ * models add despite "return only JSON": bare JSON, else the last fenced block holding an object, else the last
+ * balanced top-level object in the text. The caller still validates the value's shape.
+ */
+export function modelJson(output: string, name: string): unknown {
+  const text = output.replace(/^\uFEFF/, "").trim();
+  if (!text) throw new SyntaxError(`${name} is empty.`);
+  const parse = (candidate: string): Record<string, unknown> | undefined => {
+    try {
+      const value = JSON.parse(candidate) as unknown;
+      return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+    } catch { return undefined; }
+  };
+  const whole = parse(text);
+  if (whole) return whole;
+  const fenced = [...text.matchAll(/```[a-zA-Z0-9_-]*[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*```/g)].map((match) => parse(match[1]!.trim())).filter((value) => value !== undefined);
+  if (fenced.length) return fenced.at(-1);
+  const objects: Record<string, unknown>[] = [];
+  let unclosed = false;
+  for (let start = text.indexOf("{"); start !== -1; start = text.indexOf("{", start + 1)) {
+    let depth = 0, quoted = false, escaped = false, end = -1;
+    for (let index = start; index < text.length && end === -1; index++) {
+      const char = text[index];
+      if (quoted) { if (escaped) escaped = false; else if (char === "\\") escaped = true; else if (char === "\"") quoted = false; }
+      else if (char === "\"") quoted = true;
+      else if (char === "{") depth++;
+      else if (char === "}" && --depth === 0) end = index;
+    }
+    if (end === -1) { unclosed = true; break; }
+    const value = parse(text.slice(start, end + 1));
+    if (value) { objects.push(value); start = end; }
+  }
+  if (objects.length) return objects.at(-1);
+  throw new SyntaxError(`${name} contains no complete JSON object${unclosed ? "; an object opens but never closes, so the output looks truncated" : ""}.`);
+}
+
 /** Reject traversal and symlink parents before reading or changing repository files. */
 export async function safePath(root: string, file: string): Promise<string> {
   if (!file || isAbsolute(file) || /^[A-Za-z]:/.test(file) || file.includes("\0")) throw new Error(`Unsafe repository path: ${file}`);

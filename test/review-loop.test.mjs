@@ -26,7 +26,7 @@ function fixture() {
   const native = [{ id: "original", state: "completed", artifacts: [{ provider: "github", type: "pull", data: { id: 100 } }] }];
   const reviews = [];
   const writes = [];
-  const launches = new Set(["refs/tags/crewbie/launches/feature/ui/1/1"]);
+  const launches = new Set(["refs/crewbie/launches/feature/ui/1/1"]);
   let saved = null, revision = null, tree = null, locked = false;
   const f = { cfg, issues, comments, pulls, native, reviews, writes, launches, paused: false, report: null, uncertain: false, wrongModel: false, outOfScope: false, extraClaims: [],
     plan: parseReviewPlan({ schemaVersion: 1, reviewer: { issue: 2, issueDigest: issueDigest(issues[1].title, issues[1].body) },
@@ -40,8 +40,8 @@ function fixture() {
     },
     client: {
       async list(path) {
-        if (path.includes("/git/matching-refs/tags/crewbie/launches/")) return [...launches].map((ref) => ({ ref }));
-        if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [1, ...f.extraClaims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
+        if (path.includes("/git/matching-refs/crewbie/launches/")) return [...launches].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref }));
+        if (path.endsWith("/git/matching-refs/crewbie/claims/")) return [1, ...f.extraClaims].map((number) => ({ ref: `refs/crewbie/claims/${number}` }));
         if (path.endsWith("/pulls?state=open")) return structuredClone([...pulls.values()]);
         const match = /\/(issues|pulls)\/(\d+)\/(comments|reviews|files)$/.exec(path);
         if (!match) throw new Error(`Unexpected list ${path}`);
@@ -51,10 +51,11 @@ function fixture() {
         if (match[3] === "files") return [{ filename: number === 10 ? (f.outOfScope ? ".github/workflows/unsafe.yml" : "frontend/page.ts") : number === 30 ? "frontend/e2e/workspace.spec.ts" : `.crewbie/reviews/${saved.digest.slice(0, 20)}.json` }];
       },
       async request(method, path, body) {
+        if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null); if (method === "GET" && path.includes("/git/matching-refs/crewbie/")) return this.list(path);
         if (method === "POST" && path.endsWith("/tasks") && body?.base_ref === "crewbie/model-check-never-exists") { (f.modelChecks ??= []).push(body.model); throw new GitHubError(f.rejectedModels?.includes(body.model) ? 400 : 412, null); }
         if (method !== "GET") writes.push({ method, path, body: structuredClone(body) });
         if (path.includes("/collaborators/")) return { permission: decodeURIComponent(path.split("/collaborators/")[1].split("/")[0]) === "maintainer" ? "write" : "read" };
-        if (path.endsWith("/git/ref/tags/crewbie/paused")) {
+        if (path.endsWith("/git/ref/crewbie/paused")) {
           if (!f.paused) throw new GitHubError(404, null);
           return {};
         }
@@ -66,8 +67,8 @@ function fixture() {
         if (path === "/user") return actor;
         if (path === "/repos/example/project") return { default_branch: "main" };
         if (path.endsWith("/branches/main")) return { commit: { sha: A } };
-        if (path.endsWith("/git/matching-refs/tags/crewbie/claims/")) return [1, ...f.extraClaims].map((number) => ({ ref: `refs/tags/crewbie/claims/${number}` }));
-        if (path.includes("/git/ref/tags/crewbie/claims/")) return {};
+        if (path.endsWith("/git/matching-refs/crewbie/claims/")) return [1, ...f.extraClaims].map((number) => ({ ref: `refs/crewbie/claims/${number}` }));
+        if (path.includes("/git/ref/crewbie/claims/")) return {};
         if (path.endsWith("/git/refs") && body.ref.endsWith("dispatch-lock")) { assert.equal(locked, false); locked = true; return {}; }
         if (method === "DELETE" && path.endsWith("dispatch-lock")) { locked = false; return null; }
         if (path.includes("/git/ref/heads/crewbie/review-state/")) {
@@ -299,6 +300,7 @@ test("attribution restores the specialist's own PR description and keeps Copilot
     const client = {
       async list(path) { if (path.endsWith("/issues/10/comments")) return comments; throw new Error(`Unexpected list ${path}`); },
       async request(method, path, body) {
+        if (method === "GET" && path.includes("/git/matching-refs/tags/crewbie/")) return []; if (method === "GET" && path.includes("/git/ref/tags/crewbie/")) throw new GitHubError(404, null); if (method === "GET" && path.includes("/git/matching-refs/crewbie/")) return this.list(path);
         if (path === "/graphql") return { data: { repository: { pullRequest: { userContentEdits: { nodes: edits.map((edit) => ({ editor: { login: edit.editor }, diff: edit.body })) } } } } };
         if (method === "GET" && path.endsWith("/pulls/10")) return structuredClone(pr);
         if (method === "PATCH" && path.endsWith("/pulls/10")) { patches.push(body.body); pr.body = body.body; return { body: body.body }; }

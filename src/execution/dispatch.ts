@@ -2,6 +2,7 @@ import { PLANNING_LABEL, reviewerFor, type Config } from "../config.js";
 import { GitHubError, hash, integer, record, string } from "../core.js";
 import { batchDigest, issueBody, requireApproval, taskMetadata, type Batch } from "../specification/batch.js";
 import { isWriter, type GitHubApi } from "../tracking/github.js";
+import { createLedger, listLedger } from "../tracking/refs.js";
 import { approvedIn, ensureLabels, hasApproval, managedIssues, setStatus } from "../tracking/issues.js";
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
@@ -179,13 +180,11 @@ const RECENTLY_CLOSED_MS = 24 * 60 * 60 * 1000;
  */
 export async function inspectWork(client: GitHubApi, config: Config, knownIssues: readonly number[] = [], now = new Date()): Promise<Work[]> {
   const all = await managedIssues(client, config.repository, "open");
-  const refs = await client.request("GET", `/repos/${config.repository}/git/matching-refs/tags/crewbie/claims/`);
-  if (!Array.isArray(refs)) throw new Error("GitHub returned an invalid claim ledger.");
+  const refs = await listLedger(client, config.repository, "claims/");
   const claims = new Set<number>();
   for (const raw of refs) {
-    const ref = string(record(raw, "claim ref").ref, "claim name");
-    const match = /^refs\/tags\/crewbie\/claims\/(\d+)$/.exec(ref);
-    if (!match) throw new Error(`Unexpected claim ref: ${ref}`);
+    const match = /^claims\/(\d+)$/.exec(raw.name);
+    if (!match) throw new Error(`Unexpected claim ref: ${raw.ref}`);
     claims.add(integer(Number(match[1]), "claimed issue number"));
   }
   const recent = claims.size ? await managedIssues(client, config.repository, "closed", new Date(now.getTime() - RECENTLY_CLOSED_MS)) : [];
@@ -377,7 +376,7 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
     const base = await ensureBranch(client, config, item.metadata.branch, sha);
     await reserveLaunch(client, config, item.metadata, issue, sha, true);
     // Atomic remote claim prevents a second workflow from launching the same issue.
-    await client.request("POST", `/repos/${config.repository}/git/refs`, { ref: `refs/tags/crewbie/claims/${issue}`, sha });
+    await createLedger(client, config.repository, `claims/${issue}`, sha);
     await assign(client, config, item, fresh, base);
   }
   await restarts(client, config, work, sha, discoverModels, ado);
@@ -482,14 +481,33 @@ export function featureBody(config: Config, batch: string, branch: string, items
 }
 function managedFeatureBlock(config: Config, items: FeatureBodyItem[]): string {
   const sorted = [...items].sort((a, b) => integer(a.issue.number, "issue") - integer(b.issue.number, "issue"));
+  const checks = sorted.filter((item) => item.pull).map((item) => {
+    const reported = taskChecks(item.pull!);
+    return `### #${String(item.issue.number)} (PR #${String(item.pull!.number)})\n${reported ?? "_No Checks section in the task PR._"}`;
+  });
   return [
     FEATURE_TASKS_START,
     "## Tasks",
     ...sorted.map((item) => `- #${String(item.issue.number)} ${String(item.issue.title)}${item.pull ? ` (#${String(item.pull.number)})` : ""}`),
+    ...(checks.length ? ["", "## Checks", "Each task PR's own Checks section, as its specialist reported it. The reviewer also reads this head's CI check runs from GitHub.", "", ...checks] : []),
     "", ...sorted.map((item) => `Closes #${String(item.issue.number)}`),
     ...sourceIssues(config, items).map((number) => `Closes #${String(number)}`),
     FEATURE_TASKS_END,
   ].join("\n");
+}
+const TASK_CHECKS_CHARACTERS = 1500;
+/** GitHub's closing keywords with any issue reference form: #N, owner/repo#N or an issue URL. */
+const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*(?:[\w.-]+\/[\w.-]+)?#\d+|\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*https?:\/\/\S+\/issues\/\d+/i;
+/** The "## Checks" section of a task PR body, without closing keywords or comments that would change the feature PR's meaning. */
+export function taskChecks(pull: Record<string, unknown>): string | null {
+  const lines = (typeof pull.body === "string" ? pull.body : "").replace(/<!--[\s\S]*?-->/g, "").split(/\r?\n/);
+  const start = lines.findIndex((line) => /^#{2,3}\s+(?:Checks|Tests?|Verification)\b/i.test(line.trim()));
+  if (start === -1) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^#{1,3}\s/.test(line.trim()));
+  const text = (end === -1 ? rest : rest.slice(0, end)).filter((line) => !CLOSING.test(line)).join("\n").trim();
+  if (!text) return null;
+  return text.length > TASK_CHECKS_CHARACTERS ? `${text.slice(0, TASK_CHECKS_CHARACTERS).trimEnd()}… (truncated; see PR #${String(pull.number)})` : text;
 }
 function taskIssueSet(items: FeatureBodyItem[]): Set<number> {
   return new Set(items.map((item) => integer(item.issue.number, "issue")));
