@@ -5,6 +5,7 @@
 ### Agents implement. You review and architect.
 
 [![CI](https://github.com/mvanderbend-msoft/crewbie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mvanderbend-msoft/crewbie/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@crewbie/cli?color=b11f4b)](https://www.npmjs.com/package/@crewbie/cli)
 [![Release](https://img.shields.io/github/v/release/mvanderbend-msoft/crewbie?include_prereleases&color=b11f4b)](https://github.com/mvanderbend-msoft/crewbie/releases)
 [![Node.js](https://img.shields.io/badge/Node.js-22.12%2B-43853d)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -122,8 +123,13 @@ Never put the token in a file, an issue or a command argument. See
 **1. Install the CLI**
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.49/crewbie-cli-0.1.0-alpha.49.tgz
+npm install --global @crewbie/cli
 ```
+
+Install it globally so the `crewbie` command is on your PATH. If you install it
+into a project without `--global`, run it with `npx crewbie` instead. The
+package is on [npm](https://www.npmjs.com/package/@crewbie/cli); each version is
+also attached to its [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases).
 
 **2. Set up your repository.** Run this inside your own project:
 
