@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { unlink } from "node:fs/promises";
-import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, modelJson, optionalText, readJson, record, safePath, string, strings, textHash, writeAtomic } from "../core.js";
+import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, modelJson, optionalText, readJson, record, safePath, string, strings, textHash, words, writeAtomic } from "../core.js";
 import { limitsFor, parseConfig, PLANNING_LABEL, reviewerFor, type Config } from "../config.js";
 import { isWriter, requireWriter, type GitHubApi } from "../tracking/github.js";
 import { memoryContext, relevantTopics } from "../memory/context.js";
@@ -209,7 +209,7 @@ Every task PR merges automatically into the plan's feature branch once its check
 Implement the user-supplied requirements; PRD/spec authoring is outside Crewbie's scope.
 The legacy batch.spec field is a source reference, supplied by Crewbie, not a document to author. Never approve execution or claim unrun checks.
 Links and attachments have NOT been fetched. If essential information is missing, ask at most five concise questions and return batch: null.
-Return only JSON: {"summary":"at most 100 words explaining implementation decomposition","questions":[],"teamSuggestions":[],"batch":{"schemaVersion":1,"id":"issue-${source.number}","tasks":[{"id":"task-id","title":"short title","body":"scope\\n\\n## Acceptance criteria\\n- observable behavior from supplied requirements","owner":"existing-role-id","model":"that role's model","priority":1,"dependsOn":[]}],"approval":null}}.
+Return only JSON: {"summary":"brief explanation of implementation decomposition (aim for at most 100 words; a longer summary is kept in full in plan.md)","questions":[],"teamSuggestions":[],"batch":{"schemaVersion":1,"id":"issue-${source.number}","tasks":[{"id":"task-id","title":"short title","body":"scope\\n\\n## Acceptance criteria\\n- observable behavior from supplied requirements","owner":"existing-role-id","model":"that role's model","priority":1,"dependsOn":[]}],"approval":null}}.
 Existing config and word budgets: ${json({ config, limits: limitsFor(config) })}
 Coordinator charter: ${charter}
 Context: ${json(context)}
@@ -232,7 +232,6 @@ function deliveryNote(config: Config, batch: Batch | null): string {
 export function parsePlan(value: unknown, config: Config, source: Source): Plan {
   const data = record(value, "coordinator plan");
   const summary = string(data.summary, "plan summary");
-  bounded(summary, 100, "Plan summary");
   const questions = strings(data.questions, "planning questions");
   if (questions.length > 5) throw new Error("Keep at most five planning questions.");
   for (const question of questions) bounded(question, 60, "Planning question");
@@ -255,6 +254,17 @@ export function parsePlan(value: unknown, config: Config, source: Source): Plan 
     throw new Error("Planning output appears to contain a secret; nothing will be published.");
   }
   return { summary, questions, teamSuggestions, batch };
+}
+
+function prSummary(summary: string, path: string): string {
+  if (words(summary) <= 100) return summary;
+  // Only publish whole sentences within the PR budget; the plan retains every word.
+  const sentences: string[] = [];
+  for (const sentence of summary.trim().split(/(?<=[.!?])\s+/u)) {
+    if (!/[.!?]$/u.test(sentence) || words([...sentences, sentence].join(" ")) > 100) break;
+    sentences.push(sentence);
+  }
+  return `${sentences.join(" ")}${sentences.length ? "\n\n" : ""}Full summary: \`${path}\` (no sentences omitted from the plan).`;
 }
 
 export async function publishPlanning(root: string, client: GitHubApi, config: Config): Promise<string> {
@@ -322,7 +332,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
     };
     files[`${directory}/execution.json`] = json(execution);
   }
-  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${plan.summary}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${checks}${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from a user with write access runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
+  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${prSummary(plan.summary, `${directory}/plan.md`)}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${checks}${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from a user with write access runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
   const prLimit = limitsFor(config).pr;
   // Advisory plan checks are not counted against the word budget, so they never cost a paid plan.
   if (prLimit !== undefined) bounded((checks ? body.replace(checks, "") : body).replace(/<!--[\s\S]*?-->/g, ""), prLimit, "Planning PR description");
