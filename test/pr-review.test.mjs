@@ -40,7 +40,7 @@ test("reviewer CI evidence reports failures, missing CI and unreadable checks wi
 async function setup(t) {
   const root = await fixture(t, {
     ".github/agents/crewbie-developer.agent.md": "---\nname: crewbie-developer\n---\nYou are a grumpy but precise reviewer.",
-    ".crewbie/decisions.md": "# Decisions\n", ".crewbie/team/developer/hot.md": "# Hot\n", ".crewbie/team/developer/index.md": "# Index\n",
+    ".crewbie/decisions/hot.md": "# Decisions\n", ".crewbie/decisions/index.md": "# Decisions index\n", ".crewbie/team/developer/hot.md": "# Hot\n", ".crewbie/team/developer/index.md": "# Index\n",
   });
   const b = parseBatch(batch(), config());
   const pull = { number: 101, state: "open", title: "Crewbie feature", body: "What/why", head: { sha: HEAD, ref: BRANCH, repo: { full_name: "example/project" } }, base: { ref: "main" } };

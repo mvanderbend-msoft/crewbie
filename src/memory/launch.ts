@@ -1,6 +1,7 @@
 import { type Config } from "../config.js";
 import { GitHubError, record, slug, textHash } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
+import { SHARED_HOT, SHARED_INDEX } from "./context.js";
 
 // GitHub documents no limit for launch instructions; stay well below issue-body size so assignment is not rejected.
 export const LAUNCH_MEMORY_CHARACTERS = 20_000;
@@ -10,7 +11,8 @@ export function launchMemoryPaths(config: Config, role: string): string[] {
   return [
     ".crewbie/instructions.md",
     ...(config.constitution ? [config.constitution] : []),
-    ".crewbie/decisions.md",
+    SHARED_HOT,
+    SHARED_INDEX,
     `.crewbie/team/${role}/hot.md`,
     `.crewbie/team/${role}/index.md`,
   ];

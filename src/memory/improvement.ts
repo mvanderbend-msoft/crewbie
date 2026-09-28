@@ -42,7 +42,7 @@ export async function validateProposal(root: string, config: Config, proposal: P
     const before = await optionalText(await safePath(root, change.path));
     if (before === null ? change.beforeHash !== null : !matchesTextHash(before, change.beforeHash)) throw new Error(`${change.path} changed since analysis.`);
     if (change.path.endsWith(".agent.md")) agentPrompt(change.content, change.path);
-    else if (!change.path.endsWith("/index.md") && !change.path.endsWith("decisions.md")) bounded(change.content, change.path.endsWith("/hot.md") ? limits.hot
+    else if (!change.path.endsWith("/index.md")) bounded(change.content, change.path.endsWith("/hot.md") ? limits.hot
       : change.path === config.constitution || change.path === ".crewbie/instructions.md" ? limits.constitution : limits.topic, change.path);
     bounded(change.reason, 100, "Change reason");
     if (/-----BEGIN .*PRIVATE KEY-----|(?:gh[pousr]_[A-Za-z0-9]{20,})|(?:github_pat_[A-Za-z0-9_]{20,})/.test(change.content)) {

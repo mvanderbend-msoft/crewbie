@@ -513,10 +513,17 @@ explain scope guards, uncertain launches and round limits.
 | **Cold** | Deeper topic summaries with evidence. | The current task needs them. |
 | **Archive** | Superseded detail and its provenance. | Investigating an older decision. |
 
-Shared decisions belong in a compact repository-wide record; role history
-captures practical lessons. Reuse existing ADRs rather than copying them.
-Cloud-agent launches embed the role's shared rules, constitution, decisions,
-hot memory and index from the work branch in the launch instructions, so a
+Shared decisions use the same tiers under `.crewbie/decisions/`: `hot.md` holds
+active cross-role choices and is always read, `index.md` points to `cold/` and
+`archive/` topics that are consulted only when a task needs deeper history.
+Planning PRs, task agents and the nightly improver may record or demote shared
+decisions; humans review each change in its PR. Role history captures practical
+lessons. Reuse existing ADRs rather than copying them. `crewbie update --apply`
+moves a legacy `.crewbie/decisions.md` into `decisions/hot.md` (an unchanged
+template is simply removed).
+Cloud-agent launches embed the role's shared rules, constitution, shared hot
+decisions and index, hot memory and index from the work branch in the launch
+instructions, so a
 session starts with them rather than being asked to read them. Files too large
 to embed (20,000 characters in total) are listed as required reading.
 Specialists propose useful lessons in scoped PR changes, or defer them to
@@ -533,8 +540,8 @@ its own permissions or edit application code.
 |---|---|
 | Batch scope/source reference / constitution | 600 words each |
 | Specialist charter | No word limit; GitHub's 30,000-character agent prompt maximum |
-| Role hot memory | 600 words |
-| Role index / active shared decisions | No word limit |
+| Role / shared hot memory | 600 words |
+| Role / shared index | No word limit |
 | PR description | No word limit (set `limits.pr` to enforce one) |
 | Concurrent implementation sessions | 2 per repository |
 | Nightly input / improvement PRs | 20 new records / 1 active PR |
@@ -552,7 +559,8 @@ scores or token limits. Workflow timeouts are not guaranteed spending caps.
 .crewbie\config.json                   Approved team and execution policy
 .crewbie\instructions.md               Shared working rules
 .crewbie\constitution.md               Approved principles, or an existing path
-.crewbie\decisions.md                  Compact shared decisions
+.crewbie\decisions\hot.md              Active shared decisions
+.crewbie\decisions\index.md            Shared topic pointers
 .crewbie\team\<role>\hot.md            Current role knowledge
 .crewbie\team\<role>\index.md          Topic pointers
 ```
