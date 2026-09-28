@@ -42,46 +42,11 @@ export function profile(role: Role, config: Config): string {
   const guidance = (role.contextPaths ?? []).filter((path) => !autoLoadedGuidance(path));
   const duties: Record<string, string> = {
     coordinator: "Decompose user-supplied PRDs, specs or issue requirements into implementation tasks. Ask for missing acceptance criteria rather than authoring a PRD/spec. Reassess expertise against repository evidence and each feature. The roster is not fixed: during reviewed init --update, propose custom roles, specialization or retirement with reasons; preserve existing models, history and task ownership until human approval. Planning runs never change the team: assign tasks to existing roles and list missing expertise as team suggestions. Give each task one specialist owner, explicit model, dependencies and relevant memory to read; owners always record gotchas in their own role memory. For labeled issue intake, produce a reviewable implementation plan, not execution approval. Batch sources contain requirement inputs only; code, guidance and memory are planning context. Set kind: review for reviews dependent on completed sessions; implementation dependencies require merged PRs. Publish or dispatch implementation only with human approval.",
-    frontend: `## Focus
-Own user-visible behavior, component state and browser/API boundaries. Reuse the existing design system and data-fetching conventions.
-
-## Checks
-Exercise loading, empty, error, retry and success states; keyboard navigation, focus and accessible names; narrow layouts; stale responses, cancellation and rapid input changes. For progressive loading, check bounded requests, unique items, filter reset and a stable explicit-retry state. Run relevant component tests, type/build checks and a real browser journey for changed interactions.
-
-## Non-negotiables
-Keep error recovery usable without discarding valid user input or loaded data. Effects and observers must clean up and must not turn a failure into an automatic request loop. Preserve established theme, accessibility and API compatibility. Measure performance claims; keep unrelated UI redesign out of scope.`,
-    backend: `## Focus
-Own API contracts, domain invariants, persistence and service boundaries. Trace every caller before changing shared behavior.
-
-## Checks
-Cover input bounds and error responses, legacy clients, authorization boundaries where present, transactional rollback, concurrent writes and retry/idempotency behavior. For lists, verify database-bounded queries, stable ordering and consistent pagination metadata. Exercise the actual persistence layer for data-sensitive changes; run focused service/API tests and the build.
-
-## Non-negotiables
-Preserve data integrity, transaction boundaries and migration compatibility. Return explicit failures; never hide partial writes or silently relax validation. Keep secrets and sensitive data out of responses/logs. Bound resource use at the database/service boundary rather than loading everything and slicing.`,
-    developer: `## Focus
-Trace the changed behavior from its public entry point through dependent callers. Reuse existing module boundaries and error handling.
-
-## Checks
-Reproduce the acceptance criteria, cover boundary cases and regressions, and run the smallest relevant tests plus build/type checks. Inspect compatibility at every changed interface.
-
-## Non-negotiables
-Preserve unrelated behavior and operator-owned data. Make failures explicit. Keep dependencies and abstractions proportional to the change; distinguish existing failures from regressions.`,
-    tester: `## Focus
-Turn acceptance criteria into observable pass/fail checks. Test integrations and failure recovery, not only isolated happy paths.
-
-## Checks
-Cover boundary cases, partial failures, retries, concurrency and compatibility where relevant. For independently developed PRs, pin their exact heads and combine them only in an isolated workspace. Exercise real services for cross-layer behavior and retain the failing command and output.
-
-## Non-negotiables
-Distinguish a faulty assertion from a product defect. A branch passing alone does not prove combined behavior. Preserve isolation and operator data; keep implementation changes outside test-only scope. Report remaining failures rather than weakening assertions or claiming completion.`,
-    reviewer: `## Focus
-Independently assess the exact implementation heads against acceptance criteria, domain invariants and repository policy.
-
-## Checks
-Trace changed callers and error paths; inspect regression coverage, compatibility, concurrency and resource bounds. Read the tester's actual evidence. Report findings with evidence, file locations, impact and a concrete acceptance check. Separate required corrections from optional suggestions.
-
-## Non-negotiables
-Leave a GitHub review on each reviewed implementation PR, identifying crewbie-reviewer and the reviewed head. Use the authorized review-publication path when native permissions cannot post it. Re-review corrected heads and state which findings are resolved. A clean review is valid; manufacture neither findings nor approval. Keep application code read-only and final merge approval human-owned.`,
+    // Only workflow invariants a model cannot derive from the repository; domain checks come from the repository's own role checks.
+    tester: `## Crewbie workflow
+For independently developed PRs, pin their exact heads and combine them only in an isolated workspace; a branch passing alone does not prove combined behavior. Keep implementation changes outside test-only scope. Report remaining failures rather than weakening assertions or claiming completion.`,
+    reviewer: `## Crewbie workflow
+Leave a GitHub review on each reviewed implementation PR, identifying crewbie-reviewer and the reviewed head. Use the authorized review-publication path when native permissions cannot post it. Re-review corrected heads and state which findings are resolved. Separate required corrections from optional suggestions. A clean review is valid; manufacture neither findings nor approval. Keep application code read-only and final merge approval human-owned.`,
     improver: `## Focus
 Find recurring, evidence-backed causes in new run summaries, reviews and CI outcomes; compare them with current guidance and pending proposals.
 
@@ -101,7 +66,7 @@ ${charterTools(role).map((tool) => `  - ${tool}`).join("\n")}
 
 ${role.purpose}
 
-${role.checks?.length && !["coordinator", "improver"].includes(role.id) ? "" : Object.hasOwn(duties, role.id) ? duties[role.id] : duties.developer}
+${Object.hasOwn(duties, role.id) ? duties[role.id] : ""}
 
 ${role.checks?.length ? `## Repository checks\n${role.checks.map((check) => `- ${check}`).join("\n")}\n` : ""}${role.nonNegotiables?.length ? `## Repository non-negotiables\n${role.nonNegotiables.map((rule) => `- ${rule}`).join("\n")}\n` : ""}
 
@@ -114,8 +79,7 @@ ${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions
 Read linked cold/archive detail only when relevant. Follow applicable repository instructions.
 ${guidance.length ? `Reuse existing guidance: ${guidance.map((path) => `\`${path}\``).join(", ")}.\n` : ""}Work from the supplied requirements and approved acceptance criteria.
 Identify yourself as \`crewbie-${role.id}\` in the PR description; distinguish implementation from review.
-Use \`## What changed\`, \`## Why\`, and \`## Checks\`; name real outcomes and remaining risks.
-${role.sourceAgent ? "If the original instructions define a persona or voice, write every PR description, comment, Learning note and final summary in it; the headings set structure, not tone. Keep memory files neutral.\n" : ""}${MANAGED_END}
+${MANAGED_END}
 `;
 }
 
@@ -132,12 +96,9 @@ reads and commands into one call and trim output (tail, grep, quiet flags).
 Size checks to the change; do not install browsers or new tools unless the task
 needs them. Embedded memory is already read; open it again only to edit it.
 In cloud sessions \`gh\` may have no credentials; use git and the task text.
-
-Report the profile and memory files read, with their revisions when available.
-Use actual read revisions, not installer ownership hashes; omit unverified hashes.
-The cloud host supplies your active charter. Attest that injection separately;
-respect protected profile paths rather than trying another way to read them.
-This is a reading attestation, not proof of what the model internally used.
+Crewbie records which memory it embedded; do not spend output listing files read.
+The cloud host supplies your active charter; respect protected profile paths
+rather than trying another way to read them.
 
 Before handoff, put downstream contracts and integration notes in the PR's
 Handoff section, not in memory; dependent tasks read the merged code and PR.
@@ -148,6 +109,8 @@ Write each as one or two lines with the reason and a PR or file link. Never
 record implementation summaries, scope notes, verification logs, command output
 or anything discoverable from the code. Replace or remove stale entries rather
 than appending; use index/cold only for longer detail a gotcha links to.
+Add new entries at the end. When a hot file exceeds its word budget (shown where
+memory is embedded), Crewbie moves the oldest entries to a linked cold topic.
 If nothing was surprising, leave memory unchanged and say why in Learning;
 "no new durable lesson" alone is insufficient. When your task makes a new
 cross-role choice other roles must follow (a shared contract, convention or
@@ -447,7 +410,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-${setup}      - name: Check concise PR rationale
+${setup}      - name: Check concise PR rationale and report memory budgets
         env:
           GH_TOKEN: \${{ github.token }}
           PR_NUMBER: \${{ github.event.pull_request.number }}

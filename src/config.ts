@@ -4,10 +4,14 @@ export interface Role { id: string; purpose: string; model: string; modelReason?
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const RESTART_LABEL = "crewbie:restart";
 export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1500 };
+/** Anthropic's recommended maximum for always-loaded instruction files, also used by the AGENTS.md configuration-smells study (arXiv:2606.15828). */
+export const DEFAULT_GUIDANCE_LINES = 200;
 /** `pr` has no evidence-backed default; it is enforced only when a repository sets it explicitly. */
-export type WordLimits = typeof DEFAULT_LIMITS & { pr?: number };
+export type WordLimits = typeof DEFAULT_LIMITS & { pr?: number; guidanceLines?: number };
 export type ModelProfile = "economy" | "balanced" | "quality";
 export const DEFAULT_EXECUTION_LIMITS = { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3 };
+/** `maxTokensPerFeature` has no evidence-backed default; it is enforced only when a repository sets it explicitly. */
+export type ExecutionLimits = typeof DEFAULT_EXECUTION_LIMITS & { maxTokensPerFeature?: number };
 export type MergeMethod = "merge" | "squash" | "rebase";
 /** How Crewbie merges task PRs into their plan's feature branch once the session completed and every check passed. */
 export interface MergePolicy { method: MergeMethod }
@@ -29,7 +33,7 @@ export interface Config {
   limits?: WordLimits;
   planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
   modelProfile?: ModelProfile;
-  execution?: typeof DEFAULT_EXECUTION_LIMITS;
+  execution?: ExecutionLimits;
   merge?: MergePolicy;
   review?: ReviewConfig;
   local?: LocalConfig;
@@ -43,6 +47,7 @@ export function reviewerFor(config: Config): { role: string; model: string } | n
   return { role: role.id, model: config.review.model ?? role.model };
 }
 export function limitsFor(config?: Config): WordLimits { return config?.limits ?? DEFAULT_LIMITS; }
+export function guidanceLinesFor(config?: Config): number { return config?.limits?.guidanceLines ?? DEFAULT_GUIDANCE_LINES; }
 export function isRoleContextPath(path: string): boolean {
   return /^(?:[A-Za-z0-9._ -]+\/)*[A-Za-z0-9._ -]+\.md$/i.test(path)
     && !path.includes("..") && !path.toLowerCase().startsWith(".git/");
@@ -111,6 +116,7 @@ export function parseConfig(value: unknown): Config {
   const rawLimits = data.limits === undefined ? {} : record(data.limits, "word limits");
   const limits = Object.fromEntries(Object.entries(DEFAULT_LIMITS).map(([key, fallback]) => [key, integer(rawLimits[key] ?? fallback, `${key} word limit`, 1, 10000)])) as WordLimits;
   if (rawLimits.pr !== undefined) limits.pr = integer(rawLimits.pr, "pr word limit", 1, 10000);
+  if (rawLimits.guidanceLines !== undefined) limits.guidanceLines = integer(rawLimits.guidanceLines, "guidanceLines line limit", 1, 10000);
   let planning: Config["planning"];
   if (data.planning !== undefined) {
     const value = record(data.planning, "planning");
@@ -156,6 +162,7 @@ export function parseConfig(value: unknown): Config {
     ...(execution === undefined ? {} : { execution: {
       maxLaunchesPerBatch: integer(execution.maxLaunchesPerBatch, "maximum launches per batch", 1, 1000),
       maxAttemptsPerTask: integer(execution.maxAttemptsPerTask, "maximum attempts per task", 1, 100),
+      ...(execution.maxTokensPerFeature === undefined ? {} : { maxTokensPerFeature: integer(execution.maxTokensPerFeature, "maximum tokens per feature", 1, Number.MAX_SAFE_INTEGER) }),
     } }),
     ...(merge ? { merge } : {}),
     ...(review ? { review } : {}),

@@ -4,7 +4,7 @@ import type { Config } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { collectRecords, evidenceId, parseRecords } from "../reporting/records.js";
 import { contextTopics, memoryContext, type ContextFile } from "./context.js";
-import { maintenancePrompt, parseProposal, publishProposal, seenEvidence, selectEvidence, validateProposal } from "./improvement.js";
+import { maintenancePrompt, parseProposal, publishProposal, RATIONALE, seenEvidence, selectEvidence, validateProposal } from "./improvement.js";
 import { readState, saveState } from "./state.js";
 
 const INPUT = ".crewbie-maintenance-input.json";
@@ -33,6 +33,8 @@ export async function prepareMaintenance(root: string, client: GitHubApi, config
     byPath.set(path, { path, content, sha256: textHash(content) });
   }
   const files = [...byPath.values()];
+  const rationale = await optionalText(await safePath(root, RATIONALE));
+  if (rationale !== null) files.push({ path: RATIONALE, content: rationale, sha256: textHash(rationale) });
   const prompt = maintenancePrompt(config, evidence, files);
   if (prompt.length > 100_000) throw new Error("Maintenance context exceeds 100 KB. Narrow the evidence batch; no input was silently truncated.");
   await writeAtomic(root, INPUT, json({ schemaVersion: 1, evidence, stateRevision: state.revision }));

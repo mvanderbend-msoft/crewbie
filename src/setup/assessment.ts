@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { relative, resolve } from "node:path";
-import { DEFAULT_EXECUTION_LIMITS, parseConfig, type Config, type Role } from "../config.js";
+import { DEFAULT_EXECUTION_LIMITS, guidanceLinesFor, parseConfig, type Config, type Role } from "../config.js";
 import { optionalText, safePath, textHash } from "../core.js";
 import { assessInstructions, instructionFile, type InstructionQuality } from "./instruction-quality.js";
 import { assessTeam, type TeamAssessment } from "./team.js";
@@ -50,7 +50,7 @@ export async function assess(root: string): Promise<Assessment> {
       ? { area: "Agent environment", status: "ready", evidence: [SETUP_STEPS], detail: "Cloud agents start with the setup steps in this workflow." }
       : { area: "Agent environment", status: "gap", evidence: [], detail: `Add ${SETUP_STEPS} that installs dependencies (and checks out with fetch-depth: 0 for reviewers). Without it every agent session spends model turns installing them.` },
   ];
-  const instructionQuality = await assessInstructions(root, paths);
+  const instructionQuality = await assessInstructions(root, paths, guidanceLinesFor(installed ?? undefined));
   const context = await inventory(root, paths);
   findings.push(
     { area: "MCP servers", status: "unknown", evidence: context.mcp.map((file) => file.path), detail: "Inspect configured capabilities, overlap and missing integrations. Server connectivity and personal/global settings are not verified; credential values are withheld." },

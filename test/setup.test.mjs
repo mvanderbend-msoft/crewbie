@@ -83,8 +83,9 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
   assert.match(SHARED_INSTRUCTIONS, /no new durable lesson/i);
   assert.match(SHARED_INSTRUCTIONS, /Work economically.*Batch independent/s);
   bounded(SHARED_INSTRUCTIONS, config().limits?.constitution ?? 600, "shared instructions");
-  assert.match(profile({ id: "tester", purpose: "Test.", model: "" }, config()), /boundary|edge/i);
-  assert.match(profile({ id: "reviewer", purpose: "Review.", model: "" }, config()), /findings.*evidence/i);
+  assert.match(profile({ id: "tester", purpose: "Test.", model: "" }, config()), /isolated workspace/i);
+  assert.doesNotMatch(profile({ id: "developer", purpose: "Develop.", model: "" }, config()), /## Crewbie workflow/);
+  assert.match(profile({ id: "reviewer", purpose: "Review.", model: "" }, config()), /findings.*resolved/i);
 });
 
 test("generated charters declare only the tools their role needs", () => {
@@ -111,8 +112,8 @@ test("domain charters contain distinct checks, invariants and reviewed repositor
   assert.doesNotMatch(frontend, /observers.*automatic request loop/);
   assert.match(frontend, /npm run build/);
   assert.match(frontend, /Preserve unsaved product edits/);
-  assert.match(backend, /transactional rollback/);
-  assert.match(backend, /database-bounded/);
+  // Generic domain advice is not shipped: frontier models already know it, and it adds context without helping.
+  assert.doesNotMatch(backend, /transactional rollback|database-bounded/);
   assert.doesNotMatch(backend, /keyboard/);
   assert.doesNotMatch(frontend, /transactional rollback/);
   const configured = parseConfig(config({ roles: [{ id: "frontend", purpose: "UI.", model: "approved-model", checks: ["npm test"], nonNegotiables: ["Use established tokens."] }] }));
@@ -259,7 +260,11 @@ test("every generated role has concise writing and explicit memory pointers", ()
   agentPrompt(text, "charter");
   assert.match(text, /hot\.md/);
   assert.match(text, /index\.md/);
-  for (const heading of ["What changed", "Why", "Checks"]) assert.ok(text.includes(`\`## ${heading}\``));
+  // PR headings live once in the shared instructions every launch embeds, not in each charter.
+  for (const heading of ["What changed", "Why", "Checks"]) {
+    assert.ok(SHARED_INSTRUCTIONS.includes(`\`## ${heading}\``));
+    assert.ok(!text.includes(`\`## ${heading}\``));
+  }
   assert.equal(hash(text), hash(profile(config().roles[0], config())));
 });
 

@@ -1,9 +1,10 @@
-import { DEFAULT_EXECUTION_LIMITS, requireExecution, type Config } from "../config.js";
+import { DEFAULT_EXECUTION_LIMITS, requireExecution, type Config, type ExecutionLimits } from "../config.js";
 import { GitHubError, integer, record, slug, string } from "../core.js";
 import { taskMetadata } from "../specification/batch.js";
 import { requireWriter, type GitHubApi } from "../tracking/github.js";
 import { listCopilotModels, type ModelChoice } from "../setup/copilot.js";
 import { createLedger, deleteLedger, ledgerHas, ledgerRef, listLedger } from "../tracking/refs.js";
+import type { LaunchContext } from "../memory/launch.js";
 
 type Metadata = NonNullable<ReturnType<typeof taskMetadata>>;
 export type DiscoverModels = () => Promise<ModelChoice[]>;
@@ -75,6 +76,28 @@ export async function setLaunchPause(client: GitHubApi, config: Config, paused: 
 export interface LaunchAllowance {
   batch: string; task: string; issue: number; used: number; taskUsed: number; issueUsed: number;
   maxLaunchesPerBatch: number; maxAttemptsPerTask: number; blocked: string | null;
+  maxTokensPerFeature?: number; featureTokens?: FeatureTokens;
+}
+export interface FeatureTokens { tokens: number; pulls: number; unmeasured: number }
+/** Observed tokens Crewbie recorded in a PR's attribution block, or null when none were measured. */
+export function attributedTokens(body: string): number | null {
+  const block = /<!-- crewbie-attribution -->([\s\S]*?)<!-- \/crewbie-attribution -->/.exec(body)?.[1];
+  const match = block ? /\*\*Observed tokens:\*\* (\d+) \(/.exec(block) : null;
+  return match ? Number(match[1]) : null;
+}
+/**
+ * Observed tokens across the task PRs that target a feature branch, from Crewbie's own attribution blocks.
+ * PRs without measured usage are counted separately, so the total is a lower bound and never silently zero.
+ */
+export async function featureTokens(client: GitHubApi, config: Config, branch: string): Promise<FeatureTokens> {
+  const pulls = await client.list(`/repos/${config.repository}/pulls?state=all&base=${encodeURIComponent(branch)}`);
+  const result: FeatureTokens = { tokens: 0, pulls: pulls.length, unmeasured: 0 };
+  for (const pull of pulls) {
+    const tokens = attributedTokens(typeof pull.body === "string" ? pull.body : "");
+    if (tokens === null) result.unmeasured++;
+    else result.tokens += tokens;
+  }
+  return result;
 }
 export async function launchAllowance(client: GitHubApi, config: Config, metadata: Metadata, issue: number): Promise<LaunchAllowance> {
   const batch = slug(metadata.batch, "batch"), task = slug(metadata.task.id, "task");
@@ -108,13 +131,20 @@ export async function launchAllowance(client: GitHubApi, config: Config, metadat
       entry.attempts = 0; refunds--;
     }
   }
-  const limits = config.execution ?? DEFAULT_EXECUTION_LIMITS;
+  const limits: ExecutionLimits = config.execution ?? DEFAULT_EXECUTION_LIMITS;
   const result: LaunchAllowance = { batch, task, issue, used: entries.reduce((n, entry) => n + entry.attempts, 0),
     taskUsed: entries.filter((entry) => entry.task === task).reduce((n, entry) => n + entry.attempts, 0),
     issueUsed: entries.filter((entry) => entry.task === task && entry.issue === issue).reduce((n, entry) => n + entry.attempts, 0), ...limits, blocked: null };
   if (await launchesPaused(client, config)) result.blocked = "Future Crewbie launches are paused. Running sessions are unchanged.";
   else if (result.used >= limits.maxLaunchesPerBatch) result.blocked = `Batch launch allowance exhausted (${result.used}/${limits.maxLaunchesPerBatch}).`;
   else if (result.taskUsed >= limits.maxAttemptsPerTask) result.blocked = `Task attempt allowance exhausted (${result.taskUsed}/${limits.maxAttemptsPerTask}); initial and uncertain requests count; verified start failures do not.`;
+  else if (limits.maxTokensPerFeature !== undefined) {
+    const spent = await featureTokens(client, config, metadata.branch);
+    result.featureTokens = spent;
+    if (spent.tokens >= limits.maxTokensPerFeature) {
+      result.blocked = `Feature token ceiling reached (${spent.tokens}/${limits.maxTokensPerFeature} observed tokens across ${spent.pulls} task PRs${spent.unmeasured ? `; ${spent.unmeasured} have no measured usage, so this is a lower bound` : ""}). Raise execution.maxTokensPerFeature in a reviewed config change to continue.`;
+    }
+  }
   if (result.blocked) return result;
   // Older claims have no reliable continuation count. Never present a partial history as a lifetime cap.
   const claims = await listLedger(client, config.repository, "claims/");
@@ -162,15 +192,41 @@ export async function baselineLaunches(client: GitHubApi, config: Config, issue:
     return `Recorded the human-attested baseline of ${attempts} attempts for #${issue}. No history reset, paid launch or model change occurred. Run preflight again.`;
   });
 }
-export async function reserveLaunch(client: GitHubApi, config: Config, metadata: Metadata, issue: number, baseSha: string, initial = false): Promise<LaunchAllowance> {
+export async function reserveLaunch(client: GitHubApi, config: Config, metadata: Metadata, issue: number, baseSha: string, initial = false, context?: LaunchContext): Promise<LaunchAllowance> {
   const allowance = await launchAllowance(client, config, metadata, issue);
   if (allowance.blocked) throw new Error(allowance.blocked);
   if (initial && allowance.issueUsed > 0) throw new Error("Initial launch already reserved; inspect its outcome instead of retrying.");
   // Refunded start failures lower the count, so number after the highest existing ref rather than reuse one.
   const existing = await listLedger(client, config.repository, `launches/${allowance.batch}/${allowance.task}/`);
   const highest = Math.max(0, ...existing.map((raw) => Number(/\/(\d+)$/.exec(raw.name)?.[1] ?? 0)));
-  await createLedger(client, config.repository, `launches/${allowance.batch}/${allowance.task}/${issue}/${Math.max(allowance.taskUsed, highest) + 1}`, baseSha);
+  const name = `launches/${allowance.batch}/${allowance.task}/${issue}/${Math.max(allowance.taskUsed, highest) + 1}`;
+  let target = baseSha;
+  if (context) {
+    // The launch ref points at a tag recording exactly what memory was embedded; tag objects fire no workflows.
+    const tag = record(await client.request("POST", `/repos/${config.repository}/git/tags`, {
+      tag: name, message: JSON.stringify({ schemaVersion: 1, kind: "launch-context", ...context }), object: baseSha, type: "commit",
+    }), "launch context tag");
+    target = string(tag.sha, "launch context SHA");
+  }
+  await createLedger(client, config.repository, name, target);
   return allowance;
+}
+/** The memory Crewbie embedded in the latest launch for an issue, or null when that launch predates the record. */
+export async function latestLaunchContext(client: GitHubApi, config: Config, metadata: Metadata, issue: number): Promise<LaunchContext | null> {
+  const entries = await listLedger(client, config.repository, `launches/${slug(metadata.batch, "batch")}/${slug(metadata.task.id, "task")}/${integer(issue, "issue")}/`);
+  const latest = entries.filter((entry) => /\/\d+$/.test(entry.name)).sort((a, b) => Number(/(\d+)$/.exec(b.name)![1]) - Number(/(\d+)$/.exec(a.name)![1]))[0];
+  if (!latest?.object || latest.object.type !== "tag" || !/^[a-f0-9]{40}$/.test(String(latest.object.sha))) return null;
+  const tag = record(await client.request("GET", `/repos/${config.repository}/git/tags/${latest.object.sha}`), "launch context tag");
+  let data: Record<string, unknown>;
+  try { data = record(JSON.parse(string(tag.message, "launch context")) as unknown, "launch context"); }
+  catch { return null; }
+  if (data.schemaVersion !== 1 || data.kind !== "launch-context" || !Array.isArray(data.files)) return null;
+  const list = (value: unknown) => Array.isArray(value) ? value.map((item) => string(item, "context path")) : [];
+  return {
+    ref: string(data.ref, "launch context ref"),
+    files: data.files.map((raw) => { const file = record(raw, "context file"); return { path: string(file.path, "context path"), sha256: string(file.sha256, "context hash") }; }),
+    unread: list(data.unread), missing: list(data.missing),
+  };
 }
 const PROBE_BRANCH = "crewbie/model-check-never-exists";
 /**

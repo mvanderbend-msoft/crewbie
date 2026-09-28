@@ -207,6 +207,14 @@ additions) must fit GitHub's documented 30,000-character custom agent maximum. I
 it does not, init stops before adoption and asks the user to shorten the original;
 it never truncates instructions. Available from alpha.12; earlier releases stopped at 400 words.
 
+Generated (non-adopted) charters ship no generic domain advice such as "test
+edge cases" or "consider accessibility"; capable models already know it and it
+adds context to every launch. Only Crewbie workflow invariants remain (tester,
+reviewer, coordinator, improver). Put the repository's own observable checks and
+non-negotiables in each role's `checks` and `nonNegotiables`; the setup review
+flags roles that have none. Shared rules such as PR headings live once in
+`.crewbie/instructions.md`, which every launch embeds, rather than in each charter.
+
 Archival requires the exact inspected source hash, rejects conflicting archives
 or edited originals, and is idempotent. Archives are written before originals
 are removed. Installation previews name both actions. Adding these adoptions is
@@ -601,13 +609,30 @@ observations, not a universal instruction ban or proof that a particular number
 of words is harmful.
 
 Crewbie's documentation/profile overlap, generic-advice (including generic
-agent charters), unverified-link, npm-script/package-manifest, broad-root-scope
-and unconditional full-suite signals are **engineering heuristics**,
+agent charters), unverified-link, npm-script/package-manifest and
+unconditional full-suite signals are **engineering heuristics**,
 not validated causal rules from the paper. They identify concrete material for
 human review. Necessary standalone context and explicit merge/compliance gates
 should be retained. Contradictions, domain relevance and actual benefit still
 need semantic review and representative before/after task evidence.
-The 600-word root-guidance review threshold is advisory, not a gate. Scoped
+
+The assessment also checks the six smells catalogued in
+[*Configuration Smells in AGENTS.md Files*](https://arxiv.org/abs/2606.15828)
+(see the README table). Static signals: `lint-leakage` (style rules a
+linter/formatter enforces; a warning when one is configured, advisory
+otherwise), `context-bloat`, `blind-reference` (a document path whose line
+does not say what it holds or when to read it), and `init-fossilization` (a file
+with exactly one commit while at least ten later commits landed; skipped when
+history is unavailable, such as shallow clones). Skill leakage and conflicting
+instructions need judgment and are checked by the model rubric only.
+
+Always-loaded guidance is limited to 200 lines (`limits.guidanceLines`), after
+Anthropic's recommendation for always-loaded instruction files, which the
+smells study also uses. Longer existing files get a `context-bloat` warning.
+Proposed guidance replacements over the limit are rejected, and nothing is
+truncated. Custom-agent charters are not counted: GitHub's prompt character
+limit applies to them. Gloaguen et al. establish no harmful length, so the limit
+is a starting point to validate with `crewbie eval`. Scoped
 Copilot instructions need valid YAML `applyTo` globs. When relocating domain
 guidance, review the source reduction and destination together; preserve policy
 coverage and host-specific instruction support. Every finding must explicitly
@@ -672,10 +697,20 @@ An LLM's suitability rationale is a proposal, not a benchmark certification.
   "modelProfile": "balanced",
   "execution": {
     "maxLaunchesPerBatch": 20,
-    "maxAttemptsPerTask": 3
+    "maxAttemptsPerTask": 3,
+    "maxTokensPerFeature": 2000000
   }
 }
 ```
+
+`maxTokensPerFeature` is optional and has no default, because no evidence-backed
+value exists. When set, each launch first sums the **Observed tokens** Crewbie
+recorded in the attribution block of every task PR into the plan's feature branch.
+At or above the ceiling, further implementation and review launches stop with a
+visible reason; running sessions are unchanged. PRs without measured usage are
+counted separately, so the total is a lower bound and never zero-filled. Review-
+report PRs and unreported subagent/tool usage are not included. Raise the ceiling
+in a reviewed config change to continue. `preflight` shows the spent total.
 
 These configuration fields are optional for legacy configurations so parsing does
 not change approved plan hashes. Absent limits use 20/3. Changing the profile alone
@@ -690,7 +725,8 @@ publishes a new issue for it; that issue gets its own initial launch, which stil
 counts toward the shared task and batch allowances. An earlier issue that is still
 open must be reconciled (closed) first.
 The budget covers Crewbie requests, not the number of internal backend sessions,
-tokens, monetary spend, manual PR follow-ups, onboarding, planning or nightly work.
+monetary spend, manual PR follow-ups, onboarding, planning or nightly work; only
+`maxTokensPerFeature` looks at tokens.
 
 **Upgrading an in-flight batch:** pre-alpha.10 launch claims have no trustworthy
 complete attempt ledger. Further automatic launches in that batch stop visibly,
@@ -1031,6 +1067,15 @@ Operational cursors live on the orphan `crewbie/runtime` branch, separately from
 human-facing memory. It records the latest reviewed fingerprint/outcome per work
 item, so no-change analysis can advance without opening a pointless PR.
 
+Every proposed change states a `hypothesis` (the recurring failure it should
+prevent) and an `expectedOutcome` (the observable signal in later runs), each at
+most 60 words. The improvement PR adds them to `.crewbie/rationale.md`, a bounded
+ledger of the last 100 entries that lands only when a human merges the PR. It is
+loaded into the improver's context, never into implementation launches, so
+later analysis can check whether a rule delivered its expected outcome and
+propose narrowing or removing rules that did not. The ledger itself cannot be
+proposed as a change.
+
 The reserved proposal branch is `crewbie/improvements`. Concurrent file changes,
 a branch behind its base, or a leftover closed proposal branch stop updates for
 human reconciliation rather than force-pushing over work. Merge, close and
@@ -1053,6 +1098,21 @@ default-branch code: the body is not empty, telemetry is not duplicated and, whe
 heading would block auto-merge after the session ended, with nobody left to fix
 it. There is no default word limit because none is evidence-backed. Human review
 still evaluates rationale and evidence.
+
+The same check reports the word count of every memory file the PR adds or
+changes, read at its head: `.crewbie/instructions.md`, hot files against
+`limits.hot`, and cold/archive topics against `limits.topic`. It never fails on
+memory. Instead, before every launch on a `crewbie/<feature>` branch, Crewbie
+checks the shared and role hot files. When one is over `limits.hot`, Crewbie
+moves its oldest list entries (the top of the file; agents add new entries at the
+end) into a new `cold/earlier-<date>.md` topic until the hot file is at 80% of
+its budget. It links that topic from the matching `index.md`, rebases relative
+links, and commits everything as one commit on the feature branch. Headings and
+prose stay in place. If the branch moved or the commit fails, the launch
+continues with memory as-is, and demotion is retried at the next launch. Agent
+PR branches and the default branch are never rewritten. Hot memory merged over
+budget after a feature's last launch is still loaded, and it is demoted at the
+next launch. Launch prompts show each embedded file's `words/limit`.
 
 Copilot's final session summary replaces the specialist's own PR description.
 During attribution Crewbie restores the specialist's last description (its own
@@ -1078,8 +1138,11 @@ PR metadata, not code, approvals or merge state, and avoids another paid
 implementation run merely to repair prose.
 
 Cloud hosts inject the active charter and may protect its file path from agent
-tools. Record injection separately from file-read attestations; respect those
-restrictions. Native Copilot Memory is a separate platform feature, not Crewbie's
+tools; respect those restrictions. Agents no longer attest which memory they
+read. Each launch ledger ref points at an annotated tag (which fires no
+workflows) recording the embedded files and their hashes, plus anything too large
+to embed or absent. Reports show that as "memory: embedded"; older launches show
+"unreported". Native Copilot Memory is a separate platform feature, not Crewbie's
 reviewed role history or approval of proposed shared decisions.
 
 ## Reports and privacy
@@ -1108,7 +1171,29 @@ bundled SDK runtime against a loopback-only synthetic provider without paid mode
 calls.
 
 Before broader release, run a consenting personal/organization account matrix:
-select the actual profile/model, inspect memory-read attestations and issue/PR
+select the actual profile/model, inspect the recorded launch contexts and issue/PR
 linkage, exercise maintenance authentication, and confirm private publishing.
 No live test is implied by a fixture passing. Registry publishing, trademark
 clearance, and paid cloud runs require the project owner's separate decision.
+
+### Guidance evaluation
+
+Guidance and memory cost context on every launch; research on repository
+context files found they often raise cost without improving task success. Check
+this for your own repository rather than assuming it:
+
+1. Create two sandbox repositories from the same commit. In both, install the
+   **latest published** Crewbie release, never a local build:
+   `gh release view --repo mvanderbend-msoft/crewbie --json assets` and
+   `npm install --global --ignore-scripts <tgz asset URL>`.
+2. Keep guidance and memory in the guided sandbox. In the bare sandbox, reduce
+   `AGENTS.md`, scoped instructions, charters' repository sections and
+   `.crewbie` hot/index files to their Crewbie defaults.
+3. Approve and run the same plan in both. Wait for attribution on each task PR.
+4. Run `crewbie eval --guided owner/guided --bare owner/bare [--feature crewbie/x] [--json]`.
+
+The comparison reports merged tasks, measured coverage and observed tokens per
+merged task per arm. Token cost is compared only when every task in both arms
+has measured usage. It warns on unequal task counts and fewer than five tasks per
+arm; one run does not prove a cause. When guidance costs more without merging
+more tasks, review what it adds.

@@ -69,6 +69,7 @@ test("deferred memory proposals reach nightly evidence without accepting arbitra
       throw new Error(`Unexpected ${path}`);
     },
     async request(_method, path) {
+      if (/\/git\/matching-refs\/(tags\/)?crewbie\/launches\//.test(path)) return [];
       if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: {
         nodes: [{ number: 2, repository: { nameWithOwner: "example/project" } }], pageInfo: { hasNextPage: false, endCursor: null },
       } } } } };
@@ -91,6 +92,7 @@ test("closing an unexecuted issue is reported without inventing a completed sess
       return path.includes("/issues?") ? [{ number: 1, state: "closed", body: issueBody(b, b.tasks[0]), updated_at: "2026-09-22T08:00:00Z" }] : [];
     },
     async request(_method, path) {
+      if (/\/git\/matching-refs\/(tags\/)?crewbie\/launches\//.test(path)) return [];
       assert.equal(path, "/graphql");
       return { data: { repository: { issue: { closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
     },
@@ -114,10 +116,10 @@ test("proposal validation rejects permissions, unknown evidence, stale hashes an
   const root = await fixture(t, { ".crewbie/team/improver/hot.md": "Existing lesson." });
   const cfg = config({ nightly: { ...config().nightly, enabled: true } });
   const evidence = [runRecord(run())];
-  const change = { path: ".crewbie/team/improver/hot.md", beforeHash: hash("Existing lesson."), content: "Use a targeted regression test. Source: PR #1.", reason: "Reviewer identified a missing test.", evidence: [evidenceId(evidence[0])] };
+  const change = { path: ".crewbie/team/improver/hot.md", beforeHash: hash("Existing lesson."), content: "Use a targeted regression test. Source: PR #1.", reason: "Reviewer identified a missing test.", hypothesis: "Naming the test type stops untested fixes.", expectedOutcome: "Fewer review findings about missing tests.", evidence: [evidenceId(evidence[0])] };
   const proposal = parseProposal({ summary: "Make test guidance specific.", changes: [change] });
   await validateProposal(root, cfg, proposal, evidence);
-  for (const extra of [{ path: ".github/workflows/unsafe.yml" }, { beforeHash: "stale" }, { evidence: ["invented"] }, { content: "word ".repeat(601) }]) {
+  for (const extra of [{ path: ".github/workflows/unsafe.yml" }, { path: ".crewbie/rationale.md" }, { beforeHash: "stale" }, { evidence: ["invented"] }, { content: "word ".repeat(601) }, { hypothesis: "word ".repeat(61) }]) {
     await assert.rejects(validateProposal(root, cfg, { ...proposal, changes: [{ ...change, ...extra }] }, evidence));
   }
   assert.equal(allowedPath(cfg, ".crewbie/team/../../.github/workflows/x.md"), false);
@@ -135,11 +137,18 @@ test("memory fingerprints survive Git newline conversion but reject actual edits
   const hot = original.find((file) => file.path.endsWith("/hot.md"));
   const proposal = parseProposal({ summary: "Clarify checks.", changes: [{
     path: hot.path, beforeHash: hot.sha256, content: "Run focused checks. Source: PR #1.",
-    reason: "Review found a missing check.", evidence: [evidenceId(evidence[0])],
+    reason: "Review found a missing check.", hypothesis: "An explicit check is run more often.", expectedOutcome: "Reviews stop reporting skipped checks.", evidence: [evidenceId(evidence[0])],
   }] });
   await validateProposal(root, cfg, proposal, evidence);
   await writeFile(join(root, hot.path), hot.content + "A real new lesson.\n");
   await assert.rejects(validateProposal(root, cfg, proposal, evidence), /changed since analysis/);
+});
+
+test("records show which memory Crewbie embedded instead of trusting an agent's claim", () => {
+  const embedded = runRecord(run({ contextStatus: "embedded", context: [".crewbie/instructions.md@0123456789ab"] }));
+  assert.deepEqual(embedded.context, [".crewbie/instructions.md@0123456789ab"]);
+  assert.throws(() => runRecord(run({ contextStatus: "embedded" })));
+  assert.equal(runRecord(run({ contextStatus: "attested" })).contextStatus, "unreported", "Legacy self-attestation is not evidence.");
 });
 
 test("usage needs provenance; absent counts are never coerced to zero", () => {

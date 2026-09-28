@@ -28,10 +28,12 @@ import { publish, publishDescription, reapproveIssues } from "./tracking/issues.
 import { adoApi, createWorkItem, importWorkItem, linkAdo, syncAdo, writeBack } from "./tracking/ado.js";
 import { verifySources } from "./tracking/sources.js";
 import { memoryContext } from "./memory/context.js";
+import { overBudget, prMemoryBudgets } from "./memory/budget.js";
 import { applyMaintenance, prepareMaintenance } from "./memory/runner.js";
 import { dashboard } from "./reporting/dashboard.js";
 import { collectRecords, parseRecords } from "./reporting/records.js";
 import { collectPrUsage, renderPrUsage } from "./reporting/pr-usage.js";
+import { armTasks, compareArms, renderComparison } from "./reporting/ablation.js";
 import { createOutput } from "./presentation.js";
 import { checkoutTestFeature, discoverTestFeatures, renderTestFeatureList, runStartCommand, saveLocalStart, selectionOrThrow, suggestedStartCommand } from "./execution/test-feature.js";
 
@@ -82,6 +84,8 @@ STATUS AND REPORTS
   status                                         Reconcile remote work read-only
   dashboard --records runs.json --out report.html
   dashboard --collect --out report.html
+  eval --guided owner/a --bare owner/b [--feature crewbie/x] [--json]
+                                                 Compare outcomes and tokens with and without guidance
 
 OUTPUT AND AUTHENTICATION
 Terminal output uses grouped sections and responsive tables.
@@ -133,6 +137,7 @@ async function main(): Promise<void> {
       "feedback-file": { type: "string" },
       "review-loop": { type: "string" },
       list: { type: "boolean" }, "no-start": { type: "boolean" },
+      guided: { type: "string" }, bare: { type: "string" }, feature: { type: "string" },
     },
   });
   const output = createOutput({ machine: values.json === true || positionals[0]?.startsWith("internal-") === true });
@@ -179,6 +184,15 @@ async function main(): Promise<void> {
     if (!values.out) throw new Error("Choose a report path with --out.");
     await writeAtomic(root, values.out, dashboard(records));
     output.text(`Report written to ${values.out}. Unavailable measurements remain unknown.`);
+    return;
+  }
+  if (command === "eval") {
+    if (!values.guided || !values.bare || values.guided === values.bare) throw new Error("eval requires --guided owner/name and a different --bare owner/name sandbox.");
+    const client = api(token());
+    const feature = values.feature;
+    const tasks = [...await armTasks(client, values.guided, "guided", feature), ...await armTasks(client, values.bare, "bare", feature)];
+    const comparison = compareArms(values.guided, values.bare, tasks);
+    output.data({ ...comparison, tasks }, renderComparison(comparison));
     return;
   }
   const config = await loadConfig(root);
@@ -240,7 +254,7 @@ async function main(): Promise<void> {
   if (command === "preflight") {
     const report = await preflight(api(token()), config, values["batch-id"], undefined, config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined);
     output.data(report, [report.notice, ...report.tasks.map((task) =>
-      `#${task.issue} ${task.specialist} / ${task.model}: ${task.ready ? "READY" : "NOT READY"} - ${task.reason}\n  Approval: ${task.approved}; launches ${task.allowance.used}/${task.allowance.maxLaunchesPerBatch}; task attempts ${task.allowance.taskUsed}/${task.allowance.maxAttemptsPerTask}`)].join("\n"));
+      `#${task.issue} ${task.specialist} / ${task.model}: ${task.ready ? "READY" : "NOT READY"} - ${task.reason}\n  Approval: ${task.approved}; launches ${task.allowance.used}/${task.allowance.maxLaunchesPerBatch}; task attempts ${task.allowance.taskUsed}/${task.allowance.maxAttemptsPerTask}${task.allowance.featureTokens && task.allowance.maxTokensPerFeature ? `; feature tokens ${task.allowance.featureTokens.tokens}/${task.allowance.maxTokensPerFeature}${task.allowance.featureTokens.unmeasured ? ` (${task.allowance.featureTokens.unmeasured} PRs unmeasured; lower bound)` : ""}` : ""}`)].join("\n"));
     return;
   }
   if (command === "revise-plan") {
@@ -360,8 +374,11 @@ async function main(): Promise<void> {
   } else if (command === "internal-pr-check") {
     const number = integer(Number(values.pr), "PR number");
     const pr = record(await github.request("GET", `/repos/${config.repository}/pulls/${number}`), "PR");
+    const budgets = await prMemoryBudgets(github, config, pr);
     checkPrDescription(string(pr.body, "PR description"), limitsFor(config).pr);
-    output.text("PR has concise what/why/checks sections. Human review still judges the reasoning and evidence.");
+    // Memory budgets never block a PR: Crewbie demotes over-budget hot memory at the next launch.
+    const over = overBudget(budgets);
+    output.text(`PR has a concise description${budgets.length && !over ? `; changed memory is within budget (${budgets.map((budget) => `${budget.path} ${budget.words}/${budget.limit}`).join(", ")})` : ""}.${over ? ` Note: ${over}` : ""} Human review still judges the reasoning and evidence.`);
   } else if (command === "internal-dispatch") {
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
     const hints = (process.env.CREWBIE_ISSUE_NUMBERS ?? "").trim();

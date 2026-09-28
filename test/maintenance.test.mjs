@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { hash } from "../dist/core.js";
 import { GitHubError } from "../dist/execution/github.js";
-import { publishProposal, parseProposal } from "../dist/memory/improvement.js";
+import { publishProposal, parseProposal, rationaleLedger } from "../dist/memory/improvement.js";
 import { readState, saveState } from "../dist/memory/state.js";
 import { config, run } from "./helpers.mjs";
 import { runRecord } from "../dist/reporting/records.js";
@@ -30,7 +30,7 @@ test("operational cursor updates use a separate branch with optimistic non-force
   assert.equal(calls[0].body.tree[0].path, "state.json");
 });
 
-function proposalFixture({ active = false, behind = 0, old = "Existing lesson." } = {}) {
+function proposalFixture({ active = false, behind = 0, old = "Existing lesson.", rationale = null } = {}) {
   const calls = [];
   let branch = active ? "proposal-parent" : null;
   const client = {
@@ -45,6 +45,10 @@ function proposalFixture({ active = false, behind = 0, old = "Existing lesson." 
         return { object: { sha: branch } };
       }
       if (path.includes("/git/commits/")) return { tree: { sha: "old-tree" } };
+      if (path.includes("/contents/.crewbie/rationale.md")) {
+        if (rationale === null) throw new GitHubError(404, null);
+        return { encoding: "base64", type: "file", content: Buffer.from(rationale).toString("base64") };
+      }
       if (path.includes("/contents/")) return { encoding: "base64", type: "file", content: Buffer.from(old).toString("base64") };
       if (path.endsWith("/git/trees")) return { sha: "new-tree" };
       if (path.endsWith("/git/commits")) return { sha: "new-commit" };
@@ -55,7 +59,7 @@ function proposalFixture({ active = false, behind = 0, old = "Existing lesson." 
   };
   const proposal = parseProposal({
     summary: "Use a focused regression test because the reviewer found an uncovered edge case.",
-    changes: [{ path: ".crewbie/team/improver/hot.md", beforeHash: hash(old), content: "Add a regression test for the changed edge case. Source: PR #1.", reason: "Review feedback identified a gap.", evidence: ["evidence"] }],
+    changes: [{ path: ".crewbie/team/improver/hot.md", beforeHash: hash(old), content: "Add a regression test for the changed edge case. Source: PR #1.", reason: "Review feedback identified a gap.", hypothesis: "Uncovered edge cases recur without a named regression test.", expectedOutcome: "Later reviews stop flagging missing edge-case tests.", evidence: ["evidence"] }],
   });
   return { calls, client, proposal };
 }
@@ -69,6 +73,24 @@ test("new improvement creates only a review branch and PR, never a default-branc
   assert.ok(!mutations.some((call) => call.path.endsWith("/merge") || call.path.endsWith("/heads/main")));
   assert.match(mutations.find((call) => call.path.endsWith("/pulls")).body.body, /^\*\*Specialist:\*\* `crewbie-improver`/);
   assert.match(mutations.find((call) => call.path.endsWith("/git/commits")).body.message, /Co-authored-by: Copilot/);
+  const tree = mutations.find((call) => call.path.endsWith("/git/trees")).body.tree;
+  const ledger = tree.find((entry) => entry.path === ".crewbie/rationale.md").content;
+  assert.match(ledger, /## \d{4}-\d{2}-\d{2} \.crewbie\/team\/improver\/hot\.md\n- Reason: Review feedback identified a gap\.\n- Hypothesis: Uncovered edge cases recur/);
+  assert.match(ledger, /- Expected outcome: Later reviews stop flagging/);
+  assert.match(mutations.find((call) => call.path.endsWith("/pulls")).body.body, /Hypothesis: Uncovered edge cases recur/);
+});
+
+test("the rationale ledger keeps earlier entries, stays bounded and cannot be proposed directly", () => {
+  const proposal = proposalFixture().proposal;
+  let ledger = null;
+  for (let day = 0; day < 105; day++) ledger = rationaleLedger(ledger, proposal, `2026-01-${String(day).padStart(3, "0")}`);
+  const entries = ledger.split("\n").filter((line) => line.startsWith("## "));
+  assert.equal(entries.length, 100);
+  assert.match(entries[0], /2026-01-005/);
+  assert.match(entries.at(-1), /2026-01-104/);
+  const [change] = proposal.changes;
+  assert.throws(() => parseProposal({ summary: "x", changes: [{ ...change, hypothesis: "" }] }), /hypothesis/);
+  assert.throws(() => parseProposal({ summary: "x", changes: [{ ...change, expectedOutcome: undefined }] }), /expected outcome|expectedOutcome/i);
 });
 
 test("remote guidance accepts legacy CRLF fingerprints only for equivalent text", async () => {

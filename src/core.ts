@@ -55,6 +55,13 @@ export function words(value: string): number {
 export function bounded(value: string, limit: number, name: string): void {
   if (words(value) > limit) throw new Error(`${name} exceeds ${limit} words. Curate or split it; nothing was truncated.`);
 }
+export function lines(value: string): number {
+  const text = value.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+  return text ? text.split("\n").length : 0;
+}
+export function boundedLines(value: string, limit: number, name: string): void {
+  if (lines(value) > limit) throw new Error(`${name} exceeds ${limit} lines. Remove linter-enforced or rare-task rules, or split by path scope; nothing was truncated.`);
+}
 // GitHub's documented maximum for a custom agent's Markdown prompt below the frontmatter:
 // https://docs.github.com/en/copilot/reference/custom-agents-configuration
 export const AGENT_PROMPT_CHARACTERS = 30_000;

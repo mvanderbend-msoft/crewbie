@@ -115,6 +115,10 @@ function githubFixture(input = batch()) {
           fixture.featurePulls.push(pr);
           return structuredClone(pr);
         }
+        if (method === "POST" && path.endsWith("/git/tags")) {
+          const sha = (fixture.tags ??= []).length.toString(16).padStart(40, "c");
+          fixture.tags.push({ sha, ...body }); return { sha };
+        }
         if (method === "POST" && path.endsWith("/git/refs")) {
           if (body.ref.startsWith("refs/heads/")) {
             if (fixture.branches.has(body.ref.slice(11))) throw new GitHubError(422, "exists");
@@ -211,11 +215,16 @@ test("launches embed the owner's memory from the work branch and name what is ab
   await dispatch(fixture.client, config());
   const instructions = fixture.assignments[0].agent_assignment.custom_instructions;
   assert.match(instructions, new RegExp(`Crewbie memory at ${BRANCH}`));
-  assert.match(instructions, /----- BEGIN \.crewbie\/instructions\.md \(sha256 [a-f0-9]{12}\) -----\nShared rules\.\n----- END/);
+  assert.match(instructions, /----- BEGIN \.crewbie\/instructions\.md \(sha256 [a-f0-9]{12}, 2\/600 words\) -----\nShared rules\.\n----- END/);
   assert.match(instructions, /BEGIN \.crewbie\/team\/developer\/hot\.md[^\n]*\n- Seed data resets on restart/);
   assert.match(instructions, /Too large to embed; read before any other work: \.crewbie\/decisions\/hot\.md\./);
-  assert.match(instructions, /Absent at this revision \(do not claim to have read them\): \.crewbie\/decisions\/index\.md, \.crewbie\/team\/developer\/index\.md\./);
+  assert.match(instructions, /Absent at this revision: \.crewbie\/decisions\/index\.md, \.crewbie\/team\/developer\/index\.md\./);
+  assert.doesNotMatch(instructions, /report (which|the) (memory|files)/i);
   assert.ok(fixture.memoryReads.every((read) => read.endsWith(`?ref=${BRANCH}`)));
+  const context = JSON.parse(fixture.tags[0].message);
+  assert.equal(context.kind, "launch-context");
+  assert.deepEqual(context.files.map((file) => file.path), [".crewbie/instructions.md", ".crewbie/team/developer/hot.md"]);
+  assert.deepEqual(context.unread, [".crewbie/decisions/hot.md"]);
 });
 
 test("empty dispatch explains disabled planning without assigning or claiming any work", async () => {

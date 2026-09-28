@@ -1,6 +1,6 @@
 import { readdir, unlink } from "node:fs/promises";
-import { agentPrompt, bounded, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
-import { agentArchivePath, limitsFor, parseConfig, type Config } from "../config.js";
+import { agentPrompt, bounded, boundedLines, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
+import { agentArchivePath, guidanceLinesFor, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
 import { mergeManagedBlock, roleProfile } from "./agents.js";
 import { editableGuidance, validateInstructionScope } from "./instruction-quality.js";
@@ -128,7 +128,7 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
       }
       const content = string(instruction.content, "instruction content");
       validateInstructionScope(path, content);
-      bounded(content, limits.constitution, path);
+      boundedLines(content, guidanceLinesFor(config), path);
       files[path] = content;
       const current = await optionalText(await safePath(root, path));
       const alreadyApplied = current !== null && textHash(current) === textHash(content);

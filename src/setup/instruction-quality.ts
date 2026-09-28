@@ -1,12 +1,15 @@
+import { execFileSync } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { posix } from "node:path";
 import YAML from "yaml";
-import { errorCode, optionalText, safePath } from "../core.js";
+import { DEFAULT_GUIDANCE_LINES } from "../config.js";
+import { errorCode, lines as lineCount, optionalText, safePath } from "../core.js";
 import { autoLoadedGuidance, autoLoadedPointer } from "./auto-loaded.js";
 
 export const INSTRUCTION_STUDY = "https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd";
+export const SMELLS_STUDY = "https://arxiv.org/abs/2606.15828";
 export interface InstructionSignal {
-  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "missing-package-manifest" | "unconditional-full-suite" | "missing-path-scope" | "broad-root-guidance" | "auto-loaded-reference" | "agent-only-context";
+  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "missing-package-manifest" | "unconditional-full-suite" | "missing-path-scope" | "context-bloat" | "auto-loaded-reference" | "agent-only-context" | "lint-leakage" | "blind-reference" | "init-fossilization";
   level: "warning" | "advisory";
   path: string;
   line: number;
@@ -45,11 +48,29 @@ function scopeDirectory(path: string): string {
   const marker = path.indexOf(".github/");
   return marker >= 0 ? path.slice(0, marker) : (posix.dirname(path) === "." ? "" : `${posix.dirname(path)}/`);
 }
+/** Files a host loads into every matching session, as opposed to custom-agent charters. */
+function alwaysLoaded(path: string): boolean {
+  return instructionFile(path) && !/\.agent\.md$|(^|\/)\.claude\/agents\//.test(path);
+}
+// Style rules deterministic tools enforce; the smells study found these in 62% of popular AGENTS.md files.
+const LINT_RULE = /\b(?:\d+[- ]spaces?(?: indent(?:ation)?)?|spaces? (?:for|per) indent(?:ation)?|tabs? (?:for|over|instead of|not) (?:spaces|indent)|indent(?:ation)? (?:with|of|using) \d|semicolons?|single quotes|double quotes|trailing (?:commas?|whitespace)|(?:max(?:imum)? )?line length|\d+[- ]char(?:acter)?s?(?: line)?|camelCase|snake_case|PascalCase|kebab-case|import (?:order|sorting)|sort(?:ed)? imports)\b/i;
+const LINTER_CONFIG = /^(?:\.eslintrc(?:\..+)?|eslint\.config\.[cm]?[jt]s|\.prettierrc(?:\..+)?|prettier\.config\.[cm]?[jt]s|biome\.jsonc?|\.editorconfig|\.?ruff\.toml|\.flake8|\.pylintrc|\.rubocop\.ya?ml|\.golangci\.ya?ml|\.?rustfmt\.toml|\.clang-format|\.stylelintrc(?:\..+)?|stylelint\.config\.[cm]?js|dprint\.json|\.markdownlint(?:\..+)?|\.swiftlint\.ya?ml|\.scalafmt\.conf|checkstyle\.xml|detekt\.ya?ml)$/;
+const BLIND_FILLER = new Set(["see", "read", "also", "check", "refer", "consult", "follow", "more", "the", "and", "our", "here", "this", "file", "files", "doc", "docs", "documentation", "details", "info", "information", "guide", "please"]);
+/** A file committed once and never touched while at least ten later commits landed; null when history is unavailable. */
+function fossil(root: string, path: string): { commit: string; later: number } | null {
+  try {
+    const git = (args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const commits = git(["log", "--format=%H", "--follow", "--", path]).split("\n").filter(Boolean);
+    if (commits.length !== 1) return null;
+    const later = Number(git(["rev-list", "--count", `${commits[0]}..HEAD`]));
+    return later >= 10 ? { commit: commits[0]!, later } : null;
+  } catch { return null; }
+}
 
-export async function assessInstructions(root: string, paths: readonly string[]): Promise<InstructionQuality> {
+export async function assessInstructions(root: string, paths: readonly string[], lineLimit = DEFAULT_GUIDANCE_LINES): Promise<InstructionQuality> {
   const result: InstructionQuality = {
-    basis: INSTRUCTION_STUDY,
-    interpretation: "Advisory static heuristics, not a quality score or a causal prediction. The study does not establish a harmful word-count threshold or prove these individual patterns cause failures. Preserve justified policy; compare task outcomes before and after approved changes.",
+    basis: `${INSTRUCTION_STUDY}; ${SMELLS_STUDY}`,
+    interpretation: "Advisory static heuristics, not a quality score or a causal prediction. Gloaguen et al. found task/cost tradeoffs, not a harmful length threshold; the line limit follows Anthropic's recommendation used by the configuration-smells catalog. Preserve justified policy; compare task outcomes before and after approved changes.",
     inspected: [], omitted: [], signals: [], signalsOmitted: 0,
   };
   const signalCounts = new Map<string, number>();
@@ -65,6 +86,7 @@ export async function assessInstructions(root: string, paths: readonly string[])
   const allDocs = paths.filter((path) => /(^|\/)(README|CONTRIBUTING)\.md$/i.test(path));
   const docs = allDocs.slice(0, 12);
   const manifests = paths.filter((path) => /(^|\/)package\.json$/.test(path));
+  const linters = paths.filter((path) => LINTER_CONFIG.test(posix.basename(path))).slice(0, 3);
   const content = new Map<string, string>();
   let remaining = 512_000;
   const read = async (path: string): Promise<string | null> => {
@@ -125,10 +147,16 @@ export async function assessInstructions(root: string, paths: readonly string[])
           recommendation: "Specify valid applyTo globs for the intended domain before moving repository-wide rules here." });
       }
     }
-    if (["AGENTS.md", ".github/copilot-instructions.md"].includes(path) && text.trim().split(/\s+/).length > 600) {
-      add({ code: "broad-root-guidance", level: "advisory", path, line: 1,
-        detail: "Always-loaded guidance exceeds Crewbie's 600-word review threshold, not a paper-established harmful limit.",
-        recommendation: "Review relevance and domain scope. Keep necessary shared policy; move justified domain rules behind scoped instructions or nested AGENTS.md, with source reductions and destination edits reviewed together." });
+    if (alwaysLoaded(path) && lineCount(text) > lineLimit) {
+      add({ code: "context-bloat", level: "warning", path, line: lineLimit + 1,
+        detail: `Always-loaded guidance has ${lineCount(text)} lines, over the ${lineLimit}-line limit (Anthropic's recommendation for always-loaded instruction files; configuration smell "Context Bloat").`,
+        recommendation: "Remove linter-enforced and rare-task rules first, then move justified domain rules behind scoped instructions or nested AGENTS.md, with source reductions and destination edits reviewed together." });
+    }
+    const history = fossil(root, path);
+    if (history) {
+      add({ code: "init-fossilization", level: "advisory", path, line: 1,
+        detail: `Committed once (${history.commit.slice(0, 7)}) and never updated while the repository gained ${history.later} commits since (configuration smell "Init Fossilization").`,
+        recommendation: "Check its commands, paths and conventions against the current repository; correct or remove stale claims and review the file periodically." });
     }
     const frontmatter = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text)?.[0];
     const frontmatterEndLine = frontmatter === undefined ? 0 : lines.findIndex((line, index) => index > 0 && line.trim() === "---") + 1;
@@ -169,6 +197,7 @@ export async function assessInstructions(root: string, paths: readonly string[])
     const directory = scopeDirectory(path);
     const scopedManifests = manifests.filter((manifest) => manifest.startsWith(directory));
     let fenced = false;
+    let lintCount = 0;
     for (let index = 0; index < lines.length; index++) {
       const line = lines[index]!;
       if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
@@ -190,6 +219,28 @@ export async function assessInstructions(root: string, paths: readonly string[])
           add({ code: "agent-only-context", level: "advisory", path, line: index + 1, related: target,
             detail: "Only this agent is told to read this document; other agents and Copilot chat working on the same files do not get it.",
             recommendation: "If it holds rules for specific paths, consider a path-scoped .github/instructions/<domain>.instructions.md with applyTo globs so Copilot loads them automatically, then drop the pointer." });
+        }
+      }
+      if (!fenced && !/^\s*(?:#|\|)/.test(line)) {
+        if (LINT_RULE.test(line) && lintCount < 3) {
+          lintCount++;
+          add({ code: "lint-leakage", level: linters.length ? "warning" : "advisory", path, line: index + 1, ...(linters.length ? { related: linters[0]! } : {}),
+            detail: linters.length
+              ? `A style rule that ${linters.join(", ")} can enforce is repeated in agent guidance (configuration smell "Lint Leakage").`
+              : `A style rule a linter or formatter could enforce is in agent guidance, and no linter or formatter configuration was found (configuration smell "Lint Leakage").`,
+            recommendation: linters.length
+              ? "Delete the rule from guidance when the tool enforces it; the tool and its CI check are the enforcement."
+              : "Enforce it with a linter or formatter and a CI check, then delete it from guidance." });
+        }
+        const references = [...line.matchAll(/\[[^\]]*\]\(([^)\s]+)[^)]*\)|`([^`\s]+\.(?:md|mdx|txt|rst|adoc))`/gi)]
+          .map((match) => match[1] ?? match[2]!).filter((target) => !/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(target) && /\.(?:md|mdx|txt|rst|adoc)(?:#.*)?$/i.test(target));
+        if (references.length && !pointer) {
+          const rest = line.replace(/\[([^\]]*)\]\([^)]*\)/g, (_, text: string) => /[/\\]|\.\w{2,4}$/.test(text) ? " " : ` ${text} `).replace(/`[^`]*`/g, " ").toLowerCase().match(/[a-z]{3,}/g) ?? [];
+          if (rest.filter((word) => !BLIND_FILLER.has(word)).length < 2) {
+            add({ code: "blind-reference", level: "advisory", path, line: index + 1, related: references[0]!,
+              detail: `References ${references.join(", ")} without saying what it contains or when to read it; agents often ignore such pointers (configuration smell "Blind References").`,
+              recommendation: "Add one line on what the document holds and when an agent should read it, or remove the reference if it is not needed." });
+          }
         }
       }
       if (!fenced) for (const match of line.matchAll(/\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
