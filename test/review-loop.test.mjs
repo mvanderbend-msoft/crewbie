@@ -60,7 +60,7 @@ function fixture() {
           return {};
         }
         if (path.includes("/contents/.github/agents/")) return { type: "file", sha: A };
-        if (/\/contents\/\.crewbie\/(instructions\.md|decisions\.md|team\/)/.test(path)) {
+        if (/\/contents\/\.crewbie\/(instructions\.md|decisions\/|team\/)/.test(path)) {
           const file = f.memory?.[decodeURIComponent(path.split("/contents/")[1].split("?")[0])];
           if (file === undefined) throw new GitHubError(404, null);
           return { type: "file", encoding: "base64", content: Buffer.from(file).toString("base64") };

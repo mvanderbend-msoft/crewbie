@@ -205,7 +205,7 @@ test("launches embed the owner's memory from the work branch and name what is ab
   const fixture = githubFixture();
   fixture.memory = {
     ".crewbie/instructions.md": "Shared rules.",
-    ".crewbie/decisions.md": "x".repeat(25_000),
+    ".crewbie/decisions/hot.md": "x".repeat(25_000),
     ".crewbie/team/developer/hot.md": "- Seed data resets on restart ([#4](link)).",
   };
   await dispatch(fixture.client, config());
@@ -213,8 +213,8 @@ test("launches embed the owner's memory from the work branch and name what is ab
   assert.match(instructions, new RegExp(`Crewbie memory at ${BRANCH}`));
   assert.match(instructions, /----- BEGIN \.crewbie\/instructions\.md \(sha256 [a-f0-9]{12}\) -----\nShared rules\.\n----- END/);
   assert.match(instructions, /BEGIN \.crewbie\/team\/developer\/hot\.md[^\n]*\n- Seed data resets on restart/);
-  assert.match(instructions, /Too large to embed; read before any other work: \.crewbie\/decisions\.md\./);
-  assert.match(instructions, /Absent at this revision \(do not claim to have read them\): \.crewbie\/team\/developer\/index\.md\./);
+  assert.match(instructions, /Too large to embed; read before any other work: \.crewbie\/decisions\/hot\.md\./);
+  assert.match(instructions, /Absent at this revision \(do not claim to have read them\): \.crewbie\/decisions\/index\.md, \.crewbie\/team\/developer\/index\.md\./);
   assert.ok(fixture.memoryReads.every((read) => read.endsWith(`?ref=${BRANCH}`)));
 });
 

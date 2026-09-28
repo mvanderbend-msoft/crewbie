@@ -2,18 +2,37 @@ import { bounded, optionalText, safePath, slug, textHash } from "../core.js";
 import { limitsFor, type Config } from "../config.js";
 
 export interface ContextFile { path: string; content: string; sha256: string }
-export function relevantTopics(index: string, query: string): string[] {
+export const SHARED_HOT = ".crewbie/decisions/hot.md";
+export const SHARED_INDEX = ".crewbie/decisions/index.md";
+/** Pre-split shared decisions file; upgrades move its content into SHARED_HOT. */
+export const LEGACY_DECISIONS = ".crewbie/decisions.md";
+function scoreTopics(index: string, query: string, shared: boolean, candidates: Map<string, number>): void {
   const stop = new Set(["crewbie", "shared", "memory", "index", "archive", "cold", "with", "from", "that", "this", "have", "were", "been"]);
   const tokens = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []).filter((word) => !stop.has(word)));
   const wanted = tokens(query);
-  const candidates = new Map<string, number>();
   for (const match of index.matchAll(/\[([^\]]+)\]\(([^)\s]+)\)/g)) {
-    const path = (match[2] ?? "").replace(/^(?:\.crewbie\/decisions\/|\.\.\/\.\.\/decisions\/|decisions\/)/, "shared/");
+    let path = (match[2] ?? "").replace(/^\.\//, "").replace(/^(?:\.crewbie\/decisions\/|(?:\.\.\/)+decisions\/|decisions\/)/, "shared/");
+    // Links in the shared index are relative to .crewbie/decisions/.
+    if (shared && /^(cold|archive)\//.test(path)) path = `shared/${path}`;
     if (!/^(shared\/)?(cold|archive)\/[a-z0-9][a-z0-9-]*\.md$/.test(path)) continue;
     const score = [...tokens(`${match[1]} ${path}`)].filter((word) => wanted.has(word)).length;
     if (score) candidates.set(path, Math.max(score, candidates.get(path) ?? 0));
   }
-  return [...candidates].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([path]) => path);
+}
+const topFive = (candidates: Map<string, number>) => [...candidates].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([path]) => path);
+export function relevantTopics(index: string, query: string, shared = false): string[] {
+  const candidates = new Map<string, number>();
+  scoreTopics(index, query, shared, candidates);
+  return topFive(candidates);
+}
+/** Relevant cold/archive topics across the role index and the shared decisions index in loaded context. */
+export function contextTopics(files: ContextFile[], query: string): string[] {
+  const candidates = new Map<string, number>();
+  for (const file of files) {
+    if (file.path === SHARED_INDEX) scoreTopics(file.content, query, true, candidates);
+    else if (/^\.crewbie\/team\/[^/]+\/index\.md$/.test(file.path)) scoreTopics(file.content, query, false, candidates);
+  }
+  return topFive(candidates);
 }
 export async function memoryContext(root: string, config: Config, role: string, topics: string[] = []): Promise<ContextFile[]> {
   slug(role, "role");
@@ -23,7 +42,8 @@ export async function memoryContext(root: string, config: Config, role: string, 
   }
   const paths: [string, number | null][] = [
     ...(config.constitution ? [[config.constitution, limits.constitution] as [string, number]] : []),
-    [".crewbie/decisions.md", null],
+    [SHARED_HOT, limits.hot],
+    [SHARED_INDEX, null],
     [`.crewbie/team/${role}/hot.md`, limits.hot],
     [`.crewbie/team/${role}/index.md`, null],
   ];
@@ -41,7 +61,10 @@ export async function memoryContext(root: string, config: Config, role: string, 
   const result: ContextFile[] = [];
   for (const [path, limit] of paths) {
     const content = await optionalText(await safePath(root, path));
-    if (content === null) throw new Error(`Required context is missing: ${path}`);
+    if (content === null) {
+      if (path === SHARED_HOT && await optionalText(await safePath(root, LEGACY_DECISIONS)) !== null) throw new Error(`Shared decisions moved to ${SHARED_HOT}; run crewbie update --apply to migrate ${LEGACY_DECISIONS}.`);
+      throw new Error(`Required context is missing: ${path}`);
+    }
     if (limit !== null) bounded(content, limit, path);
     result.push({ path, content, sha256: textHash(content) });
   }

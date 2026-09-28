@@ -377,6 +377,27 @@ test("merge-enabled planning adds only plan files and verifies the exact human-r
   assert.equal(f.state.writes.length, 0, "Authorization is read-only.");
 });
 
+test("a plan can record shared decisions that humans review with it, outside the execution manifest", async (t) => {
+  const f = await planningFixture(t, true);
+  f.candidate.batch.tasks = [planned("catalogue-ui")];
+  await preparePlanning(f.root, f.client, f.cfg, f.event, 42);
+  assert.match(await readFile(join(f.root, ".crewbie-planning-prompt.txt"), "utf8"), /complete new content of \.crewbie\/decisions\/hot\.md/);
+  const decisions = "# Shared decisions\n\n- Catalogue pages hold 24 items; UI and API rely on it (issue #12).\n";
+  await f.output({ ...f.candidate, decisions });
+  await publishPlanning(f.root, f.client, f.cfg);
+  assert.equal(f.state.tree.find((entry) => entry.path === ".crewbie/decisions/hot.md").content, decisions);
+  assert.match(f.state.writes.at(-1).body.body, /records shared decisions in `\.crewbie\/decisions\/hot\.md`/);
+  const manifest = JSON.parse(f.state.tree.find((entry) => entry.path.endsWith("execution.json")).content);
+  assert.ok(!Object.hasOwn(manifest.files, ".crewbie/decisions/hot.md"));
+  const active = f.merge();
+  assert.equal((await approvedMergedPlan(f.client, active, 13)).batch.approval.execute, true);
+  f.state.diff.find((file) => file.filename === ".crewbie/decisions/hot.md").status = "removed";
+  await assert.rejects(approvedMergedPlan(f.client, active, 13), /unapproved change/);
+  const source = { number: 12, title: "t", body: "b", revision: "r", labelEvent: 77 };
+  assert.throws(() => parsePlan({ ...f.candidate, decisions: "word ".repeat(700) }, f.cfg, source), /exceeds 600 words/);
+  assert.equal(parsePlan({ ...f.candidate, decisions: null }, f.cfg, source).decisions, null);
+});
+
 test("merge execution accepts an unchanged setup listed in the manifest but absent from the PR diff", async (t) => {
   const path = ".crewbie/plans/progressive-catalogue-loading-issue-12/setup.json";
   const f = await mergedFixture(t, [path]);

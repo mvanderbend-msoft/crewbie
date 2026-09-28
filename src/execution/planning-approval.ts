@@ -6,6 +6,7 @@ import { verifySources } from "../tracking/sources.js";
 import { publish } from "../tracking/issues.js";
 import { withDispatchLock } from "./dispatch.js";
 import type { AdoApi } from "../tracking/ado.js";
+import { SHARED_HOT } from "../memory/context.js";
 
 export interface PlanExecution {
   schemaVersion: 1;
@@ -121,10 +122,14 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   const currentSha = sha(record(current.object, "default ref object").sha);
   const compare = record(await client.request("GET", `${prefix}/compare/${mergeSha}...${currentSha}`), "merge ancestry");
   if (!["ahead", "identical"].includes(String(compare.status)) || record(compare.merge_base_commit, "merge base").sha !== mergeSha) throw new Error("The approved planning merge is no longer on the default branch.");
-  const files = await client.list(`${prefix}/pulls/${number}/files`);
+  const files = (await client.list(`${prefix}/pulls/${number}/files`));
   const expected = new Set([...Object.keys(manifest.files), manifestPath]);
   const changed = new Map(files.map((file) => [string(file.filename, "changed file"), file]));
-  if (files.length > expected.size || pr.changed_files !== files.length || changed.size !== files.length
+  // A planning PR may also record shared decisions; that memory is reviewed with the plan but never drives execution.
+  const decisions = changed.get(SHARED_HOT);
+  if (decisions && (!["added", "modified"].includes(String(decisions.status)) || decisions.previous_filename !== undefined)) throw new Error(`Planning PR contains an unapproved change: ${SHARED_HOT}`);
+  changed.delete(SHARED_HOT);
+  if (changed.size > expected.size || pr.changed_files !== files.length || files.length !== changed.size + (decisions ? 1 : 0)
     || !changed.has(manifestPath)) throw new Error("Planning PR file coverage is incomplete or differs from the approved manifest.");
   for (const [path, file] of changed) {
     if (!expected.has(path)

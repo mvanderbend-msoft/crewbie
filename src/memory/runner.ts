@@ -3,7 +3,7 @@ import { errorCode, json, optionalText, readJson, record, safePath, textHash, wr
 import type { Config } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { collectRecords, evidenceId, parseRecords } from "../reporting/records.js";
-import { memoryContext, relevantTopics, type ContextFile } from "./context.js";
+import { contextTopics, memoryContext, type ContextFile } from "./context.js";
 import { maintenancePrompt, parseProposal, publishProposal, seenEvidence, selectEvidence, validateProposal } from "./improvement.js";
 import { readState, saveState } from "./state.js";
 
@@ -26,8 +26,7 @@ export async function prepareMaintenance(root: string, client: GitHubApi, config
   const query = evidence.map((run) => run.summary).join("\n");
   for (const role of affectedRoles) {
     const base = await memoryContext(root, config, role);
-    const index = base.filter((file) => file.path.endsWith("/index.md") || file.path === ".crewbie/decisions.md").map((file) => file.content).join("\n");
-    for (const file of await memoryContext(root, config, role, relevantTopics(index, query))) byPath.set(file.path, file);
+    for (const file of await memoryContext(root, config, role, contextTopics(base, query))) byPath.set(file.path, file);
     const path = `.github/agents/crewbie-${role}.agent.md`;
     const content = await optionalText(await safePath(root, path));
     if (content === null) throw new Error(`Missing charter ${path}.`);

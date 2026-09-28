@@ -86,7 +86,7 @@ Leave a GitHub review on each reviewed implementation PR, identifying crewbie-re
 Find recurring, evidence-backed causes in new run summaries, reviews and CI outcomes; compare them with current guidance and pending proposals.
 
 ## Checks
-Read your own history, affected role memory and shared decisions. Cite concrete evidence for each small proposed change and explain the expected benefit. Check budgets, stale advice, contradictions and rejected proposals.
+Read your own history, affected role memory and shared decisions. Cite concrete evidence for each small proposed change and explain the expected benefit. Check budgets, stale advice, contradictions and rejected proposals. When \`.crewbie/decisions/hot.md\` holds superseded or rarely needed entries, move their detail to \`.crewbie/decisions/cold/<topic>.md\` (or \`archive/\` when superseded) and link it from \`.crewbie/decisions/index.md\`; do the same for role hot memory.
 
 ## Non-negotiables
 Change only approved guidance/memory paths. Preserve policy and accepted decisions unless an amendment is explicitly proposed for human review. Keep activity logs and operational cursors out of prose memory. No new useful evidence means no manufactured improvement.`,
@@ -109,7 +109,7 @@ ${MANAGED_START}
 ## Context and handoff
 ${role.sourceAgent ? `The original instructions are included above. Backup provenance: \`${agentArchivePath(role.sourceAgent)}\`. Resolve adopted-agent references through \`.crewbie/config.json\`; surface conflicting guidance for human direction.\n` : ""}Crewbie launches embed your required memory; any file not embedded must be read before work:
 \`.crewbie/instructions.md\` for shared scope, learning and handoff rules,
-${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions.md\`,
+${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions/hot.md\`, \`.crewbie/decisions/index.md\`,
 \`.crewbie/team/${role.id}/hot.md\`, and \`.crewbie/team/${role.id}/index.md\`.
 Read linked cold/archive detail only when relevant. Follow applicable repository instructions.
 ${guidance.length ? `Reuse existing guidance: ${guidance.map((path) => `\`${path}\``).join(", ")}.\n` : ""}Work from the supplied requirements and approved acceptance criteria.
@@ -143,8 +143,10 @@ record implementation summaries, scope notes, verification logs, command output
 or anything discoverable from the code. Replace or remove stale entries rather
 than appending; use index/cold only for longer detail a gotcha links to.
 If nothing was surprising, leave memory unchanged and say why in Learning;
-"no new durable lesson" alone is insufficient. Shared decisions change
-only for new cross-role choices; preserve accepted decisions. For useful out-of-scope learning, post one PR comment starting
+"no new durable lesson" alone is insufficient. When your task makes a new
+cross-role choice other roles must follow (a shared contract, convention or
+technology choice), add or replace one or two lines in \`.crewbie/decisions/hot.md\`
+with the reason and a link; this is always in scope. Preserve accepted decisions. For useful out-of-scope learning, post one PR comment starting
 with \`<!-- crewbie-memory-proposal -->\`: target, lesson, reason and source for
 nightly review. Report Handoff and Learning separately in the PR.
 Write entries as plain lines, with no "proposed" marker: merging the PR is the
@@ -183,7 +185,8 @@ Apply reviewed team changes before approving tasks that need those specialists.
 For hosted planning, an approved human labels the source issue
 \`crewbie:ready-for-planning\`. With \`planning.enabled\` and an explicit model,
 the coordinator maps supplied requirements to existing specialists in a PR that
-only adds plan files under \`.crewbie/plans/\`; team changes are listed as
+only adds plan files under \`.crewbie/plans/\`, plus \`.crewbie/decisions/hot.md\`
+when the plan makes a new cross-role choice; team changes are listed as
 suggestions, never applied. Review its questions and source revision. With \`planning.executeOnMerge\`,
 the PR includes an execution manifest. A configured human
 must approve the exact final head and merge it; Actions then publishes tasks and
@@ -208,9 +211,10 @@ Record priority and prerequisites by stable task ID. Include source revisions.
 Set \`kind: "review"\` for review or verification tasks. Every task starts after
 its prerequisites merged into the plan's feature branch and works on that branch.
 Keep context attestations out of requirement/source prose.
-Include the owner's memory paths and shared decisions in the proposed scope when
-learning updates are appropriate; otherwise explicitly defer them to nightly
-review. Memory changes are proposals on the work branch, not direct writes to
+Include the owner's memory paths in the proposed scope when learning updates
+are appropriate; otherwise explicitly defer them to nightly review. Owners may
+always update \`.crewbie/decisions/hot.md\` for a new cross-role choice their
+task makes. Memory changes are proposals on the work branch, not direct writes to
 accepted history. Require a shared decision only for a genuinely new cross-role
 choice, not for every task. Keep testing and review as distinct specialties;
 activate domain specialists only where the repository needs them.

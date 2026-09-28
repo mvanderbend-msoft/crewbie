@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
 import { fixture, config, run, batch } from "./helpers.mjs";
 import { featureBranch, issueBody, parseBatch } from "../dist/specification/batch.js";
 const BRANCH = featureBranch(parseBatch(batch(), config()));
 import { installation, applyInstallation } from "../dist/setup/install.js";
-import { memoryContext, relevantTopics } from "../dist/memory/context.js";
+import { contextTopics, memoryContext, relevantTopics } from "../dist/memory/context.js";
 import { allowedPath, parseProposal, selectEvidence, validateProposal } from "../dist/memory/improvement.js";
 import { collectRecords, evidenceId, parseRecords, runRecord } from "../dist/reporting/records.js";
 import { dashboard } from "../dist/reporting/dashboard.js";
@@ -18,12 +18,40 @@ test("each role reads shared guidance and only its own bounded history", async (
   const cfg = config({ nightly: { ...config().nightly, enabled: true } });
   await applyInstallation(root, await installation(root, { config: cfg, constitutionText: null }));
   const context = await memoryContext(root, cfg, "improver");
-  assert.deepEqual(context.map((file) => file.path), [".crewbie/instructions.md", ".crewbie/decisions.md", ".crewbie/team/improver/hot.md", ".crewbie/team/improver/index.md"]);
+  assert.deepEqual(context.map((file) => file.path), [".crewbie/instructions.md", ".crewbie/decisions/hot.md", ".crewbie/decisions/index.md", ".crewbie/team/improver/hot.md", ".crewbie/team/improver/index.md"]);
   assert.ok(context.every((file) => file.sha256 === hash(file.content)));
   await assert.rejects(memoryContext(root, cfg, "missing"), /configured role/);
   await assert.rejects(memoryContext(root, cfg, "improver", ["../../escape"]), /Memory topic/);
   await unlink(join(root, ".crewbie/instructions.md"));
   await assert.rejects(memoryContext(root, cfg, "improver"), /Required shared working rules are missing/);
+});
+
+test("shared decisions split into hot and index; updates migrate the legacy file and resolve shared topics", async (t) => {
+  const cfg = config();
+  const seeded = await fixture(t);
+  await mkdir(join(seeded, ".crewbie"), { recursive: true });
+  await writeFile(join(seeded, ".crewbie/decisions.md"), "# Shared decisions\n\nRecord approved choices, short reasons, scope and evidence links. Link existing ADRs rather than copying them.\n");
+  await applyInstallation(seeded, await installation(seeded, { config: cfg, constitutionText: null }));
+  await assert.rejects(readFile(join(seeded, ".crewbie/decisions.md")), /ENOENT/);
+  assert.match(await readFile(join(seeded, ".crewbie/decisions/hot.md"), "utf8"), /Active cross-role choices only/);
+
+  const custom = await fixture(t);
+  await mkdir(join(custom, ".crewbie"), { recursive: true });
+  await writeFile(join(custom, ".crewbie/decisions.md"), "# Shared decisions\n\n- Money is integer cents ([detail](decisions/cold/money.md)).\n");
+  await applyInstallation(custom, await installation(custom, { config: cfg, constitutionText: null }));
+  await assert.rejects(readFile(join(custom, ".crewbie/decisions.md")), /ENOENT/);
+  assert.equal(await readFile(join(custom, ".crewbie/decisions/hot.md"), "utf8"), "# Shared decisions\n\n- Money is integer cents ([detail](cold/money.md)).\n");
+  await writeFile(join(custom, ".crewbie/decisions/index.md"), "# Index\n\n- [Money rounding rules](cold/money.md)\n");
+  await mkdir(join(custom, ".crewbie/decisions/cold"), { recursive: true });
+  await writeFile(join(custom, ".crewbie/decisions/cold/money.md"), "Round half to even.\n");
+  const base = await memoryContext(custom, cfg, "developer");
+  assert.deepEqual(contextTopics(base, "Fix money rounding in checkout"), ["shared/cold/money.md"]);
+  assert.equal((await memoryContext(custom, cfg, "developer", ["shared/cold/money.md"])).at(-1).path, ".crewbie/decisions/cold/money.md");
+
+  await writeFile(join(custom, ".crewbie/decisions.md"), "# Old\n\n- A choice.\n");
+  await assert.rejects(installation(custom, { config: cfg, constitutionText: null }), /Both \.crewbie\/decisions\.md and \.crewbie\/decisions\/hot\.md exist/);
+  await unlink(join(custom, ".crewbie/decisions/hot.md"));
+  await assert.rejects(memoryContext(custom, cfg, "developer"), /run crewbie update --apply/);
 });
 
 test("deferred memory proposals reach nightly evidence without accepting arbitrary comment authors", async () => {

@@ -1022,7 +1022,9 @@ Up to five
 relevant cold/archive links per role are selected by index-label keyword matches.
 Unrelated history stays unloaded; missing context is a reason to defer a change,
 not to invent it. Shared links can use `../../decisions/cold/topic.md` from a
-role index, or `decisions/cold/topic.md` from the shared decisions file.
+role index, or `cold/topic.md` from `.crewbie/decisions/index.md`; up to five
+shared topics are selected the same way. `.crewbie/decisions/hot.md` is always
+loaded and bounded by the hot limit.
 Operational cursors live on the orphan `crewbie/runtime` branch, separately from
 human-facing memory. It records the latest reviewed fingerprint/outcome per work
 item, so no-change analysis can advance without opening a pointless PR.
@@ -1038,7 +1040,7 @@ Cold/archive topics are loaded explicitly through the index, not all at once.
 The `limits` configuration can record deliberate word-budget exceptions:
 `spec`, `hot`, `constitution`, `topic`, and `pr`.
 Charters are bounded only by GitHub's 30,000-character agent prompt maximum; role
-indexes and shared decisions have no word limit. Legacy `charter`, `index` and
+and shared indexes have no word limit. Legacy `charter`, `index` and
 `decisions` entries are ignored.
 There is no silent truncation. Oversized external PR feedback is explicitly
 omitted with a source link, not partially presented as a complete summary.
