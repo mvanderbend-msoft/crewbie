@@ -515,6 +515,10 @@ explain scope guards, uncertain launches and round limits.
 
 Shared decisions belong in a compact repository-wide record; role history
 captures practical lessons. Reuse existing ADRs rather than copying them.
+Cloud-agent launches embed the role's shared rules, constitution, decisions,
+hot memory and index from the work branch in the launch instructions, so a
+session starts with them rather than being asked to read them. Files too large
+to embed (20,000 characters in total) are listed as required reading.
 Specialists propose useful lessons in scoped PR changes, or defer them to
 nightly review when memory is outside their approved scope. No compulsory churn.
 

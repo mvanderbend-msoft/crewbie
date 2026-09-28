@@ -98,6 +98,12 @@ function githubFixture(input = batch()) {
         if (path.endsWith("/branches/main")) return { commit: { sha: "base-sha" } };
         if (path.endsWith("/git/matching-refs/crewbie/claims/")) return [...claims].map((number) => ({ ref: `refs/crewbie/claims/${number}` }));
         if (path.includes("/contents/.github/agents/")) return { sha: "profile-sha", type: "file" };
+        if (path.includes("/contents/.crewbie/")) {
+          const file = fixture.memory?.[decodeURIComponent(path.split("/contents/")[1].split("?")[0])];
+          if (file === undefined) throw new GitHubError(404, null);
+          (fixture.memoryReads ??= []).push(decodeURIComponent(path.split("/contents/")[1]));
+          return { type: "file", encoding: "base64", content: Buffer.from(file).toString("base64") };
+        }
         if (path.includes("/git/ref/crewbie/claims/")) {
           if (!claims.has(Number(path.split("/").at(-1)))) throw new GitHubError(404, null);
           return {};
@@ -193,6 +199,23 @@ test("end-to-end dispatch requests named specialist/model, respects two slots an
   await dispatch(fixture.client, config());
   assert.equal(fixture.assignments.length, 3);
   assert.ok(fixture.claims.has(2));
+});
+
+test("launches embed the owner's memory from the work branch and name what is absent or too large", async () => {
+  const fixture = githubFixture();
+  fixture.memory = {
+    ".crewbie/instructions.md": "Shared rules.",
+    ".crewbie/decisions.md": "x".repeat(25_000),
+    ".crewbie/team/developer/hot.md": "- Seed data resets on restart ([#4](link)).",
+  };
+  await dispatch(fixture.client, config());
+  const instructions = fixture.assignments[0].agent_assignment.custom_instructions;
+  assert.match(instructions, new RegExp(`Crewbie memory at ${BRANCH}`));
+  assert.match(instructions, /----- BEGIN \.crewbie\/instructions\.md \(sha256 [a-f0-9]{12}\) -----\nShared rules\.\n----- END/);
+  assert.match(instructions, /BEGIN \.crewbie\/team\/developer\/hot\.md[^\n]*\n- Seed data resets on restart/);
+  assert.match(instructions, /Too large to embed; read before any other work: \.crewbie\/decisions\.md\./);
+  assert.match(instructions, /Absent at this revision \(do not claim to have read them\): \.crewbie\/team\/developer\/index\.md\./);
+  assert.ok(fixture.memoryReads.every((read) => read.endsWith(`?ref=${BRANCH}`)));
 });
 
 test("empty dispatch explains disabled planning without assigning or claiming any work", async () => {
