@@ -44,7 +44,7 @@ The installed workflows use:
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
-| Config `review.enabled` / `review.role` | Have a configured role review every head of a plan's feature PR in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist); an installed choice, including `enabled: false`, is kept |
+| Config `review.enabled` / `review.role` | Have a configured role review each task PR whose CI ran against its own acceptance criteria before auto-merge, and every head of a plan's feature PR, in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist) and preserves the installed choice, including `enabled: false`, in which case task PRs merge on passing checks alone |
 | Config `merge.method` | How task PRs merge into the feature branch: `merge` (default), `squash` or `rebase`. Legacy `merge.mode` and `merge.minConfidence` are ignored |
 | Config `local.start` | Optional local app start command used by `crewbie test` after it checks out a feature branch, for example `npm run dev` |
 
@@ -901,10 +901,15 @@ Changing a task's kind invalidates its approval like other scope changes.
   reconcile does it instead.
 - **Merge into the feature branch.** Dispatch merges a task PR into its feature
   branch once the session completed, every check that ran on the head passed (the
-  newest run of each check counts) and GitHub reports no conflict. Crewbie needs no
-  CI: with no checks (no CI, a branch filter such as `branches: [main]`, or runs
-  held for approval in Actions) it merges and says so, because the feature PR,
-  which a human tests and merges, is the gate. Task PRs are not reviewed. It pins the head SHA and never bypasses branch protection. Pending
+  newest run of each check counts) and GitHub reports no conflict. When CI ran
+  and a reviewer is configured, a trusted review of that exact task head must
+  also find no blocking acceptance-criteria issues or omitted patches; a
+  changes-requested or partial review leaves the PR for a fix or a human merge.
+  Crewbie needs no CI: with no checks (no CI, a branch filter such as
+  `branches: [main]`, or runs held for approval in Actions) it merges without a
+  task review and says so, because the feature PR, which Crewbie reviews and a
+  human tests and merges, is the gate. Crewbie pins
+  the head SHA and never bypasses branch protection. Pending
   checks are re-evaluated on the next dispatch run, including the hourly schedule.
   A PR that changes `.github/workflows/` is left for a human merge, because
   workflows on the feature branch run with repository secrets for PRs into it.
@@ -922,7 +927,9 @@ Changing a task's kind invalidates its approval like other scope changes.
   (`dev`, optionally after `install:all`, or `start`) and `init --start "COMMAND"`
   records an explicit command in the reviewed setup.
 - **Crewbie review.** With `"review": { "enabled": true, "role": "<role id>" }`,
-  dispatch starts `crewbie-review.yml` once for each head of a feature PR. The
+  dispatch starts `crewbie-review.yml` once for each task PR head whose CI ran
+  and passed, reviewing that task's own criteria and diff before auto-merge. It also
+  reviews each head of the combined feature PR. The
   reviewer reads its own charter and memory from the default branch plus the PR's
   API diff (the PR's code is never checked out), runs tool-free in Copilot CLI
   with the role's model, and posts one PR comment: a verdict, a summary and

@@ -53,6 +53,8 @@ async function setup(t) {
       }
       if (path.endsWith("/pulls/101/files")) return [{ filename: "src/a.ts", status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1,2 @@\n-old\n+new" }];
       if (path.endsWith("/issues/101/comments")) return comments;
+      if (/\/issues\/[123]\/timeline$/.test(path)) return path.includes("/issues/1/")
+        ? [{ event: "cross-referenced", source: { issue: { pull_request: { url: "https://api.github.com/repos/example/project/pulls/101" } } } }] : [];
       throw new Error(`Unexpected list: ${path}`);
     },
     async request(method, path, body) {
@@ -91,12 +93,30 @@ test("review preparation uses the reviewer's charter and the API diff; publicati
   assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 56)).ready, false, "A stale head is never reviewed.");
 });
 
-test("only Crewbie feature PRs into the default branch are reviewed", async (t) => {
+test("only managed task and feature PRs are reviewed", async (t) => {
   const { root, pull, client } = await setup(t);
   pull.head.ref = "copilot/foundation";
-  assert.match((await prepareReview(root, client, reviewConfig, 101, HEAD, 58)).reason, /not a Crewbie feature PR/);
+  assert.match((await prepareReview(root, client, reviewConfig, 101, HEAD, 58)).reason, /not a Crewbie feature or task PR/);
   Object.assign(pull, { head: { ...pull.head, ref: BRANCH }, base: { ref: "crewbie/other" } });
   assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 59)).ready, false);
+  pull.head = { sha: HEAD, ref: "copilot/foundation" };
+  pull.base.ref = BRANCH;
+  assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 60)).ready, false, "Missing head repository is not a task PR.");
+});
+test("task PR review checks its own acceptance criteria and reports a blocking missed deliverable", async (t) => {
+  const { root, pull, comments, client } = await setup(t);
+  pull.head.ref = "copilot/foundation";
+  pull.base.ref = BRANCH;
+  assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 61)).ready, true);
+  const prompt = await readFile(join(root, ".crewbie-review-prompt.txt"), "utf8");
+  const b = parseBatch(batch(), config());
+  assert.match(prompt, /Review this task's own acceptance criteria before it merges/);
+  assert.ok(prompt.includes(JSON.stringify(b.tasks[0].body)));
+  assert.ok(!prompt.includes(JSON.stringify(b.tasks[1].body)), "Other tasks must not dilute the review.");
+  await writeFile(join(root, ".crewbie-review-output.txt"), JSON.stringify({ verdict: "changes", summary: "Missing required file.", findings: [{ severity: "blocking", path: "docs/CHANGELOG.md", line: 1, body: "Required entry is absent." }] }));
+  await publishReview(root, client, reviewConfig);
+  assert.match(comments[0].body, /task #1 `crewbie\/feature-[0-9a-f]{8}`[\s\S]*Blocking.*docs\/CHANGELOG\.md:1/);
+  assert.match(comments[0].body, /will not auto-merge/);
 });
 test("a feature PR is reviewed against every task of its plan, and the verdict leaves the merge to a human", async (t) => {
   const { root, comments, client } = await setup(t);

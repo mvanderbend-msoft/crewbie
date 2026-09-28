@@ -1,5 +1,6 @@
-import { mergeFor, type Config } from "../config.js";
+import { mergeFor, reviewerFor, type Config } from "../config.js";
 import { GitHubError, integer, record, string } from "../core.js";
+import { requestReview, trustedReview } from "./pr-review.js";
 import type { GitHubApi } from "../tracking/github.js";
 
 /** Copilot leaves finished PRs as drafts; Crewbie marks them ready once the session completed and attribution ran. */
@@ -75,13 +76,23 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   }
   const combined = record(await checks.request("GET", `${prefix}/commits/${head}/status`), "commit status");
   const statuses = Array.isArray(combined.statuses) ? combined.statuses.map((status) => record(status, "commit status")) : [];
-  // Crewbie assumes no CI and no Actions settings: checks that ran must pass, but none running (no CI, branch filters or
-  // runs held for approval) does not block, because the human-merged feature PR into the default branch is the gate.
   const ran = runs.check_runs.map((run) => record(run, "check run")).filter((run) => run.conclusion !== "action_required");
   const waiting = checksPassed(ran, statuses);
   if (waiting) return { merged: false, reason: `${vetted} ${head.slice(0, 7)}. ${waiting}` };
+  // Crewbie assumes no CI and no Actions settings: checks that ran must pass, but none running (no CI, branch filters or
+  // runs held for approval) does not block, because the human-merged feature PR into the default branch is the gate.
+  const ciRan = ran.length > 0 || statuses.length > 0;
   if (pr.mergeable === false) return { merged: false, reason: "The PR conflicts with its base branch; resolve it, then Crewbie merges on its next run." };
   if (pr.mergeable !== true) return { merged: false, reason: "GitHub is still computing mergeability; Crewbie retries on its next run." };
+  // Green CI still says nothing about a task's own acceptance criteria, so a configured reviewer checks them first.
+  // Without CI the reviewer would only see untested code; the feature PR review and the human merge remain the gate.
+  const reviewer = ciRan ? reviewerFor(config) : undefined;
+  if (reviewer) {
+    const review = await trustedReview(client, config, number, head);
+    if (!review) return { merged: false, reason: await requestReview(client, config, number, head) };
+    if (review.verdict !== "pass") return { merged: false, reason: `crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}; fix the task PR before it merges.` };
+    if (review.partial) return { merged: false, reason: "The task review omitted patches; review them and merge manually." };
+  }
   try {
     const result = record(await client.request("PUT", `${prefix}/pulls/${number}/merge`, { sha: head, merge_method: merge.method }), "merge result");
     if (result.merged !== true) return { merged: false, reason: `GitHub did not confirm the merge of PR #${number}.` };
@@ -91,6 +102,7 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
     }
     throw error;
   }
-  const verified = ran.length || statuses.length ? "every check passed" : "no checks ran on it; the feature PR is where it gets tested";
+  const verified = !ciRan ? "no checks ran on it; the feature PR is where it gets tested"
+    : reviewer ? "every check passed and the task review passed" : "every check passed";
   return { merged: true, reason: `Auto-merged ${head.slice(0, 7)} into ${string(record(pr.base, "PR base").ref, "base branch")}: the session completed and ${verified}.` };
 }

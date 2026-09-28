@@ -18,7 +18,7 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
     "crewbie-plan.yml": "Prepare a coordinator plan from approved issue intake; the planning opt-in gate still applies.",
     "crewbie-execute-plan.yml": "Verify exact-head human approval and merge before publishing implementation tasks.",
     "crewbie-dispatch.yml": "Release approved tasks when dependencies, capacity and launch controls permit; merge each finished task PR into its plan's feature branch once checks pass, then open the feature PR to the default branch and request its review.",
-    "crewbie-review.yml": "Have the configured Crewbie reviewer comment on each feature PR head; reads the API diff and never runs PR code.",
+    "crewbie-review.yml": "Have the configured Crewbie reviewer comment on each task and feature PR head; reads the API diff and never runs PR code.",
     "crewbie-maintain.yml": "Offer bounded knowledge-maintenance proposals; scheduled analysis remains opt-in.",
     "crewbie-report.yml": "Collect execution evidence into a static report without starting implementation agents.",
   };
