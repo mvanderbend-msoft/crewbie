@@ -1,5 +1,6 @@
 import { agentArchivePath, DEFAULT_EXECUTION_LIMITS } from "../config.js";
 import { record, string } from "../core.js";
+import { LEGACY_DECISIONS } from "../memory/context.js";
 import { setupConfiguration, type FileChange } from "./install.js";
 
 function cell(value: string): string { return value.replaceAll("|", "\\|").replace(/\r?\n/g, " "); }
@@ -23,6 +24,7 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
     "crewbie-report.yml": "Collect execution evidence into a static report without starting implementation agents.",
   };
   const detail = change.merged ? ["Merged with your edits", "Crewbie refreshed only its managed block; everything you wrote outside it is kept."]
+    : change.after === null && path === LEGACY_DECISIONS ? ["Moved shared decisions", "Replaced by .crewbie/decisions/hot.md; custom content moves there, an unchanged template is dropped."]
     : change.after === null ? ["Archived original", "Remove the original only after preserving its approved charter in the agent archive."]
     : path === ".crewbie/config.json" ? ["User policy", "Team, explicit models, approvals and limits; update preserves your configuration."]
     : path === ".crewbie/managed.json" ? ["Crewbie bookkeeping", "Fingerprints protect human edits during updates; do not reset to bypass conflicts."]
