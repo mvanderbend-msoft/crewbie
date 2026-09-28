@@ -122,7 +122,7 @@ Never put the token in a file, an issue or a command argument. See
 **1. Install the CLI**
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.48/crewbie-cli-0.1.0-alpha.48.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.49/crewbie-cli-0.1.0-alpha.49.tgz
 ```
 
 **2. Set up your repository.** Run this inside your own project:
