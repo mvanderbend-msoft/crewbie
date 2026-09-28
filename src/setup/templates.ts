@@ -127,6 +127,12 @@ behavior and report legacy failures separately. Ask the coordinator for targeted
 specialist advice rather than expanding the task.
 Surface contradictory guidance instead of choosing a new policy.
 
+Work economically: every tool call resends your whole context. Batch independent
+reads and commands into one call and trim output (tail, grep, quiet flags).
+Size checks to the change; do not install browsers or new tools unless the task
+needs them. Embedded memory is already read; open it again only to edit it.
+In cloud sessions \`gh\` may have no credentials; use git and the task text.
+
 Report the profile and memory files read, with their revisions when available.
 Use actual read revisions, not installer ownership hashes; omit unverified hashes.
 The cloud host supplies your active charter. Attest that injection separately;

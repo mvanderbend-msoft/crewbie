@@ -37,6 +37,14 @@ test("initial assessment does not change a repository", async (t) => {
   await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
 });
 
+test("assessment flags a missing Copilot setup-steps workflow so agents do not reinstall dependencies each session", async (t) => {
+  const missing = (await assess(await fixture(t, { "README.md": "A project." }))).findings.find((f) => f.area === "Agent environment");
+  assert.equal(missing?.status, "gap");
+  assert.match(missing.detail, /copilot-setup-steps\.yml.*installs dependencies/);
+  const present = (await assess(await fixture(t, { ".github/workflows/copilot-setup-steps.yml": "on: workflow_dispatch" }))).findings.find((f) => f.area === "Agent environment");
+  assert.equal(present?.status, "ready");
+});
+
 test("full-stack assessment includes nested source evidence and keeps planning context out of requirement sources", async (t) => {
   const root = await fixture(t, { "frontend/src/App.tsx": "export const App = 1;", "backend/src/main/java/App.java": "class App {}" });
   const report = await assess(root);
@@ -73,6 +81,8 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
   assert.match(SHARED_INSTRUCTIONS, /work branch/);
   assert.match(SHARED_INSTRUCTIONS, /crewbie-memory-proposal/);
   assert.match(SHARED_INSTRUCTIONS, /no new durable lesson/i);
+  assert.match(SHARED_INSTRUCTIONS, /Work economically.*Batch independent/s);
+  bounded(SHARED_INSTRUCTIONS, config().limits?.constitution ?? 600, "shared instructions");
   assert.match(profile({ id: "tester", purpose: "Test.", model: "" }, config()), /boundary|edge/i);
   assert.match(profile({ id: "reviewer", purpose: "Review.", model: "" }, config()), /findings.*evidence/i);
 });

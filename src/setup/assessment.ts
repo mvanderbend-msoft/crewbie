@@ -8,6 +8,7 @@ import { assessTeam, type TeamAssessment } from "./team.js";
 import { inventory, type Inventory } from "./inventory.js";
 import { repositoryMap, type RepositoryMap } from "./repository-map.js";
 
+const SETUP_STEPS = ".github/workflows/copilot-setup-steps.yml";
 export interface Assessment {
   schemaVersion: 1;
   findings: { area: string; status: "ready" | "gap" | "unknown"; evidence: string[]; detail: string }[];
@@ -45,6 +46,9 @@ export async function assess(root: string): Promise<Assessment> {
     { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "Propose agent-specific guidance only for useful missing context." },
     { area: "Decisions", status: existingConstitution ? "ready" : "gap", evidence: existingConstitution ? [existingConstitution] : [], detail: "Reuse the existing constitution." },
     { area: "Cloud execution", status: "unknown", evidence: ci.slice(0, 5), detail: "Run doctor with a selected repository and specialist. Account permissions and model support require separate verification." },
+    ci.includes(SETUP_STEPS)
+      ? { area: "Agent environment", status: "ready", evidence: [SETUP_STEPS], detail: "Cloud agents start with the setup steps in this workflow." }
+      : { area: "Agent environment", status: "gap", evidence: [], detail: `Add ${SETUP_STEPS} that installs dependencies (and checks out with fetch-depth: 0 for reviewers). Without it every agent session spends model turns installing them.` },
   ];
   const instructionQuality = await assessInstructions(root, paths);
   const context = await inventory(root, paths);
