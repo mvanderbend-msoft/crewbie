@@ -33,6 +33,7 @@ const READ_ONLY_TOOLS = ["read", "search"];
 const WORKING_TOOLS = ["read", "search", "edit", "execute"];
 
 export function charterTools(role: Role): string[] {
+  // Rendered as a block list: the managed-block merge re-serializes frontmatter, and flow lists would not round-trip.
   return [...(READ_ONLY_ROLES.has(role.id) ? READ_ONLY_TOOLS : WORKING_TOOLS)];
 }
 
@@ -93,7 +94,8 @@ Change only approved guidance/memory paths. Preserve policy and accepted decisio
   return `---
 name: crewbie-${role.id}
 description: ${JSON.stringify(role.purpose)}
-tools: [${charterTools(role).join(", ")}]
+tools:
+${charterTools(role).map((tool) => `  - ${tool}`).join("\n")}
 ---
 # ${role.id}
 
