@@ -472,11 +472,15 @@ retrying. For an open plan, reply on the PR: while it has open questions (posted
 as a Crewbie comment, PR in draft) any new write-access user comment is taken as the answers;
 otherwise a comment starting with `/crewbie revise` carries the feedback. Each such
 comment requests one paid run (the planning workflow listens to `issue_comment`).
+The comment job prefilters bots and associations other than OWNER, MEMBER or
+COLLABORATOR; plain-text answers remain possible while questions are open.
 Locally, `crewbie revise-plan --pr N --feedback-file feedback.txt` previews the same
 revision and `--apply` requests it.
 The workflow accepts an explicit human request, reuses prior setup/plan/batch
 context, skips the full assessment and regenerates the execution manifest.
-Only users with write access may request it. It checks source, policy and the exact prior head, and advances the branch
+Only users with write access may request it: the API permission check remains
+authoritative because COLLABORATOR does not guarantee write access. It checks
+source, policy and the exact prior head, and advances the branch
 without force; a branch behind the default branch gets it merged into the revision
 commit, so no manual branch update is needed. Previous approvals are stale after
 revision; close/relabel is not needed for ordinary plan feedback. Re-running an already
@@ -949,8 +953,11 @@ Changing a task's kind invalidates its approval like other scope changes.
 - **Feature-PR fix comments.** A write-access human can comment `/crewbie fix`
   on the feature PR, optionally followed by notes, after a Crewbie
   changes-requested review. `/crewbie revise` has the same meaning on feature PRs
-  and keeps its planning-revision meaning on planning PRs. Crewbie handles each
-  comment ID once, first tries to merge the default branch into the feature branch
+  and keeps its planning-revision meaning on planning PRs. The fix job prefilters
+  comments for `/crewbie` and an OWNER, MEMBER or COLLABORATOR association;
+  Crewbie still checks the exact command, non-bot identity and actual write access.
+  Crewbie handles each comment ID once, first tries to merge the default
+  branch into the feature branch
   through the GitHub merges API. Each finding goes to the specialist whose merged
   task PR changed the affected file (falling back to directory overlap, then the
   first non-review task owner), and each specialist gets one fix task with only
