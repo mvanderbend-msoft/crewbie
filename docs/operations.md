@@ -524,8 +524,10 @@ files under `.crewbie/plans/<issue>/`:
 - A copy of the unchanged configuration used for revisions (`setup.json`).
 - A bounded execution manifest identifying the planning run and reviewed files.
 
-The planning PR never changes roles, agent charters, memory, configuration,
-workflows or secrets; any other file blocks execution. Change the team
+The planning PR never changes roles, agent charters, role memory, configuration,
+workflows or secrets; it may add or update `.crewbie/decisions/hot.md`, which is
+reviewed with the plan but is not part of the execution manifest. Any other file
+blocks execution. Change the team
 through reviewed `crewbie init --update`. It includes no application changes. Clarification-only
 plans do not contain an executable manifest and cannot start work when merged.
 If a generated plan needs edits, regenerate it and review the new commit; changing
