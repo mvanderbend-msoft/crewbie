@@ -128,8 +128,17 @@ npm install --global @crewbie/cli
 
 Install it globally so the `crewbie` command is on your PATH. If you install it
 into a project without `--global`, run it with `npx crewbie` instead. The
-package is on [npm](https://www.npmjs.com/package/@crewbie/cli); each version is
-also attached to its [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases).
+package is on [npm](https://www.npmjs.com/package/@crewbie/cli).
+
+If you can't use the public npm registry, for example because of a company
+registry, install the package file from the
+[GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
+
+```powershell
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.50/crewbie-cli-0.1.0-alpha.50.tgz
+```
+
+Each release also includes a `SHA256SUMS` file to check the download.
 
 **2. Set up your repository.** Run this inside your own project:
 
