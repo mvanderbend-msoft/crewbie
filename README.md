@@ -109,6 +109,10 @@ Never put the token in a file, an issue or a command argument. See
 - **Planning, review and dispatch** run on GitHub Actions and use Actions minutes
   (free for public repositories).
 - **Each agent session** uses Copilot AI credits for the chosen model.
+- **Save tokens with a setup workflow.** Every step an agent takes resends its
+  whole context. Add `.github/workflows/copilot-setup-steps.yml` to install your
+  dependencies before the agent starts; otherwise each session spends turns
+  installing them. `crewbie init` tells you when it is missing.
 - Default limits: 2 agents at the same time, 3 tries per task and 20 launches
   per plan. You can change these in `.crewbie/config.json`. They limit launches,
   not money.
