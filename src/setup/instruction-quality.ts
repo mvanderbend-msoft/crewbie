@@ -6,7 +6,7 @@ import { autoLoadedGuidance, autoLoadedPointer } from "./auto-loaded.js";
 
 export const INSTRUCTION_STUDY = "https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd";
 export interface InstructionSignal {
-  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "unconditional-full-suite" | "missing-path-scope" | "broad-root-guidance" | "auto-loaded-reference" | "agent-only-context";
+  code: "generic-only" | "duplicated-documentation" | "shared-profile-boilerplate" | "unverified-reference" | "missing-npm-script" | "missing-package-manifest" | "unconditional-full-suite" | "missing-path-scope" | "broad-root-guidance" | "auto-loaded-reference" | "agent-only-context";
   level: "warning" | "advisory";
   path: string;
   line: number;
@@ -40,7 +40,7 @@ export function validateInstructionScope(path: string, content: string): void {
   }
 }
 const normalize = (text: string) => text.replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
-const generic = /^(?:write clean(?:,? readable)?(?: and maintainable)? code|follow (?:coding )?best practices|be (?:thorough|helpful|concise)|ensure (?:high )?code quality|run (?:the )?tests|write (?:good |unit )?tests)[.!]?$/i;
+const generic = /^(?:you are (?:a )?(?:(?:senior|experienced) )?(?:software )?(?:engineer|developer)|write (?:clean(?:,? readable)?(?: and maintainable)?|(?:high[- ]quality|good)) code(?: and tests)?|follow (?:coding )?best practices|be (?:thorough|helpful|concise)|ensure (?:high )?code quality|run (?:the )?tests|write (?:high[- ]quality|good |unit )?tests)[.!]?$/i;
 function scopeDirectory(path: string): string {
   const marker = path.indexOf(".github/");
   return marker >= 0 ? path.slice(0, marker) : (posix.dirname(path) === "." ? "" : `${posix.dirname(path)}/`);
@@ -130,7 +130,10 @@ export async function assessInstructions(root: string, paths: readonly string[])
         detail: "Always-loaded guidance exceeds Crewbie's 600-word review threshold, not a paper-established harmful limit.",
         recommendation: "Review relevance and domain scope. Keep necessary shared policy; move justified domain rules behind scoped instructions or nested AGENTS.md, with source reductions and destination edits reviewed together." });
     }
+    const frontmatter = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(text)?.[0];
+    const frontmatterEndLine = frontmatter === undefined ? 0 : lines.findIndex((line, index) => index > 0 && line.trim() === "---") + 1;
     const semantic = lines.map((line, index) => ({ text: line.replace(/^\s*[-*]\s*/, "").trim(), line: index + 1 }))
+      .filter((line) => line.line > frontmatterEndLine)
       .filter((line) => line.text && !line.text.startsWith("#") && !line.text.startsWith("<!--"));
     if (semantic.length && semantic.every((line) => generic.test(line.text))) {
       add({ code: "generic-only", level: "advisory", path, line: semantic[0]!.line,
@@ -208,12 +211,21 @@ export async function assessInstructions(root: string, paths: readonly string[])
             detail: "The text appears to require full-suite work unconditionally; faithful compliance may increase cost.",
             recommendation: "Confirm the intent. Scope routine checks to changed behavior where appropriate, while preserving explicit merge, release and compliance gates." });
         }
-        if (scopedManifests.length && scopedManifests.every((manifest) => scripts.has(manifest)) && !line.includes("--if-present")) {
-          for (const match of line.matchAll(/\bnpm\s+run\s+([a-zA-Z0-9:_-]+)/g)) {
-            if (scopedManifests.some((manifest) => scripts.get(manifest)!.has(match[1]!))) continue;
-            add({ code: "missing-npm-script", level: "warning", path, line: index + 1,
-              detail: "A literal npm run command names no script in any inspected package manifest within this instruction scope.",
-              recommendation: "Verify the command and working directory against the current manifest. Correct stale guidance instead of creating a script solely to satisfy it." });
+        if (!line.includes("--if-present")) {
+          const npmScripts = [...line.matchAll(/\bnpm\s+run\s+([a-zA-Z0-9:_-]+)/g)];
+          if (npmScripts.length) {
+            if (!scopedManifests.length) {
+              add({ code: "missing-package-manifest", level: "warning", path, line: index + 1,
+                detail: "A literal npm run command has no package.json in this instruction scope to establish its working directory or script.",
+                recommendation: "Verify the command's working directory. Add the relevant package manifest to the repository or make the guidance name the intended package location." });
+            } else if (scopedManifests.every((manifest) => scripts.has(manifest))) {
+              for (const match of npmScripts) {
+                if (scopedManifests.some((manifest) => scripts.get(manifest)!.has(match[1]!))) continue;
+                add({ code: "missing-npm-script", level: "warning", path, line: index + 1,
+                  detail: "A literal npm run command names no script in any inspected package manifest within this instruction scope.",
+                  recommendation: "Verify the command and working directory against the current manifest. Correct stale guidance instead of creating a script solely to satisfy it." });
+              }
+            }
           }
         }
       }
