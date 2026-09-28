@@ -60,6 +60,11 @@ function fixture() {
           return {};
         }
         if (path.includes("/contents/.github/agents/")) return { type: "file", sha: A };
+        if (/\/contents\/\.crewbie\/(instructions\.md|decisions\.md|team\/)/.test(path)) {
+          const file = f.memory?.[decodeURIComponent(path.split("/contents/")[1].split("?")[0])];
+          if (file === undefined) throw new GitHubError(404, null);
+          return { type: "file", encoding: "base64", content: Buffer.from(file).toString("base64") };
+        }
         if (method === "POST" && path.endsWith("/git/refs") && body.ref.includes("/crewbie/launches/")) {
           if (launches.has(body.ref)) throw new GitHubError(422, null);
           launches.add(body.ref); return {};
@@ -131,6 +136,7 @@ test("review plan/report reject stale, contradictory, duplicate and out-of-scope
 
 test("real review publication drives bounded same-profile correction and exact-head re-review without merges", async () => {
   const f = fixture();
+  f.memory = { ".crewbie/team/frontend/hot.md": "- Cart totals are cached per tab." };
   await reconcileReview(f.client, f.cfg, f.plan);
   assert.equal(f.native[1].custom_agent.id, "crewbie-reviewer");
   assert.ok(f.issues[1].labels.includes("crewbie:running"));
@@ -141,6 +147,7 @@ test("real review publication drives bounded same-profile correction and exact-h
   const correction = f.writes.filter((w) => w.path === "/agents/repos/example/project/tasks").at(-1).body;
   assert.equal(correction.custom_agent, "crewbie-frontend"); assert.equal(correction.model, "approved-model");
   assert.equal(correction.head_ref, "copilot/ui"); assert.equal(correction.create_pull_request, false);
+  assert.match(correction.prompt, /Crewbie memory at copilot\/ui,[\s\S]*BEGIN \.crewbie\/team\/frontend\/hot\.md[^\n]*\n- Cart totals are cached per tab\./);
   await reconcileReview(f.client, f.cfg, f.plan);
   assert.equal(f.native.length, 3, "An active correction is not relaunched.");
   f.complete("native-2");

@@ -11,6 +11,7 @@ import { createLedger, ledgerHas, listLedger } from "../tracking/refs.js";
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { checkLaunchModels, launchAllowance, listCopilotModels, reserveLaunch, type DiscoverModels } from "./controls.js";
+import { launchMemory } from "../memory/launch.js";
 
 interface Target { issue: number; pr: number; issueDigest: string; allowedPaths: string[] }
 export interface ReviewPlan {
@@ -268,6 +269,7 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
       const branchInfo = record(await client.request("GET", `/repos/${config.repository}/branches/${encodeURIComponent(base)}`), "launch base");
       const baseSha = sha(record(branchInfo.commit, "base commit").sha);
       await client.request("GET", `/repos/${config.repository}/contents/.github/agents/crewbie-${owner}.agent.md?ref=${baseSha}`);
+      const memory = await launchMemory(client, config, owner, pr ? string(record(pr.head, "head").ref, "head ref") : base);
       await reserveLaunch(client, config, current, number, baseSha);
       job.launching = true;
       await persist();
@@ -276,7 +278,7 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
         custom_agent: `crewbie-${owner}`, model, create_pull_request: !pr,
         base_ref: pr ? string(record(pr.base, "base").ref, "base ref") : base,
         ...(pr ? { head_ref: string(record(pr.head, "head").ref, "head ref") } : {}),
-        prompt,
+        prompt: `${prompt}\n${memory}`,
       }), "continuation response");
       const id = string(result.id, "continuation task ID");
       if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("Invalid continuation task ID.");

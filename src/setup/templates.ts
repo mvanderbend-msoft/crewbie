@@ -107,7 +107,8 @@ ${role.checks?.length ? `## Repository checks\n${role.checks.map((check) => `- $
 
 ${MANAGED_START}
 ## Context and handoff
-${role.sourceAgent ? `The original instructions are included above. Backup provenance: \`${agentArchivePath(role.sourceAgent)}\`. Resolve adopted-agent references through \`.crewbie/config.json\`; surface conflicting guidance for human direction.\n` : ""}Before work, read \`.crewbie/instructions.md\` for shared scope, learning and handoff rules,
+${role.sourceAgent ? `The original instructions are included above. Backup provenance: \`${agentArchivePath(role.sourceAgent)}\`. Resolve adopted-agent references through \`.crewbie/config.json\`; surface conflicting guidance for human direction.\n` : ""}Crewbie launches embed your required memory; any file not embedded must be read before work:
+\`.crewbie/instructions.md\` for shared scope, learning and handoff rules,
 ${config.constitution ? `\`${config.constitution}\`, ` : ""}\`.crewbie/decisions.md\`,
 \`.crewbie/team/${role.id}/hot.md\`, and \`.crewbie/team/${role.id}/index.md\`.
 Read linked cold/archive detail only when relevant. Follow applicable repository instructions.

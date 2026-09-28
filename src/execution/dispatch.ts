@@ -7,6 +7,7 @@ import { approvedIn, ensureLabels, hasApproval, managedIssues, setStatus } from 
 import { verifySources } from "../tracking/sources.js";
 import type { AdoApi } from "../tracking/ado.js";
 import { attributePull } from "./attribution.js";
+import { launchMemory } from "../memory/launch.js";
 import { cloudTasks } from "../tracking/native.js";
 import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, modelRejection, rejectedLaunchModels, reserveLaunch, RESTART_LABEL, RESTART_MARKER, withDispatchLock, type DiscoverModels } from "./controls.js";
 import { autoMerge, markReady } from "./merge.js";
@@ -374,10 +375,11 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
       continue;
     }
     const base = await ensureBranch(client, config, item.metadata.branch, sha);
+    const memory = await launchMemory(client, config, item.metadata.task.owner, base);
     await reserveLaunch(client, config, item.metadata, issue, sha, true);
     // Atomic remote claim prevents a second workflow from launching the same issue.
     await createLedger(client, config.repository, `claims/${issue}`, sha);
-    await assign(client, config, item, fresh, base);
+    await assign(client, config, item, fresh, base, memory);
   }
   await restarts(client, config, work, sha, discoverModels, ado);
   await featurePulls(client, config, work, branch);
@@ -582,7 +584,7 @@ async function freshLaunchable(client: GitHubApi, config: Config, item: Work, sh
   await client.request("GET", `/repos/${config.repository}/contents/.github/agents/crewbie-${item.metadata.task.owner}.agent.md?ref=${sha}`);
   return fresh;
 }
-async function assign(client: GitHubApi, config: Config, item: Work, fresh: Record<string, unknown>, branch: string): Promise<void> {
+async function assign(client: GitHubApi, config: Config, item: Work, fresh: Record<string, unknown>, branch: string, memory: string): Promise<void> {
   const issue = integer(fresh.number, "issue number");
   const task = item.metadata.task;
   try {
@@ -590,7 +592,7 @@ async function assign(client: GitHubApi, config: Config, item: Work, fresh: Reco
       assignees: ["copilot-swe-agent[bot]"],
       agent_assignment: {
         target_repo: config.repository, base_branch: branch, custom_agent: `crewbie-${task.owner}`, model: task.model,
-        custom_instructions: `Implement only issue #${issue}. Approved task fingerprint: ${hash(String(fresh.body))}. If the issue changes from this approved scope, stop for reapproval. Approved task:\n${task.body}\nRead your Crewbie charter, shared working rules, configured constitution, shared decisions, hot memory and index first. Link the PR with Closes #${issue}. Identify Specialist: crewbie-${task.owner} in the PR description. Report the memory paths/revisions read. Before handoff, add only non-obvious gotchas (one or two lines each, with a link) to .crewbie/team/${task.owner}/hot.md on this branch, as the shared working rules describe; this is always in scope. Put downstream contracts in the PR Handoff section, not memory. Keep the PR concise, with ## What changed, ## Why and ## Checks sections (actual checks and risks). Requested model: ${task.model}; report observed model only with runtime evidence.`,
+        custom_instructions: `Implement only issue #${issue}. Approved task fingerprint: ${hash(String(fresh.body))}. If the issue changes from this approved scope, stop for reapproval. Approved task:\n${task.body}\n${memory}\nLink the PR with Closes #${issue}. Identify Specialist: crewbie-${task.owner} in the PR description. Report the memory paths/revisions read. Before handoff, add only non-obvious gotchas (one or two lines each, with a link) to .crewbie/team/${task.owner}/hot.md on this branch, as the shared working rules describe; this is always in scope. Put downstream contracts in the PR Handoff section, not memory. Keep the PR concise, with ## What changed, ## Why and ## Checks sections (actual checks and risks). Requested model: ${task.model}; report observed model only with runtime evidence.`,
       },
     }), "assignment response");
     if (!copilotAssigned(assigned)) throw new Error("GitHub did not confirm Copilot among the assignees. The assignment may have been ignored; check push access and cloud-agent entitlement.");
@@ -649,13 +651,15 @@ async function restarts(client: GitHubApi, config: Config, work: Work[], sha: st
       const after = record(await client.request("DELETE", `${prefix}/issues/${issue}/assignees`, { assignees: ["copilot-swe-agent[bot]"] }), "unassign response");
       if (copilotAssigned(after)) throw new Error(`Issue #${issue}: GitHub did not remove the earlier Copilot assignment, so a new one would not start a session. No attempt was used; unassign Copilot, then run dispatch again.`);
     }
+    const base = await ensureBranch(client, config, item.metadata.branch, sha);
+    const memory = await launchMemory(client, config, item.metadata.task.owner, base);
     const reserved = await reserveLaunch(client, config, item.metadata, issue, sha);
     await client.request("DELETE", `${prefix}/issues/${issue}/labels/${encodeURIComponent(RESTART_LABEL)}`);
     await client.request("POST", `${prefix}/issues/${issue}/comments`, {
       body: `Crewbie restart requested by @${String(record(labeled.actor, "actor").login)}: attempt ${reserved.taskUsed + 1} of ${reserved.maxAttemptsPerTask} for this task. The previous session had ended.\n${RESTART_MARKER}${reserved.taskUsed + 1} -->`,
     });
     item.sessionEnded = false;
-    await assign(client, config, item, { ...fresh, assignees: [] }, await ensureBranch(client, config, item.metadata.branch, sha));
+    await assign(client, config, item, { ...fresh, assignees: [] }, base, memory);
   }
 }
 export async function preflight(client: GitHubApi, config: Config, batchId?: string, discoverModels: DiscoverModels = listCopilotModels, ado?: AdoApi) {
