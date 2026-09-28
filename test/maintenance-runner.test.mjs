@@ -35,6 +35,7 @@ test("nightly prepare includes affected specialist history and advances no-chang
     },
     async request(method, path, body) {
       if (path === "/graphql") return { data: { repository: { issue: { closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } } };
+      if (method === "GET" && /\/git\/matching-refs\/(tags\/)?crewbie\/launches\//.test(path)) return [];
       if (method === "GET" && path.includes("/git/ref/heads/crewbie/runtime")) {
         if (!state) throw new GitHubError(404, null);
         return { object: { sha: "runtime-commit" } };

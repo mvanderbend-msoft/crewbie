@@ -78,8 +78,8 @@ code{font-family:Consolas,"Courier New",Courier,monospace}footer{font-size:14px}
 <label>Requested model<select id="model"><option value="">All models</option></select></label>
 <label>From<input type="date" id="from"></label><label>Through<input type="date" id="through"></label></div>
 <section class="card" aria-live="polite"><h2>Coverage</h2><p id="coverage"></p><p id="usage"></p></section>
-<div class="card table"><table><caption>Attributable records in the selected range</caption><thead><tr><th>Specialist / work</th><th>Date / status</th><th>Requested model</th><th>Observed model</th><th>Tokens in / out</th><th>Credits / billed amount</th><th>Evidence / memory reads</th></tr></thead><tbody id="runs"></tbody></table></div>
-<footer class="muted">Collected issue and review records are not an exhaustive session ledger. Repository and artifact retention limit coverage. Organization-wide billing is not allocated to specialists. Missing sessions, unallocated charges, and unavailable Actions costs are not inferred. Memory-read attestations are agent reports, not proof of internal model behavior.</footer>
+<div class="card table"><table><caption>Attributable records in the selected range</caption><thead><tr><th>Specialist / work</th><th>Date / status</th><th>Requested model</th><th>Observed model</th><th>Tokens in / out</th><th>Credits / billed amount</th><th>Evidence / embedded memory</th></tr></thead><tbody id="runs"></tbody></table></div>
+<footer class="muted">Collected issue and review records are not an exhaustive session ledger. Repository and artifact retention limit coverage. Organization-wide billing is not allocated to specialists. Missing sessions, unallocated charges, and unavailable Actions costs are not inferred. Embedded memory is what Crewbie put in the launch, recorded at launch time; it is not proof of internal model behavior.</footer>
 </main><script>
 const DATA=${data};
 const el=id=>document.getElementById(id);
@@ -99,7 +99,7 @@ function render(){
  for(const r of rows){const tr=document.createElement('tr');const work=cell(tr,r.specialist);safeLink(work,'Issue',r.issue);safeLink(work,'PR',r.pullRequest);cell(tr,r.date.slice(0,10)+' / '+r.status);cell(tr,r.requestedModel);
  cell(tr,r.observedModel===null?'Unverified':r.observedModel,r.observedModel===null?'unknown':r.observedModel!==r.requestedModel?'mismatch':'');
  cell(tr,(r.inputTokens??'Unknown')+' / '+(r.outputTokens??'Unknown'));cell(tr,(r.credits??'Unknown')+' / '+(r.currencyAmount===null?'Unknown':r.currencyAmount+' '+r.currency));
- cell(tr,([r.observedModelSource,r.usageSource].filter(Boolean).join('; ')||'No runtime usage evidence')+'; memory reads: '+r.contextStatus);el('runs').append(tr)}
+ cell(tr,([r.observedModelSource,r.usageSource].filter(Boolean).join('; ')||'No runtime usage evidence')+'; memory: '+(r.contextStatus==='embedded'?'embedded '+r.context.join(', '):'unreported'));el('runs').append(tr)}
 }
 for(const id of ['specialist','model','from','through'])el(id).addEventListener('change',render);render();
 </script></body></html>`;

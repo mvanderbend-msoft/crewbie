@@ -63,13 +63,14 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     "", `Concurrency: ${config.maxActive} active sessions. This is not a limit on team size.`,
     config.review?.enabled ? `PR reviewer: crewbie-${config.review.role} reviews each feature PR before you merge it into the default branch.` : "PR reviewer: off.", "",
     `Model profile: **${config.modelProfile ?? "balanced"}**. Explicit model overrides remain authoritative.`,
-    `Crewbie launch limits: **${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxLaunchesPerBatch} per batch / ${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxAttemptsPerTask} per task**, including the first attempt and uncertain requests. Not a monetary cap.`, "",
+    `Crewbie launch limits: **${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxLaunchesPerBatch} per batch / ${(config.execution ?? DEFAULT_EXECUTION_LIMITS).maxAttemptsPerTask} per task**, including the first attempt and uncertain requests. ${config.execution?.maxTokensPerFeature ? `Feature token ceiling: **${config.execution.maxTokensPerFeature} observed tokens**.` : "No feature token ceiling (set `execution.maxTokensPerFeature` to add one)."} Not a monetary cap.`, "",
   ];
   for (const role of config.roles) {
     lines.push(`### ${role.id}`, "");
     if (role.sourceAgent) lines.push(`Original: \`${role.sourceAgent}\` -> \`.github/agents/crewbie-${role.id}.agent.md\`.`,
       `Archive: \`${agentArchivePath(role.sourceAgent)}\` (backup provenance). The active charter contains the complete original instructions, with tool restrictions and persona preserved; only lines that just point to guidance Copilot loads automatically are left out.`, "");
     if (role.checks?.length) lines.push("**Checks**", ...role.checks.map((check) => `- ${check}`), "");
+    else if (!role.sourceAgent) lines.push("**Checks:** none. Crewbie no longer ships generic advice; add the repository's own observable checks (commands, fixtures, invariants a model cannot infer from the code) to this role in `.crewbie/config.json`.", "");
     if (role.modelReason) lines.push(`**Model proposal (${role.complexity ?? "unclassified"}):** ${role.modelReason}`, "");
     if (role.nonNegotiables?.length) lines.push("**Boundaries**", ...role.nonNegotiables.map((rule) => `- ${rule}`), "");
   }

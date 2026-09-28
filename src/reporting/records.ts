@@ -4,12 +4,15 @@ import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { managedIssues } from "../tracking/issues.js";
 import { taskMetadata } from "../specification/batch.js";
 import { linkedPull } from "../execution/dispatch.js";
+import { latestLaunchContext } from "../execution/controls.js";
 
 export interface RunRecord {
   schemaVersion: 1;
   kind: "work-item" | "session" | "improvement-review";
   sessionId: string | null;
-  contextStatus: "unreported" | "attested";
+  /** "embedded" means Crewbie recorded the memory it put in the launch; it is not proof of what the model used. */
+  contextStatus: "unreported" | "embedded";
+  context?: string[];
   id: string; specialist: string; requestedModel: string; observedModel: string | null;
   observedModelSource: string | null; date: string; status: string; issue: string;
   pullRequest: string | null; inputTokens: number | null; outputTokens: number | null;
@@ -28,12 +31,16 @@ export function runRecord(value: unknown): RunRecord {
   const data = record(value, "run");
   if (data.schemaVersion !== undefined && data.schemaVersion !== 1) throw new Error("Unsupported run-record version.");
   if (data.kind !== undefined && !["session", "work-item", "improvement-review"].includes(String(data.kind))) throw new Error("Invalid record kind.");
-  if (data.contextStatus !== undefined && !["unreported", "attested"].includes(String(data.contextStatus))) throw new Error("Memory-read evidence must be unreported or explicitly attested.");
+  // "attested" was an agent self-report in earlier releases; it carries no deterministic evidence.
+  if (data.contextStatus !== undefined && !["unreported", "attested", "embedded"].includes(String(data.contextStatus))) throw new Error("Memory context must be unreported or embedded.");
+  const embedded = data.contextStatus === "embedded";
+  if (embedded && (!Array.isArray(data.context) || !data.context.length)) throw new Error("Embedded memory context must list the embedded files.");
   const result: RunRecord = {
     schemaVersion: 1,
     kind: data.kind === "session" ? "session" : data.kind === "improvement-review" ? "improvement-review" : "work-item",
     sessionId: nullable(data.sessionId, "session ID"),
-    contextStatus: data.contextStatus === "attested" ? "attested" : "unreported",
+    contextStatus: embedded ? "embedded" : "unreported",
+    ...(embedded ? { context: (data.context as unknown[]).map((item) => string(item, "embedded memory file")) } : {}),
     id: string(data.id, "run ID"), specialist: string(data.specialist, "specialist"),
     requestedModel: string(data.requestedModel, "requested model"),
     observedModel: nullable(data.observedModel, "observed model"),
@@ -95,9 +102,11 @@ export async function collectRecords(client: GitHubApi, config: Config): Promise
     const primary = String(pr?.body ?? issue.title ?? "");
     let summary = [primary.length <= 2500 ? primary : "PR body omitted because it exceeds the summary budget; consult the PR.", ...evidence].join("\n");
     if (summary.length > 4000) summary = "Detailed feedback exceeds the compact record budget. Review the linked issue/PR, reviews and CI before proposing changes.";
+    const launched = await latestLaunchContext(client, config, metadata, number);
+    const context = launched?.files.map((file) => `${file.path}@${file.sha256.slice(0, 12)}`) ?? [];
     records.push(runRecord({
       id: `${config.repository}#${number}`, specialist: metadata.task.owner, requestedModel: metadata.task.model,
-      date,
+      date, ...(context.length ? { contextStatus: "embedded", context } : {}),
       status: pr?.merged_at ? "merged" : pr?.state === "closed" ? "failed" : pr ? "review" : issue.state === "closed" ? "closed-unmerged" : "pending",
       issue: `https://github.com/${config.repository}/issues/${number}`,
       pullRequest: pr ? `https://github.com/${config.repository}/pull/${integer(pr.number, "PR number")}` : null,

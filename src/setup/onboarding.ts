@@ -1,8 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AGENT_PROMPT_CHARACTERS, agentPrompt, bounded, json, modelJson, record, slug, string, strings } from "../core.js";
-import { agentArchivePath, isExistingAgentPath, isRoleContextPath, limitsFor, parseConfig } from "../config.js";
+import { AGENT_PROMPT_CHARACTERS, agentPrompt, bounded, boundedLines, json, modelJson, record, slug, string, strings } from "../core.js";
+import { agentArchivePath, guidanceLinesFor, isExistingAgentPath, isRoleContextPath, limitsFor, parseConfig } from "../config.js";
 import type { Assessment } from "./assessment.js";
 import { redact } from "./inventory.js";
 import { profile } from "./templates.js";
@@ -79,9 +79,16 @@ Keep root AGENTS.md and .github/copilot-instructions.md focused on cross-cutting
 Copilot loads guidance automatically, including for custom agents: .github/copilot-instructions.md and root AGENTS.md always, a nested AGENTS.md for its directory, and a .github/instructions/*.instructions.md file whenever the working files match its applyTo globs. Never add pointers, "read/see/check X instructions" steps or duplicated summaries of these files elsewhere; that is redundant context. Only instruct agents to read files the host does not load automatically. Remove existing ones too: for every auto-loaded-reference signal in a file you may edit, propose the edit that deletes the pointer and keeps the rest of the line. Adopted agents are exempt from edits: the installer already leaves lines that only point to automatically loaded guidance out of the active charter; report other flagged lines in adopted agents as findings. Claude/Gemini files (CLAUDE.md, GEMINI.md, .claude/agents) run on hosts that do not load .github guidance, so their pointers can be justified.
 Create path-scoped instruction files when needed: when a retained agent, root guidance or a proposed role check carries conventions for anyone changing specific paths (not role behavior such as review stance or persona), propose .github/instructions/<domain>.instructions.md with applyTo globs for the actual paths, and reduce the source in the same proposal. Do the same when guidance tells an agent to read a scoped instructions file that does not exist, using only rules present in the supplied guidance. An agent-only-context signal means only one agent is told to read a document; since the document itself is not supplied, defer with the proposed scoped file named rather than inventing its rules. Do not duplicate rules that stay in an adopted agent body.
 For every instruction file, check generic advice, duplication, stale links, contradictions, rule applicability and non-obvious constraints. Account for every supplied static signal, explaining false positives instead of blindly rewriting policy. The static heuristics are a starting point, not the complete review.
+Also check the six configuration smells from the AGENTS.md smells catalog (arXiv:2606.15828):
+Lint Leakage: rules a linter or formatter already enforces (indentation, quotes, semicolons, line length, naming case, import order). When a lint-leakage signal names linter configuration, propose deleting those rules; otherwise recommend enforcing them with a tool, deferring when none is configured.
+Context Bloat: always-loaded files over ${guidanceLinesFor(assessment.config)} lines. Reduce by relevance and path scope, never by dropping unresolved policy.
+Skill Leakage: step-by-step instructions for a rare task (adding a provider, releasing, scaffolding a module) in always-loaded guidance. Defer with a named .github/skills/<name>/SKILL.md destination and the lines it would take, because skills are out of this proposal's scope.
+Conflicting Instructions: two rules, within or across files, that cannot both be followed (different locations, tools or conventions for the same thing). Name both lines; defer when the right choice is a human decision.
+Init Fossilization: an init-fossilization signal means the file was committed once and never updated while the repository kept changing. Treat its claims as likely stale and check them against the repository map.
+Blind References: a path or link with no explanation of what it contains or when to read it. Propose one line saying what and when, or remove the reference when the target is auto-loaded.
 Review custom-agent responsibilities, permissions, handoffs, duplicated boilerplate, model choices and relevance. Preserve safety restrictions, professional persona and useful domain rules. For each finding recommending a concrete edit, supply replacement text or explicitly explain why it is deferred; human approval must apply real file edits, not only generate a team.
 For adopted agents, express added checks on their roles; archive their original charter unchanged rather than also rewriting that source file.
-Keep each active charter focused on relevant, non-obvious guidance. Preserve adopted agents' original bodies completely; never discard original details. GitHub limits a custom agent prompt to ${AGENT_PROMPT_CHARACTERS} characters, including Crewbie additions. Keep proposed guidance/constitution under ${limitsFor(assessment.config).constitution} words.
+Keep each active charter focused on relevant, non-obvious guidance. Preserve adopted agents' original bodies completely; never discard original details. GitHub limits a custom agent prompt to ${AGENT_PROMPT_CHARACTERS} characters, including Crewbie additions. Keep each proposed guidance file at most ${guidanceLinesFor(assessment.config)} lines (Anthropic's recommendation for always-loaded instruction files) and a proposed constitution under ${limitsFor(assessment.config).constitution} words.
 Reuse the constitution if present. Optionally propose a short constitution if absent; the human can decline it.
 Return ONLY JSON:
 {"summary":"concise human-readable assessment and rationale","findings":[{"area":"instructions|mcp|agents|constitution","path":null,"assessment":"evidence-linked assessment","recommendation":"retain, reuse, concrete edit or explicit deferral with reason","action":"retain","editPaths":[]}],"questions":[],"roles":[{"id":"domain-specialist","sourceAgent":null,"purpose":"project-specific ownership","model":"catalog model ID when supplied","complexity":"standard","modelReason":"task-specific cost/capability rationale","checks":["observable check"],"nonNegotiables":["invariant"],"contextPaths":[]}],"reviewer":"domain-specialist","agentDecisions":[],"instructions":[{"path":"AGENTS.md","content":"complete proposed text","reason":"why"}],"constitutionText":null}
@@ -241,7 +248,7 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
     if (existing?.redacted || assessment.inventory.omitted.some((file) => file.path === path)) throw new Error(`Cannot rewrite uninspected or redacted guidance: ${path}`);
     const content = string(instruction.content, "guidance content");
     validateInstructionScope(path, content);
-    bounded(content, limitsFor(config).constitution, path);
+    boundedLines(content, guidanceLinesFor(config), path);
     result.instructions.push({ path, content, beforeHash: existing?.beforeHash ?? null, reason });
   }
   for (const finding of findings) {

@@ -144,6 +144,39 @@ follow-up questions.
 
 **5. Open an issue** with your first feature and add `crewbie:ready-for-planning`.
 
+## What init checks in your instructions
+
+Init reviews every instruction file and custom agent it finds. It then proposes
+edits for you to approve. It checks for the six configuration smells from
+[*Configuration Smells in AGENTS.md Files*](https://arxiv.org/abs/2606.15828),
+a study of 100 popular repositories:
+
+| Smell | What it is | How Crewbie finds it |
+|---|---|---|
+| **Lint leakage** | Style rules a linter or formatter already enforces, such as indentation, quotes or line length | Static check. Warns when a linter or formatter config exists; otherwise suggests adding one |
+| **Context bloat** | Always-loaded guidance over 200 lines | Static check, following Anthropic's 200-line recommendation. Proposed edits must stay within it. Change it with `limits.guidanceLines` |
+| **Skill leakage** | Step-by-step instructions for rare tasks in always-loaded guidance | Model review. Suggests moving them to a skill |
+| **Conflicting instructions** | Two rules that cannot both be followed | Model review. Names both lines |
+| **Init fossilization** | A file committed once and never updated while the code kept changing | Static check against Git history |
+| **Blind references** | A path to a document with no word on what it holds or when to read it | Static check. Asks for one explaining line |
+
+Crewbie also checks for:
+
+| Check | What it flags |
+|---|---|
+| Generic advice | Files or agent charters with only advice such as "write clean code" |
+| Duplicated documentation | Passages copied from README or CONTRIBUTING |
+| Shared boilerplate | The same block repeated across custom agents |
+| Pointers to auto-loaded files | "Read AGENTS.md" and similar lines. Copilot already loads those files |
+| Agent-only context | A document only one agent is told to read, which is better as path-scoped instructions |
+| Broken links and paths | Links, paths and agents that point to files that no longer exist |
+| Wrong commands | `npm run` scripts that do not exist, or have no `package.json` in scope |
+| Always running every test | Rules that run the whole test suite on every change, outside merge or release gates |
+| Invalid scope | `.instructions.md` files without valid `applyTo` globs |
+
+The static checks are hints for the review, not a score. Init reports every
+finding as retain, edit or defer, and nothing is written until you approve it.
+
 ## The team
 
 The team fits your repository; there is no fixed list of roles. A typical web app
@@ -173,7 +206,9 @@ Agents keep short notes in Git so the next task does not repeat old mistakes.
 
 Crewbie puts the hot files and indexes straight into each agent's start-up
 instructions, so the agent always has them. Older notes stay out of the way
-until they are needed. Every memory change goes through a PR you review.
+until they are needed. When a hot file grows past its word budget, Crewbie
+moves the oldest entries to a linked `cold/` note. It never blocks a PR for
+this. Every memory change goes through a PR you review.
 GitHub also loads your own `.github/copilot-instructions.md` and `AGENTS.md`
 for each agent, as usual.
 
@@ -209,6 +244,10 @@ for each agent, as usual.
 | `crewbie preflight` | Show what would launch next. |
 | `crewbie pause --apply` / `crewbie resume --apply` | Stop and restart new launches. Running sessions continue. |
 | `crewbie dashboard --collect --out report.html` | Build a report of who did what, with which model. |
+| `crewbie eval --guided owner/a --bare owner/b` | Compare two sandboxes that ran the same plan with and without your guidance: tasks merged and tokens per merged task. |
+
+To cap spend per feature, set `execution.maxTokensPerFeature` in
+`.crewbie/config.json`; launches stop once the plan's task PRs reach it.
 
 Planning locally instead of on GitHub, the review loop, Azure DevOps work items,
 nightly learning and recovery steps are all in the
@@ -227,6 +266,7 @@ nightly learning and recovery steps are all in the
 .crewbie\decisions\index.md            Links to older shared decisions
 .crewbie\team\<role>\hot.md            Role lessons
 .crewbie\team\<role>\index.md          Links to older role notes
+.crewbie\rationale.md                  Why nightly learning changed each rule (after the first improvement merges)
 ```
 
 Plans are added under `.crewbie\plans\` by each plan PR. Crewbie tracks which

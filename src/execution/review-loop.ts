@@ -270,7 +270,7 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
       const baseSha = sha(record(branchInfo.commit, "base commit").sha);
       await client.request("GET", `/repos/${config.repository}/contents/.github/agents/crewbie-${owner}.agent.md?ref=${baseSha}`);
       const memory = await launchMemory(client, config, owner, pr ? string(record(pr.head, "head").ref, "head ref") : base);
-      await reserveLaunch(client, config, current, number, baseSha);
+      await reserveLaunch(client, config, current, number, baseSha, false, memory.context);
       job.launching = true;
       await persist();
       if (!await ledgerHas(client, config.repository, `claims/${number}`)) await createLedger(client, config.repository, `claims/${number}`, baseSha);
@@ -278,7 +278,7 @@ export async function reconcileReview(client: GitHubApi, config: Config, plan: R
         custom_agent: `crewbie-${owner}`, model, create_pull_request: !pr,
         base_ref: pr ? string(record(pr.base, "base").ref, "base ref") : base,
         ...(pr ? { head_ref: string(record(pr.head, "head").ref, "head ref") } : {}),
-        prompt: `${prompt}\n${memory}`,
+        prompt: `${prompt}\n${memory.text}`,
       }), "continuation response");
       const id = string(result.id, "continuation task ID");
       if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("Invalid continuation task ID.");

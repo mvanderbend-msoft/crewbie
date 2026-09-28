@@ -6,6 +6,14 @@ export const SHARED_HOT = ".crewbie/decisions/hot.md";
 export const SHARED_INDEX = ".crewbie/decisions/index.md";
 /** Pre-split shared decisions file; upgrades move its content into SHARED_HOT. */
 export const LEGACY_DECISIONS = ".crewbie/decisions.md";
+/** The word budget Crewbie enforces for a memory file, or null when the path has none. */
+export function memoryLimit(config: Config, path: string): number | null {
+  const limits = limitsFor(config);
+  if (path === ".crewbie/instructions.md" || path === config.constitution) return limits.constitution;
+  if (path === SHARED_HOT || /^\.crewbie\/team\/[a-z][a-z0-9-]*\/hot\.md$/.test(path)) return limits.hot;
+  if (/^\.crewbie\/(?:decisions|team\/[a-z][a-z0-9-]*)\/(?:cold|archive)\/[a-z0-9][a-z0-9-]*\.md$/.test(path)) return limits.topic;
+  return null;
+}
 function scoreTopics(index: string, query: string, shared: boolean, candidates: Map<string, number>): void {
   const stop = new Set(["crewbie", "shared", "memory", "index", "archive", "cold", "with", "from", "that", "this", "have", "were", "been"]);
   const tokens = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []).filter((word) => !stop.has(word)));
@@ -40,11 +48,12 @@ export async function memoryContext(root: string, config: Config, role: string, 
   if (!["coordinator", "improver", ...config.roles.map((item) => item.id)].includes(role)) {
     throw new Error("Choose a configured role.");
   }
+  // Hot memory can merge over budget (demotion happens at the next launch), so reading it must never fail.
   const paths: [string, number | null][] = [
     ...(config.constitution ? [[config.constitution, limits.constitution] as [string, number]] : []),
-    [SHARED_HOT, limits.hot],
+    [SHARED_HOT, null],
     [SHARED_INDEX, null],
-    [`.crewbie/team/${role}/hot.md`, limits.hot],
+    [`.crewbie/team/${role}/hot.md`, null],
     [`.crewbie/team/${role}/index.md`, null],
   ];
   const shared = await optionalText(await safePath(root, ".crewbie/instructions.md"));

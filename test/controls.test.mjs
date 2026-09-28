@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { GitHubError } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
-import { baselineLaunches, launchAllowance, reserveLaunch, setLaunchPause, withDispatchLock } from "../dist/execution/controls.js";
+import { attributedTokens, baselineLaunches, featureTokens, latestLaunchContext, launchAllowance, reserveLaunch, setLaunchPause, withDispatchLock } from "../dist/execution/controls.js";
 import { cancelRun } from "../dist/execution/cancel.js";
 import { issueBody, taskMetadata } from "../dist/specification/batch.js";
 import { config, batch } from "./helpers.mjs";
@@ -15,6 +15,7 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0])), BRANCH = m
   const client = {
     async list(path) {
       if (path.includes("/git/matching-refs/")) return [...state.refs].filter((ref) => ref.startsWith(`refs/${path.split("/git/matching-refs/")[1]}`)).map((ref) => ({ ref, object: state.objects.get(ref) }));
+      if (path.includes("/pulls?state=all&base=")) { state.pullQueries = [...(state.pullQueries ?? []), path]; return state.pulls ?? []; }
       const comments = /\/issues\/(\d+)\/comments$/.exec(path);
       if (comments) return state.comments[comments[1]] ?? [];
       if (path.endsWith("/issues/1/timeline")) return [{ event: "cross-referenced", source: { issue: { pull_request: { url: "https://api.github.com/repos/example/project/pulls/10" } } } }];
@@ -58,6 +59,47 @@ const b = batch(), metadata = taskMetadata(issueBody(b, b.tasks[0])), BRANCH = m
   };
   return { state, client, metadata, run };
 }
+
+test("an explicit feature token ceiling stops further launches; measured totals are lower bounds", async () => {
+  const attribution = (tokens) => `Change.\n<!-- crewbie-attribution -->\n**Specialist:** \`crewbie-developer\`\n\n**Observed tokens:** ${tokens}; 1/1 known sessions.\n<!-- /crewbie-attribution -->`;
+  assert.equal(attributedTokens(attribution("1500 (1000 input + 500 output)")), 1500);
+  assert.equal(attributedTokens(attribution("unavailable")), null);
+  assert.equal(attributedTokens("**Observed tokens:** 99 (outside the block)"), null, "Only Crewbie's own attribution block counts.");
+  assert.throws(() => parseConfig(config({ execution: { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3, maxTokensPerFeature: 0 } })));
+  const f = fixture();
+  f.state.pulls = [{ body: attribution("600000 (590000 input + 10000 output)") }, { body: attribution("unavailable") }];
+  const unlimited = await launchAllowance(f.client, config(), f.metadata, 1);
+  assert.equal(unlimited.blocked, null);
+  assert.equal(f.state.pullQueries, undefined, "Without a configured ceiling no PRs are read.");
+  const capped = parseConfig(config({ execution: { maxLaunchesPerBatch: 20, maxAttemptsPerTask: 3, maxTokensPerFeature: 500000 } }));
+  assert.equal(capped.execution.maxTokensPerFeature, 500000);
+  const blocked = await launchAllowance(f.client, capped, f.metadata, 1);
+  assert.match(blocked.blocked, /Feature token ceiling reached \(600000\/500000 .*2 task PRs; 1 have no measured usage, so this is a lower bound/);
+  assert.match(f.state.pullQueries[0], new RegExp(`base=${encodeURIComponent(f.metadata.branch).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  await assert.rejects(reserveLaunch(f.client, capped, f.metadata, 1, "a".repeat(40)), /Feature token ceiling/);
+  assert.equal(f.state.refs.size, 0, "A blocked launch reserves nothing.");
+  assert.deepEqual(await featureTokens(f.client, capped, f.metadata.branch), { tokens: 600000, pulls: 2, unmeasured: 1 });
+});
+
+test("a launch records its embedded memory in a tag the ledger ref points at", async () => {
+  const f = fixture();
+  assert.equal(await latestLaunchContext(f.client, config(), f.metadata, 1), null);
+  const context = { ref: "crewbie/feature", files: [{ path: ".crewbie/instructions.md", sha256: "c".repeat(64) }], unread: [], missing: [".crewbie/decisions/index.md"] };
+  const original = f.client.request.bind(f.client);
+  f.client.request = async (method, path, body) => {
+    const result = await original(method, path, body);
+    if (method === "POST" && path.endsWith("/git/refs") && body.ref.includes("/launches/")) f.state.objects.set(body.ref, { type: "tag", sha: body.sha });
+    return result;
+  };
+  await reserveLaunch(f.client, config(), f.metadata, 1, "a".repeat(40), false, context);
+  const tag = f.state.writes.find((write) => write.path.endsWith("/git/tags")).body;
+  assert.equal(tag.object, "a".repeat(40));
+  assert.equal(JSON.parse(tag.message).kind, "launch-context");
+  const ref = f.state.writes.find((write) => write.path.endsWith("/git/refs")).body;
+  assert.equal(ref.sha, "b".repeat(40), "The ledger ref points at the context tag, not the base commit.");
+  assert.deepEqual(await latestLaunchContext(f.client, config(), f.metadata, 1), context);
+  assert.equal((await launchAllowance(f.client, config(), f.metadata, 1)).taskUsed, 1, "A tag-backed launch still counts as one attempt.");
+});
 
 test("validated optional policy preserves legacy hashes and defaults to explicit 20/3 allowances", async () => {
   assert.equal(parseConfig(config()).execution, undefined);

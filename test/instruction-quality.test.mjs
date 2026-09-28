@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assess } from "../dist/setup/assessment.js";
 import { fixture } from "./helpers.mjs";
@@ -14,13 +15,13 @@ test("assessment flags concrete instruction risks with line evidence, without re
   });
   const before = await readdir(root);
   const result = await assess(root), quality = result.instructionQuality;
-  assert.deepEqual(quality.signals.map((s) => s.code).sort(), ["duplicated-documentation", "missing-npm-script", "unconditional-full-suite", "unverified-reference"].sort());
+  assert.deepEqual(quality.signals.map((s) => s.code).sort(), ["blind-reference", "duplicated-documentation", "missing-npm-script", "unconditional-full-suite", "unverified-reference"].sort());
   assert.equal(quality.signals.find((s) => s.code === "missing-npm-script").line, 5);
   assert.equal(quality.signals.find((s) => s.code === "unverified-reference").line, 6);
   assert.equal(quality.signals.find((s) => s.code === "duplicated-documentation").related, "README.md");
   assert.ok(quality.signals.every((s) => s.path === "AGENTS.md" && s.recommendation));
   assert.match(quality.interpretation, /not a quality score/);
-  assert.equal(quality.basis, "https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd");
+  assert.equal(quality.basis, "https://www.sri.inf.ethz.ch/publications/gloaguen2026agentsmd; https://arxiv.org/abs/2606.15828");
   assert.equal(result.findings.find((f) => f.area === "Instructions").status, "unknown");
   assert.equal(result.findings.find((f) => f.area === "Instruction quality").status, "gap");
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), guide);
@@ -48,7 +49,7 @@ test("generic-only agent charters are advisory, not a claim of measured harm", a
   assert.equal(result.instructionQuality.signals[0].code, "generic-only");
   assert.equal(result.instructionQuality.signals[0].level, "advisory");
   assert.equal(result.instructionQuality.signals[0].line, 5);
-  assert.match(result.instructionQuality.interpretation, /does not.*prove these individual patterns/);
+  assert.match(result.instructionQuality.interpretation, /not a harmful length threshold/);
 });
 
 test("npm guidance without a scoped package manifest is reported", async (t) => {
@@ -58,11 +59,11 @@ test("npm guidance without a scoped package manifest is reported", async (t) => 
   assert.equal(quality.signals[0].line, 1);
 });
 
-test("instruction length is an advisory scope-review signal, not a quality gate, and limits disclose coverage", async (t) => {
+test("always-loaded guidance over 200 lines is context bloat, and limits disclose coverage", async (t) => {
   const long = "# Context\n\n" + Array.from({ length: 250 }, (_, i) => `Constraint ${i}: preserve version ${i} compatibility at boundary ${i}.`).join("\n");
   const root = await fixture(t, { "AGENTS.md": long, "nested/CLAUDE.md": "x".repeat(65_000) });
   const result = await assess(root);
-  assert.deepEqual(result.instructionQuality.signals.map((signal) => [signal.code, signal.level]), [["broad-root-guidance", "advisory"]]);
+  assert.deepEqual(result.instructionQuality.signals.map((signal) => [signal.code, signal.level]), [["context-bloat", "warning"]]);
   assert.deepEqual(result.instructionQuality.inspected, ["AGENTS.md"]);
   assert.equal(result.instructionQuality.omitted[0].path, "nested/CLAUDE.md");
   assert.match(result.instructionQuality.omitted[0].reason, /size alone is not a quality finding/);
@@ -108,7 +109,7 @@ test("repeated specialist boilerplate is distinguished from role-specific expert
 });
 
 test("large warning sets stay readable and disclose unshown signals", async (t) => {
-  const root = await fixture(t, { "AGENTS.md": Array.from({ length: 20 }, (_, i) => `Read [guide ${i}](missing-${i}.md).`).join("\n") });
+  const root = await fixture(t, { "AGENTS.md": Array.from({ length: 20 }, (_, i) => `Read [guide ${i}](missing-${i}.md) before editing module ${i}.`).join("\n") });
   const result = await assess(root);
   assert.equal(result.instructionQuality.signals.length, 12);
   assert.equal(result.instructionQuality.signalsOmitted, 8);
@@ -117,11 +118,33 @@ test("large warning sets stay readable and disclose unshown signals", async (t) 
 
 test("a noisy root instruction file cannot hide findings in other guidance files", async (t) => {
   const root = await fixture(t, {
-    "AGENTS.md": Array.from({ length: 20 }, (_, i) => `Read [guide ${i}](missing-${i}.md).`).join("\n"),
+    "AGENTS.md": Array.from({ length: 20 }, (_, i) => `Read [guide ${i}](missing-${i}.md) before editing module ${i}.`).join("\n"),
     "frontend/AGENTS.md": "Follow best practices.",
     ".github/instructions/backend.instructions.md": "Preserve database boundaries.",
   });
   const quality = (await assess(root)).instructionQuality;
   assert.ok(quality.signals.some((signal) => signal.path === "frontend/AGENTS.md" && signal.code === "generic-only"));
   assert.ok(quality.signals.some((signal) => signal.path === ".github/instructions/backend.instructions.md" && signal.code === "missing-path-scope"));
+});
+
+test("configuration smells: lint leakage, blind references and init fossilization", async (t) => {
+  const guide = "# Rules\n\nUse 2-space indentation and single quotes.\nNever store money as floats; use integer cents.\n- [docs/arch.md](docs/arch.md)\nRead [architecture](docs/arch.md) before changing module boundaries.\n";
+  const root = await fixture(t, { "AGENTS.md": guide, "docs/arch.md": "Boundaries.", ".prettierrc": "{}" });
+  const quality = (await assess(root)).instructionQuality;
+  const lint = quality.signals.filter((signal) => signal.code === "lint-leakage");
+  assert.deepEqual(lint.map((signal) => [signal.line, signal.level, signal.related]), [[3, "warning", ".prettierrc"]]);
+  assert.deepEqual(quality.signals.filter((signal) => signal.code === "blind-reference").map((signal) => signal.line), [5], "An explained reference is fine.");
+  assert.ok(!quality.signals.some((signal) => signal.code === "init-fossilization"), "Untracked files have no history.");
+
+  const bare = await fixture(t, { "AGENTS.md": "Use camelCase for variables.\n" });
+  assert.equal((await assess(bare)).instructionQuality.signals.find((signal) => signal.code === "lint-leakage").level, "advisory", "Without a configured tool it is a suggestion.");
+
+  const git = (...args) => execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdio: "ignore" });
+  git("add", "AGENTS.md"); git("commit", "-q", "-m", "init guidance");
+  for (let i = 0; i < 10; i++) git("commit", "-q", "--allow-empty", "-m", `work ${i}`);
+  const fossil = (await assess(root)).instructionQuality.signals.find((signal) => signal.code === "init-fossilization");
+  assert.match(fossil.detail, /Committed once .* 10 commits since/);
+  await writeFile(join(root, "AGENTS.md"), `${guide}Updated.\n`);
+  git("commit", "-q", "-am", "refresh guidance");
+  assert.ok(!(await assess(root)).instructionQuality.signals.some((signal) => signal.code === "init-fossilization"), "An updated file is not fossilized.");
 });

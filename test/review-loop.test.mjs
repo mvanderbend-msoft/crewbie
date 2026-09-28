@@ -65,6 +65,7 @@ function fixture() {
           if (file === undefined) throw new GitHubError(404, null);
           return { type: "file", encoding: "base64", content: Buffer.from(file).toString("base64") };
         }
+        if (method === "POST" && path.endsWith("/git/tags")) { (f.tags ??= []).push(body); return { sha: "d".repeat(40) }; }
         if (method === "POST" && path.endsWith("/git/refs") && body.ref.includes("/crewbie/launches/")) {
           if (launches.has(body.ref)) throw new GitHubError(422, null);
           launches.add(body.ref); return {};
