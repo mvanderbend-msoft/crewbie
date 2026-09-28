@@ -607,6 +607,10 @@ is not a reason to defer a safe proposal: approval already gates every write.
 The model must assess every inspected file for all justified improvements, not
 stop after one file or the static warning list. Retained guidance needs an
 evidence-based rationale; nothing forces edits to already useful rules.
+When supplied guidance or the project description identifies build, test or lint
+tooling, proposed replacement guidance puts copy-pasteable commands (including
+required flags) in an early `## Commands` section; it does not invent commands
+without supporting evidence.
 Copilot attaches repository-wide instructions, `AGENTS.md` and matching path-specific
 instructions to every session, including custom agents. The `auto-loaded-reference`
 warning flags lines in Copilot guidance and agents that tell the agent to read those
