@@ -6,6 +6,7 @@ import YAML from "yaml";
 import { assess } from "../dist/setup/assessment.js";
 import { setupPrompt } from "../dist/setup/onboarding.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
+import { adoptedProfile } from "../dist/setup/agents.js";
 import { workflows, profile, SHARED_INSTRUCTIONS, SKILL } from "../dist/setup/templates.js";
 import { agentPrompt, bounded, hash, safePath } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
@@ -74,6 +75,22 @@ test("specialists have distinct duties and an actionable scoped memory handoff",
   assert.match(SHARED_INSTRUCTIONS, /no new durable lesson/i);
   assert.match(profile({ id: "tester", purpose: "Test.", model: "" }, config()), /boundary|edge/i);
   assert.match(profile({ id: "reviewer", purpose: "Review.", model: "" }, config()), /findings.*evidence/i);
+});
+
+test("generated charters declare only the tools their role needs", () => {
+  const frontmatter = (charter) => YAML.parse(/^---\n([\s\S]*?)\n---/.exec(charter)[1]);
+  for (const role of ["coordinator", "improver"]) {
+    const charter = frontmatter(profile({ id: role, purpose: `${role} purpose.`, model: "" }, config()));
+    assert.deepEqual(charter.tools, ["read", "search"]);
+  }
+  const specialist = frontmatter(profile({ id: "developer", purpose: "Develop.", model: "" }, config()));
+  assert.deepEqual(specialist.tools, ["read", "search", "edit", "execute"]);
+  const adopted = frontmatter(adoptedProfile(
+    { id: "coordinator", purpose: "Coordinate.", model: "", sourceAgent: ".github/agents/coordinator.agent.md" },
+    config(),
+    "---\nname: coordinator\ndescription: Coordinate.\n---\nCoordinate work.\n",
+  ));
+  assert.deepEqual(adopted.tools, ["read", "search"]);
 });
 
 test("domain charters contain distinct checks, invariants and reviewed repository guidance", () => {
