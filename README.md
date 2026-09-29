@@ -40,7 +40,9 @@ you already know: a GitHub issue, a label, a pull request review and a comment.
 A real run in a demo repo, with waiting time cut out: an issue with one label
 becomes a plan, the plan becomes agent work, and the result is merged to `main`.
 
-https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23
+[![Crewbie turning a labelled issue into a plan, agent work and a merged change](https://raw.githubusercontent.com/mvanderbend-msoft/crewbie/main/.github/assets/crewbie-demo.gif)](https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23)
+
+Shown at double speed. [Watch the full-speed video](https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23).
 
 > [!NOTE]
 > The account ran out of Actions minutes near the end of this run, so the final
