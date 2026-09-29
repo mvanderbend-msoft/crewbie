@@ -36,6 +36,19 @@ you already know: a GitHub issue, a label, a pull request review and a comment.
 > **Alpha software.** Commands can still change. Crewbie works with GitHub
 > Copilot only. Cloud runs use GitHub Actions minutes and Copilot AI credits.
 
+## See it in action
+
+A real run in a demo repo, with waiting time cut out: an issue with one label
+becomes a plan, the plan becomes agent work, and the result is merged to `main`.
+
+[![Crewbie turning a labelled issue into a plan, agent work and a merged change](https://raw.githubusercontent.com/mvanderbend-msoft/crewbie/main/.github/assets/crewbie-demo.gif)](https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23)
+
+Shown at double speed. [Watch the full-speed video](https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23).
+
+> [!NOTE]
+> The account ran out of Actions minutes near the end of this run, so the final
+> feature PR was opened by hand and had no Crewbie review.
+
 ## How it works
 
 ```text
