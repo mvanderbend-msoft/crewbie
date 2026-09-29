@@ -45,10 +45,6 @@ becomes a plan, the plan becomes agent work, and the result is merged to `main`.
 
 Shown at double speed. [Watch the full-speed video](https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23).
 
-> [!NOTE]
-> The account ran out of Actions minutes near the end of this run, so the final
-> feature PR was opened by hand and had no Crewbie review.
-
 ## How it works
 
 ```text
