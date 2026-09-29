@@ -12,6 +12,7 @@ import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdow
 import { terminalPrompts, type SetupPrompts } from "./terminal.js";
 import { COPILOT_VERSION_VARIABLE, copilotVersion as copilotVersionOf, copilotVersionCommand, copilotVersionVariable, setCopilotVersion } from "./copilot-version.js";
 import { suggestedStartCommand } from "../execution/test-feature.js";
+import { collectCodeGraph } from "./code-graph.js";
 
 interface InitOptions {
   proposal?: string; out?: string; apply?: boolean; update?: boolean;
@@ -20,6 +21,7 @@ interface InitOptions {
   json?: boolean; "copilot-version"?: string;
   "model-policy"?: string; "specialist-model"?: string; "model-profile"?: string;
   start?: string;
+  "code-graph"?: boolean; "code-graph-bin"?: string;
 }
 interface InitIO {
   client: () => GitHubApi;
@@ -30,6 +32,7 @@ interface InitIO {
   select?: SetupPrompts["select"];
   confirm?: SetupPrompts["confirm"];
   report?: (text: string) => void;
+  collectGraph?: typeof collectCodeGraph;
 }
 
 async function planningVariable(client: GitHubApi, repository: string, version: string | undefined): Promise<string> {
@@ -88,6 +91,8 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if ((options as { approver?: unknown }).approver !== undefined) throw new Error("--approver is no longer supported; repository write access authorizes setup.");
     if (options["model-policy"] !== undefined && !["fixed", "cost-aware"].includes(options["model-policy"])) throw new Error("--model-policy must be fixed or cost-aware.");
     if (options["model-profile"] !== undefined) modelProfile(options["model-profile"]);
+    if (options["code-graph-bin"] !== undefined && !options["code-graph"]) throw new Error("--code-graph-bin requires --code-graph.");
+    if (options["code-graph"] && options.proposal) throw new Error("--code-graph is for a new assessment, not installing a saved proposal.");
     if (options.start !== undefined) parseConfig({ schemaVersion: 1, repository: "", roles: [{ id: "developer", purpose: "Validate start.", model: "model" }], constitution: null, maxActive: 1, nightly: { enabled: false, maxRecords: 1, allowedPaths: [] }, ado: null, local: { start: options.start } });
     if (options["assessment-only"] && (options.proposal || options.apply || options.guidance)) throw new Error("--assessment-only cannot apply setup or guidance.");
     if (options.proposal) {
@@ -121,6 +126,14 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (options.repo !== undefined) assessment.config.repository = options.repo;
     if (options["model-profile"] !== undefined) assessment.config.modelProfile = modelProfile(options["model-profile"]);
     assessment.config = parseConfig(assessment.config);
+    if (options["code-graph"]) {
+      if (assessment.repository?.truncated || !assessment.repository?.files) throw new Error("CodeGraph requires a complete repository file inventory. Rerun without --code-graph for names-only assessment.");
+      if (!options["assessment-only"] && !options.json) report("CodeGraph opt-in: a trusted local indexer will read a bounded temporary source snapshot. File paths, counts, spans and dependency/test relationships will be saved and sent to Copilot; source bodies, comments and signatures are withheld. No project scripts, repository graph configuration, MCP servers or embeddings run. The temporary index is deleted afterwards.");
+      assessment.codeGraph = await (io.collectGraph ?? collectCodeGraph)(root, assessment.repository.files, {
+        ...(options["code-graph-bin"] === undefined ? {} : { executable: options["code-graph-bin"] }),
+      });
+      assessment.inventory.scope = "AI guidance inventory plus explicitly approved CodeGraph structural evidence. Guidance text is bounded and redacted; MCP settings expose metadata only, never credentials, arguments or URLs. Separately, a trusted local static indexer reads a bounded temporary source snapshot. Only file paths, counts, spans and relationships are saved and sent to Copilot, not source bodies, comments or signatures. Ignored files, symlinks, hidden files, repository graph configuration and unsupported source types are excluded from the graph. No project scripts, MCP servers or embeddings are run. No builds, tests, runtime behavior or model capability are verified. See CodeGraph coverage and warnings for limitations.";
+    }
     if (options["assessment-only"]) {
       if (options.out) await writeAtomic(root, options.out, json(assessment));
       report(json(assessment));
@@ -163,7 +176,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield") {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
-    report(`\n1. Assess\n  Model: ${model}\n  Reviewing instructions, agents, constitution and MCP metadata; application code and project files are not read, only their names are mapped to check cited paths.\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
+    report(`\n1. Assess\n  Model: ${model}\n  ${assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata; application code and project files are not read, only their names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
     const propose = () => proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
       models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,

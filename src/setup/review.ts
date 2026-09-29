@@ -1,13 +1,13 @@
 import { agentArchivePath, DEFAULT_EXECUTION_LIMITS } from "../config.js";
-import { record, string } from "../core.js";
+import { json, record, string } from "../core.js";
 import { LEGACY_DECISIONS } from "../memory/context.js";
 import { setupConfiguration, type FileChange } from "./install.js";
 
 function cell(value: string): string { return value.replaceAll("|", "\\|").replace(/\r?\n/g, " "); }
-function block(content: string): string {
+function block(content: string, language = "markdown"): string {
   const length = Math.max(3, ...(content.match(/`+/g) ?? []).map((run) => run.length + 1));
   const fence = "`".repeat(length);
-  return `${fence}markdown\n${content}\n${fence}`;
+  return `${fence}${language}\n${content}\n${fence}`;
 }
 
 export function setupReportPath(output: string): string {
@@ -113,6 +113,11 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
       const item = record(raw, "omitted file");
       lines.push(`- \`${string(item.path, "omitted path")}\`: ${string(item.reason, "omission reason")}`);
     }
+  }
+  if (data.codeGraph !== undefined) {
+    lines.push("## CodeGraph structural evidence", "",
+      "Explicitly opted-in snapshot metadata supplied to the assessment. Static links are heuristic, not measured test coverage or model capability. Review omissions and collection time; this is not a live index. Source bodies, comments and signatures are not included.", "",
+      block(json(record(data.codeGraph, "CodeGraph evidence")), "json"), "");
   }
   if (Array.isArray(data.questions) && data.questions.length) lines.push("", "## Open questions", "", ...data.questions.map((question) => `- ${string(question, "question")}`));
   if (changes) lines.push("", "## Reviewed installation files", "", ...changes.map((change) => `- ${filePreview(change)}`));
