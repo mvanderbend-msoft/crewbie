@@ -52,6 +52,18 @@ export function json(value: unknown): string {
 export function words(value: string): number {
   return value.trim() ? value.trim().split(/\s+/u).length : 0;
 }
+/**
+ * Markdown without HTML comments outside code. Memory entries keep their source (PR link, date) in a trailing
+ * comment: whoever prunes the entry needs it, agents applying the entry do not, so it costs them no context.
+ */
+export function withoutComments(value: string): string {
+  return value.replace(/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$|(`+)[^`\n]+?\2(?!`)|^[ \t]*<!--[\s\S]*?-->[ \t]*(?:\n|$)|[ \t]*<!--[\s\S]*?-->/gm,
+    (match, fence?: string, code?: string) => fence || code ? match : "");
+}
+/** Words an agent sees once comments are removed; memory budgets count these. */
+export function visibleWords(value: string): number {
+  return words(withoutComments(value));
+}
 export function bounded(value: string, limit: number, name: string): void {
   if (words(value) > limit) throw new Error(`${name} exceeds ${limit} words. Curate or split it; nothing was truncated.`);
 }

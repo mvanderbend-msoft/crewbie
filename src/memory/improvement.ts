@@ -1,4 +1,4 @@
-import { agentPrompt, bounded, integer, json, matchesTextHash, optionalText, record, safePath, string } from "../core.js";
+import { agentPrompt, bounded, integer, json, matchesTextHash, optionalText, record, safePath, string, withoutComments } from "../core.js";
 import { limitsFor, type Config } from "../config.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { evidenceId, type RunRecord } from "../reporting/records.js";
@@ -49,7 +49,7 @@ export async function validateProposal(root: string, config: Config, proposal: P
     const before = await optionalText(await safePath(root, change.path));
     if (before === null ? change.beforeHash !== null : !matchesTextHash(before, change.beforeHash)) throw new Error(`${change.path} changed since analysis.`);
     if (change.path.endsWith(".agent.md")) agentPrompt(change.content, change.path);
-    else if (!change.path.endsWith("/index.md")) bounded(change.content, change.path.endsWith("/hot.md") ? limits.hot
+    else if (!change.path.endsWith("/index.md")) bounded(withoutComments(change.content), change.path.endsWith("/hot.md") ? limits.hot
       : change.path === config.constitution || change.path === ".crewbie/instructions.md" ? limits.constitution : limits.topic, change.path);
     bounded(change.reason, 100, "Change reason");
     bounded(change.hypothesis, 60, "Change hypothesis");
@@ -166,6 +166,7 @@ Cold/archive topics are selected by bounded keyword matching against index label
 Return only JSON: {"summary":"short what/why/checks/risks","changes":[{"path":"allowed Markdown path","beforeHash":"SHA256 from context, or null for a new file","content":"complete proposed file","reason":"short evidence-backed reason","hypothesis":"the recurring failure this change should prevent","expectedOutcome":"observable signal in later runs that it worked","evidence":["evidence ID"]}]}.
 An empty changes list is valid when evidence does not justify changes.
 ${RATIONALE} (when supplied) records why earlier rules were accepted and what outcome was expected. Compare new evidence with those expectations: when a rule's expected outcome did not appear, or its failure no longer occurs, propose removing or narrowing the rule instead of adding more guidance. Never edit ${RATIONALE}; Crewbie maintains it.
+Memory entries keep their reason inline and their source (PR or issue link, date) in a trailing HTML comment that implementing agents never see. Use those sources to judge whether an entry is stale, keep them on entries you keep, and give new entries one.
 Use only these allowed path prefixes/exact paths: ${json(config.nightly.allowedPaths)}
 Word limits: ${json(limitsFor(config))}. At most 10 changed files.
 Every change needs cited evidence. Propose policy changes explicitly; humans decide. Keep raw transcripts and secrets out of memory.

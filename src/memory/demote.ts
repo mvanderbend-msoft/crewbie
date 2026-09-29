@@ -1,5 +1,5 @@
 import { limitsFor, type Config } from "../config.js";
-import { GitHubError, record, slug, string, words } from "../core.js";
+import { GitHubError, record, slug, string, visibleWords as words } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { memoryLimit, SHARED_HOT } from "./context.js";
 import { remoteText } from "./launch.js";

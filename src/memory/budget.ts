@@ -1,5 +1,5 @@
 import type { Config } from "../config.js";
-import { integer, record, string, words } from "../core.js";
+import { integer, record, string, visibleWords } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { memoryLimit } from "./context.js";
 
@@ -20,7 +20,7 @@ export async function prMemoryBudgets(client: GitHubApi, config: Config, pr: Rec
     const file = record(await client.request("GET", `/repos/${config.repository}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${head}`), "memory file");
     // Files over 1 MB come back without inline content; they are over any word budget.
     const text = file.encoding === "base64" && typeof file.content === "string" ? Buffer.from(file.content, "base64").toString("utf8") : null;
-    result.push({ path, words: text === null ? Number.MAX_SAFE_INTEGER : words(text), limit });
+    result.push({ path, words: text === null ? Number.MAX_SAFE_INTEGER : visibleWords(text), limit });
   }
   return result;
 }

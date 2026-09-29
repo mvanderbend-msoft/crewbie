@@ -51,7 +51,7 @@ Leave a GitHub review on each reviewed implementation PR, identifying crewbie-re
 Find recurring, evidence-backed causes in new run summaries, reviews and CI outcomes; compare them with current guidance and pending proposals.
 
 ## Checks
-Read your own history, affected role memory and shared decisions. Cite concrete evidence for each small proposed change and explain the expected benefit. Check budgets, stale advice, contradictions and rejected proposals. When \`.crewbie/decisions/hot.md\` holds superseded or rarely needed entries, move their detail to \`.crewbie/decisions/cold/<topic>.md\` (or \`archive/\` when superseded) and link it from \`.crewbie/decisions/index.md\`; do the same for role hot memory.
+Read your own history, affected role memory and shared decisions. Cite concrete evidence for each small proposed change and explain the expected benefit. Check budgets, stale advice, contradictions and rejected proposals; each entry's trailing source comment shows where it came from. When \`.crewbie/decisions/hot.md\` holds superseded or rarely needed entries, move their detail to \`.crewbie/decisions/cold/<topic>.md\` (or \`archive/\` when superseded) and link it from \`.crewbie/decisions/index.md\`; do the same for role hot memory.
 
 ## Non-negotiables
 Change only approved guidance/memory paths. Preserve policy and accepted decisions unless an amendment is explicitly proposed for human review. Keep activity logs and operational cursors out of prose memory. No new useful evidence means no manufactured improvement.`,
@@ -105,7 +105,11 @@ Handoff section, not in memory; dependent tasks read the merged code and PR.
 Your own hot memory is always in scope: update it on the work branch unless a
 human explicitly says otherwise. Hot memory holds gotchas only: non-obvious traps,
 surprising constraints or failed approaches that would cost a future task time.
-Write each as one or two lines with the reason and a PR or file link. Never
+Write each as one or two lines: the rule and its reason inline, then its source
+as a trailing comment, for example:
+\`- Seed data resets on restart, so tests create users. <!-- source: #42 2026-09-29 -->\`
+Launches hide comments; read the file before replacing or removing an entry to
+see its source. Never
 record implementation summaries, scope notes, verification logs, command output
 or anything discoverable from the code. Replace or remove stale entries rather
 than appending; use index/cold only for longer detail a gotcha links to.
@@ -115,7 +119,7 @@ If nothing was surprising, leave memory unchanged and say why in Learning;
 "no new durable lesson" alone is insufficient. When your task makes a new
 cross-role choice other roles must follow (a shared contract, convention or
 technology choice), add or replace one or two lines in \`.crewbie/decisions/hot.md\`
-with the reason and a link; this is always in scope. Preserve accepted decisions. For useful out-of-scope learning, post one PR comment starting
+with the reason and a source comment; this is always in scope. Preserve accepted decisions. For useful out-of-scope learning, post one PR comment starting
 with \`<!-- crewbie-memory-proposal -->\`: target, lesson, reason and source for
 nightly review. Report Handoff and Learning separately in the PR.
 Write entries as plain lines, with no "proposed" marker: merging the PR is the

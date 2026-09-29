@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { unlink } from "node:fs/promises";
-import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, modelJson, optionalText, readJson, record, safePath, string, strings, textHash, words, writeAtomic } from "../core.js";
+import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, modelJson, optionalText, readJson, record, safePath, string, strings, textHash, withoutComments, words, writeAtomic } from "../core.js";
 import { limitsFor, parseConfig, PLANNING_LABEL, reviewerFor, type Config } from "../config.js";
 import { isWriter, requireWriter, type GitHubApi } from "../tracking/github.js";
 import { contextTopics, memoryContext, SHARED_HOT } from "../memory/context.js";
@@ -208,7 +208,7 @@ Every task PR merges automatically into the plan's feature branch once its check
 Implement the user-supplied requirements; PRD/spec authoring is outside Crewbie's scope.
 The legacy batch.spec field is a source reference, supplied by Crewbie, not a document to author. Never approve execution or claim unrun checks.
 Links and attachments have NOT been fetched. If essential information is missing, ask at most five concise questions and return batch: null.
-When the plan makes a cross-role choice that later work must follow (a shared contract, convention or technology choice not already recorded), return decisions as the complete new content of ${SHARED_HOT} (current content is in Context): keep still-valid entries, replace superseded ones, one or two lines per entry with the reason and a link to issue #${source.number}. Otherwise return decisions: null. Never record task scope, plan summaries or anything the code will show.
+When the plan makes a cross-role choice that later work must follow (a shared contract, convention or technology choice not already recorded), return decisions as the complete new content of ${SHARED_HOT} (current content is in Context): keep still-valid entries with their source comments, replace superseded ones, one or two lines per entry with the reason inline and a trailing source comment such as <!-- source: #${source.number} -->. Otherwise return decisions: null. Never record task scope, plan summaries or anything the code will show.
 Return only JSON: {"summary":"brief explanation of implementation decomposition (aim for at most 100 words; a longer summary is kept in full in plan.md)","questions":[],"teamSuggestions":[],"decisions":null,"batch":{"schemaVersion":1,"id":"issue-${source.number}","tasks":[{"id":"task-id","title":"short title","body":"scope\\n\\n## Acceptance criteria\\n- observable behavior from supplied requirements","owner":"existing-role-id","model":"that role's model","priority":1,"dependsOn":[]}],"approval":null}}.
 Existing config and word budgets: ${json({ config, limits: limitsFor(config) })}
 Coordinator charter: ${charter}
@@ -243,7 +243,7 @@ export function parsePlan(value: unknown, config: Config, source: Source): Plan 
   if (data.decisions !== undefined && data.decisions !== null) {
     decisions = string(data.decisions, "shared decisions");
     if (!decisions.trim()) throw new Error("Shared decisions must be the complete file content, or null for no change.");
-    bounded(decisions, limitsFor(config).hot, SHARED_HOT);
+    bounded(withoutComments(decisions), limitsFor(config).hot, SHARED_HOT);
     if (!decisions.endsWith("\n")) decisions += "\n";
   }
   let batch: Batch | null = null;

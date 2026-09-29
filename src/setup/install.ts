@@ -1,5 +1,5 @@
 import { readdir, unlink } from "node:fs/promises";
-import { agentPrompt, bounded, boundedLines, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, writeAtomic } from "../core.js";
+import { agentPrompt, bounded, boundedLines, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, withoutComments, writeAtomic } from "../core.js";
 import { agentArchivePath, guidanceLinesFor, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
 import { mergeManagedBlock, roleProfile } from "./agents.js";
@@ -31,10 +31,10 @@ export function setupConfiguration(value: unknown): Config {
     ? { ...config, planning: { ...config.planning, executeOnMerge: true } } : config;
 }
 function memorySeed(id: string, tier: string): string {
-  return tier === "hot" ? `# ${id}: gotchas\n\nNon-obvious traps and surprising constraints only, one or two lines each with a link. No implementation summaries, scope notes or verification logs. Replace stale entries.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
+  return tier === "hot" ? `# ${id}: gotchas\n\nNon-obvious traps and surprising constraints only, one or two lines each: the rule and its reason, then the source link in a trailing HTML comment. No implementation summaries, scope notes or verification logs. Replace stale entries.\n` : `# ${id}: memory index\n\nLink relevant cold topics and archived decisions here. Read detail only when needed.\n`;
 }
 const LEGACY_DECISIONS_SEED = "# Shared decisions\n\nRecord approved choices, short reasons, scope and evidence links. Link existing ADRs rather than copying them.\n";
-export const SHARED_HOT_SEED = "# Shared decisions\n\nActive cross-role choices only, one or two lines each with the reason and a PR or file link. Replace superseded entries; move older detail to cold/ and link it from index.md. Link existing ADRs rather than copying them.\n";
+export const SHARED_HOT_SEED = "# Shared decisions\n\nActive cross-role choices only, one or two lines each: the choice and its reason, then the PR or file link in a trailing HTML comment. Replace superseded entries; move older detail to cold/ and link it from index.md. Link existing ADRs rather than copying them.\n";
 export const SHARED_INDEX_SEED = "# Shared decisions: index\n\nLink shared cold topics (cold/name.md) and archived decisions (archive/name.md) here. Read detail only when needed.\n";
 /** Seeds shared hot/index memory and moves a pre-split .crewbie/decisions.md into the shared hot file. */
 async function sharedDecisions(root: string, files: Record<string, string | null>, adopted: Record<string, string>, limit: number): Promise<void> {
@@ -44,7 +44,7 @@ async function sharedDecisions(root: string, files: Record<string, string | null
     const seeded = textHash(legacy) === textHash(LEGACY_DECISIONS_SEED);
     if (!seeded) {
       if (hot !== null) throw new Error(`Both ${LEGACY_DECISIONS} and ${SHARED_HOT} exist. Merge the old decisions into ${SHARED_HOT}, delete ${LEGACY_DECISIONS}, then update again.`);
-      bounded(legacy, limit, `${LEGACY_DECISIONS} (moving to ${SHARED_HOT})`);
+      bounded(withoutComments(legacy), limit, `${LEGACY_DECISIONS} (moving to ${SHARED_HOT})`);
       files[SHARED_HOT] = legacy.replace(/\]\((?:\.\/)?decisions\//g, "](");
     }
     files[LEGACY_DECISIONS] = null;
@@ -109,7 +109,7 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
   if (data.constitutionText !== null && data.constitutionText !== undefined) {
     const content = string(data.constitutionText, "constitution text");
     if (!config.constitution) throw new Error("Select a constitution path before proposing its contents.");
-    bounded(content, limits.constitution, "Constitution");
+    bounded(withoutComments(content), limits.constitution, "Constitution");
     files[config.constitution] = content.endsWith("\n") ? content : content + "\n";
   }
   if (data.adopt !== undefined) {

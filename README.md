@@ -240,6 +240,21 @@ this. Every memory change goes through a PR you review.
 GitHub also loads your own `.github/copilot-instructions.md` and `AGENTS.md`
 for each agent, as usual.
 
+Each entry is a rule with its reason, plus where it came from in an HTML
+comment:
+
+```markdown
+- Seed data resets on restart, so tests create users. <!-- source: #42 2026-09-29 -->
+```
+
+Agents doing the work need the reason to apply the rule, so the reason is
+visible. The source only matters when deciding whether an entry is stale, so
+Crewbie removes comments before memory reaches implementers and the reviewer,
+and does not count them toward word budgets. The agents that rewrite memory
+(the planner for shared decisions, the nightly improver) see the comments.
+This follows research showing that instructions without their reasoning are
+rarely pruned and pile up ([arXiv:2608.11095](https://arxiv.org/abs/2608.11095)).
+
 ## Principles
 
 | Principle | In practice |

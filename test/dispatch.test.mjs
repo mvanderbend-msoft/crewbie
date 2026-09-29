@@ -210,13 +210,14 @@ test("launches embed the owner's memory from the work branch and name what is ab
   fixture.memory = {
     ".crewbie/instructions.md": "Shared rules.",
     ".crewbie/decisions/hot.md": "x".repeat(25_000),
-    ".crewbie/team/developer/hot.md": "- Seed data resets on restart ([#4](link)).",
+    ".crewbie/team/developer/hot.md": "- Seed data resets on restart ([#4](link)). <!-- source: #4 2026-09-01, only for maintainers -->",
   };
   await dispatch(fixture.client, config());
   const instructions = fixture.assignments[0].agent_assignment.custom_instructions;
   assert.match(instructions, new RegExp(`Crewbie memory at ${BRANCH}`));
   assert.match(instructions, /----- BEGIN \.crewbie\/instructions\.md \(sha256 [a-f0-9]{12}, 2\/600 words\) -----\nShared rules\.\n----- END/);
-  assert.match(instructions, /BEGIN \.crewbie\/team\/developer\/hot\.md[^\n]*\n- Seed data resets on restart/);
+  assert.match(instructions, /BEGIN \.crewbie\/team\/developer\/hot\.md \(sha256 [a-f0-9]{12}, 7\/\d+ words\) -----\n- Seed data resets on restart \(\[#4\]\(link\)\)\.\n----- END/, "Source comments are neither embedded nor counted.");
+  assert.doesNotMatch(instructions, /only for maintainers/);
   assert.match(instructions, /Too large to embed; read before any other work: \.crewbie\/decisions\/hot\.md\./);
   assert.match(instructions, /Absent at this revision: \.crewbie\/decisions\/index\.md, \.crewbie\/team\/developer\/index\.md\./);
   assert.doesNotMatch(instructions, /report (which|the) (memory|files)/i);

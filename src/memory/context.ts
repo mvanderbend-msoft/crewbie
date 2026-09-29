@@ -1,4 +1,4 @@
-import { bounded, optionalText, safePath, slug, textHash } from "../core.js";
+import { bounded, optionalText, safePath, slug, textHash, withoutComments } from "../core.js";
 import { limitsFor, type Config } from "../config.js";
 
 export interface ContextFile { path: string; content: string; sha256: string }
@@ -74,7 +74,7 @@ export async function memoryContext(root: string, config: Config, role: string, 
       if (path === SHARED_HOT && await optionalText(await safePath(root, LEGACY_DECISIONS)) !== null) throw new Error(`Shared decisions moved to ${SHARED_HOT}; run crewbie update --apply to migrate ${LEGACY_DECISIONS}.`);
       throw new Error(`Required context is missing: ${path}`);
     }
-    if (limit !== null) bounded(content, limit, path);
+    if (limit !== null) bounded(withoutComments(content), limit, path);
     result.push({ path, content, sha256: textHash(content) });
   }
   return result;

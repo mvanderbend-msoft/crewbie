@@ -46,6 +46,8 @@ test("the PR check reads changed memory at the PR head and reports, never blocks
   assert.doesNotMatch(overBudget(budgets), /instructions\.md/);
   files[".crewbie/team/developer/hot.md"] = "- A lesson.";
   assert.equal(overBudget(await prMemoryBudgets(client, cfg, { number: 7, head: { sha: "head-sha" } })), null);
+  files[".crewbie/team/developer/hot.md"] = `- A lesson. <!-- ${"source ".repeat(2000)} -->`;
+  assert.deepEqual((await prMemoryBudgets(client, cfg, { number: 7, head: { sha: "head-sha" } }))[0].words, 3, "Source comments do not count toward the budget.");
   assert.match(overBudget([{ path: ".crewbie/decisions/hot.md", words: Number.MAX_SAFE_INTEGER, limit: 600 }]), /too large to read/);
 });
 
@@ -93,6 +95,8 @@ test("evaluation compares success and cost per merged task, and flags guidance t
 });
 
 import { demoteBranchMemory, demoteEntries } from "../dist/memory/demote.js";
+import { visibleWords, withoutComments } from "../dist/core.js";
+import { SHARED_INSTRUCTIONS } from "../dist/setup/templates.js";
 
 test("demotion moves the oldest hot entries with their continuation lines and keeps headings", () => {
   const entries = Array.from({ length: 30 }, (_, i) => `- Entry ${i} ${"word ".repeat(8)}see [pr](../../src/a${i}.ts)\n  continued ${i}`);
@@ -106,6 +110,15 @@ test("demotion moves the oldest hot entries with their continuation lines and ke
   assert.match(result.hot, /Entry 29/, "Newest entries stay hot.");
   assert.doesNotMatch(result.hot, /Entry 0 /);
   assert.equal(demoteEntries(`# Hot\n\n${"prose ".repeat(300)}`, 100), null, "Nothing movable: leave it.");
+  assert.equal(demoteEntries(`# Hot\n\n- Entry <!-- ${"source ".repeat(300)} -->\n`, 100), null, "Comments do not push hot memory over budget.");
+});
+
+test("comments are removed outside code; inline and fenced code keep them", () => {
+  const text = "# Hot\n<!-- whole line -->\n- Rule, because reason. <!-- source: #4 -->\n- Multi <!-- a\nb --> line\n- Example: `- x <!-- source: #1 -->`\n```html\n<!-- kept -->\n```\n";
+  assert.equal(withoutComments(text), "# Hot\n- Rule, because reason.\n- Multi line\n- Example: `- x <!-- source: #1 -->`\n```html\n<!-- kept -->\n```\n");
+  assert.equal(visibleWords("- Rule. <!-- one two three -->"), 2);
+  assert.equal(withoutComments("Unclosed <!-- stays"), "Unclosed <!-- stays");
+  assert.match(withoutComments(SHARED_INSTRUCTIONS), /`- Seed data resets on restart, so tests create users\. <!-- source: #42 2026-09-29 -->`/, "The shared rules' format example survives launch stripping.");
 });
 
 function repo(files, { failPatch = false } = {}) {

@@ -1114,6 +1114,11 @@ PR branches and the default branch are never rewritten. Hot memory merged over
 budget after a feature's last launch is still loaded, and it is demoted at the
 next launch. Launch prompts show each embedded file's `words/limit`.
 
+Word counts exclude HTML comments outside code. Memory entries keep their source
+(PR or issue link, date) in a trailing comment. Launch prompts and PR review
+prompts remove comments; planning and nightly maintenance receive raw files
+because they return complete memory files and must keep each entry's source.
+
 Copilot's final session summary replaces the specialist's own PR description.
 During attribution Crewbie restores the specialist's last description (its own
 Copilot edit containing `Specialist: crewbie-<role>`) as the PR body and saves

@@ -40,7 +40,7 @@ test("reviewer CI evidence reports failures, missing CI and unreadable checks wi
 async function setup(t) {
   const root = await fixture(t, {
     ".github/agents/crewbie-developer.agent.md": "---\nname: crewbie-developer\n---\nYou are a grumpy but precise reviewer.",
-    ".crewbie/decisions/hot.md": "# Decisions\n", ".crewbie/decisions/index.md": "# Decisions index\n", ".crewbie/team/developer/hot.md": "# Hot\n", ".crewbie/team/developer/index.md": "# Index\n",
+    ".crewbie/decisions/hot.md": "# Decisions\n", ".crewbie/decisions/index.md": "# Decisions index\n", ".crewbie/team/developer/hot.md": "# Hot\n- Totals are cached. <!-- source: maintainer-only -->\n", ".crewbie/team/developer/index.md": "# Index\n",
   });
   const b = parseBatch(batch(), config());
   const pull = { number: 101, state: "open", title: "Crewbie feature", body: "What/why", head: { sha: HEAD, ref: BRANCH, repo: { full_name: "example/project" } }, base: { ref: "main" } };
@@ -82,6 +82,8 @@ test("review preparation uses the reviewer's charter and the API diff; publicati
   assert.match(prompt, /voice your charter gives you[\s\S]*grumpy but precise[\s\S]*Implement foundation[\s\S]*--- src\/a\.ts \(modified, \+2 -1\)\n@@/);
   assert.match(prompt, /CI on head ccccccc: All 2 CI checks passed\. \(lint: success; test: success\)/, "Only the newest run of a re-run check counts.");
   assert.match(prompt, /Never block only because the PR description lacks a test narrative/);
+  assert.match(prompt, /Totals are cached\./);
+  assert.doesNotMatch(prompt, /maintainer-only/, "The reviewer reads memory without source comments.");
   await writeFile(join(root, ".crewbie-review-output.txt"), JSON.stringify({ verdict: "changes", summary: "Hmph.", findings: [{ severity: "blocking", path: "src/a.ts", line: 2, body: "Handle null." }] }));
   assert.match(await publishReview(root, client, reviewConfig), /changes/);
   assert.equal(comments.length, 1);

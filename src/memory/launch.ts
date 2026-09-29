@@ -1,5 +1,5 @@
 import { type Config } from "../config.js";
-import { GitHubError, record, slug, textHash, words } from "../core.js";
+import { GitHubError, record, slug, textHash, visibleWords, withoutComments } from "../core.js";
 import type { GitHubApi } from "../tracking/github.js";
 import { memoryLimit, SHARED_HOT, SHARED_INDEX } from "./context.js";
 import { demoteBranchMemory } from "./demote.js";
@@ -47,16 +47,16 @@ export async function launchMemory(client: GitHubApi, config: Config, role: stri
     const content = await remoteText(client, config.repository, path, ref);
     if (content === null) { missing.push(path); continue; }
     if (content === "large") { unread.push(path); continue; }
-    const sha256 = textHash(content), limit = memoryLimit(config, path);
-    const size = limit === null ? "" : `, ${words(content)}/${limit} words`;
-    const block = `----- BEGIN ${path} (sha256 ${sha256.slice(0, 12)}${size}) -----\n${content.trimEnd()}\n----- END ${path} -----`;
+    const sha256 = textHash(content), limit = memoryLimit(config, path), visible = withoutComments(content);
+    const size = limit === null ? "" : `, ${visibleWords(content)}/${limit} words`;
+    const block = `----- BEGIN ${path} (sha256 ${sha256.slice(0, 12)}${size}) -----\n${visible.trimEnd()}\n----- END ${path} -----`;
     if (block.length > budget) { unread.push(path); continue; }
     budget -= block.length;
     blocks.push(block);
     files.push({ path, sha256 });
   }
   const text = [
-    `Crewbie memory at ${ref}, embedded by Crewbie so you start with it; treat it as already read. Crewbie records what was embedded; do not report it. Add memory entries at the end of a file; when a hot file exceeds the word budget shown, Crewbie moves its oldest entries to a linked cold topic.`,
+    `Crewbie memory at ${ref}, embedded by Crewbie so you start with it; treat it as already read. Crewbie records what was embedded; do not report it. Add memory entries at the end of a file; when a hot file exceeds the word budget shown, Crewbie moves its oldest entries to a linked cold topic. HTML comments (entry sources) are removed here and from budgets; before replacing or removing an entry, read its file on your branch to see its source.`,
     ...blocks,
     ...(unread.length ? [`Too large to embed; read before any other work: ${unread.join(", ")}.`] : []),
     ...(missing.length ? [`Absent at this revision: ${missing.join(", ")}.`] : []),
