@@ -350,7 +350,15 @@ saved setup JSON and Markdown retain the structural evidence, collection time,
 snapshot digest, omissions and warnings for review.
 
 Limits: 2,000 files, 1 MB per file, 20 MB total copied source; 120 seconds and
-1 MB diagnostic output per subprocess; 16 MB graph export and 24 KB final report.
+1 MB diagnostic output per subprocess; 256 MB graph export and 24 KB final report
+(decimal byte limits). Exports are read incrementally in two passes, retaining
+only symbol-to-file lookups and aggregated relationships, not the full JSON or
+raw edge list. Each buffered record/value is limited to 1 MB, nesting to 64 levels,
+symbol identities to 100,000 and distinct file-pair relationships to 50,000.
+Increasing the local export allowance does not increase what is sent to Copilot.
+Oversized exports report their actual byte size and limit; non-regular exports
+have a separate error. Malformed, over-budget or interrupted reads fail before
+AI assessment, without including raw source or tool output in diagnostics.
 Reports contain at most 20 file representatives/hotspots and 20 inter-file
 dependency summaries, with omitted counts. The supported source allowlist
 includes Swift but **not Metal shader files or Xcode build settings**. Missing

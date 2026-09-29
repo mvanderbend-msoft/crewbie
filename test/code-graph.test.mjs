@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { access, chmod, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join, relative } from "node:path";
 import { collectCodeGraph, summarizeCodeGraph } from "../dist/setup/code-graph.js";
 import { workingTree } from "../dist/setup/repository-map.js";
@@ -17,7 +17,7 @@ function fileGraph(snapshot, paths) {
   return { nodes: paths.map((path) => ({ kind: "File", file_path: join(snapshot, path), qualified_name: join(snapshot, path) })), edges: [] };
 }
 
-function transport({ version = "code-review-graph 2.3.9", status = { build_incomplete: false }, buildOutput = "", exported, onCall } = {}) {
+function transport({ version = "code-review-graph 2.3.9", status = { build_incomplete: false }, buildOutput = "", exported, writeExport, onCall } = {}) {
   const calls = [];
   return {
     calls,
@@ -32,6 +32,10 @@ function transport({ version = "code-review-graph 2.3.9", status = { build_incom
         if (args[0] === "visualize") {
           const snapshot = args[args.indexOf("--repo") + 1];
           const data = args[args.indexOf("--data-dir") + 1];
+          if (writeExport) {
+            await writeExport(join(data, "graph.json"), snapshot);
+            return "";
+          }
           const value = exported === undefined ? fileGraph(snapshot, await snapshotFiles(snapshot))
             : typeof exported === "function" ? await exported(snapshot) : exported;
           await writeFile(join(data, "graph.json"), typeof value === "string" || Buffer.isBuffer(value) ? value : JSON.stringify(value));
@@ -40,6 +44,17 @@ function transport({ version = "code-review-graph 2.3.9", status = { build_incom
       },
     },
   };
+}
+
+async function writePaddedExport(path, prefix, suffix) {
+  const handle = await open(path, "wx");
+  try {
+    await handle.writeFile(prefix);
+    // Cross the former 16 MB limit without allocating an entire export in memory.
+    const padding = " ".repeat(1_000_000);
+    for (let index = 0; index < 17; index++) await handle.writeFile(padding);
+    await handle.writeFile(suffix);
+  } finally { await handle.close(); }
 }
 
 const metadata = (overrides = {}) => ({
@@ -156,12 +171,11 @@ test("CodeGraph never silently falls back after collection failures and cleans t
   }
 });
 
-test("CodeGraph rejects malformed or oversized exports and unknown status without leaking raw payloads", async (t) => {
+test("CodeGraph rejects malformed exports and unknown status without leaking raw payloads", async (t) => {
   const root = await fixture(t, { "app.swift": "struct App {}" });
   for (const options of [
     { exported: "SYNTHETIC_PRIVATE_SOURCE_IS_NOT_JSON" },
     { exported: { nodes: [], edges: "unsupported" } },
-    { exported: Buffer.alloc(16_000_001, 32) },
     { status: "SYNTHETIC_PRIVATE_SOURCE_IS_NOT_JSON" },
     { status: {} },
   ]) {
@@ -172,6 +186,61 @@ test("CodeGraph rejects malformed or oversized exports and unknown status withou
     });
     await assert.rejects(access(dirname(runner.calls[0].cwd)), { code: "ENOENT" });
   }
+});
+
+test("CodeGraph streams exports larger than 16 MB into the same bounded summary and cleans up", async (t) => {
+  const paths = ["ios/App.swift", "tests/AppTests.swift"];
+  const root = await fixture(t, { [paths[0]]: "struct App {}", [paths[1]]: "struct AppTests {}" });
+  let graph, snapshotRoot;
+  const runner = transport({ writeExport: async (path, snapshot) => {
+    snapshotRoot = snapshot;
+    graph = fileGraph(snapshot, paths);
+    graph.edges.push({ kind: "TESTED_BY", source: graph.nodes[0].qualified_name, target: graph.nodes[1].qualified_name });
+    await writePaddedExport(path, `{"nodes":[${JSON.stringify(graph.nodes[0])},`, `${JSON.stringify(graph.nodes[1])}],"edges":${JSON.stringify(graph.edges)}}`);
+    assert.ok((await stat(path)).size > 16_000_000);
+  } });
+  const report = await collectCodeGraph(root, paths, runner.options);
+  assert.deepEqual(report.coverage, { candidates: 2, copied: 2, indexed: 2, omitted: 0, unindexed: 0, partial: false });
+  assert.deepEqual(report.dependencies, [{ from: paths[0], to: paths[1], kind: "TESTED_BY", count: 1 }]);
+  assert.deepEqual(report, summarizeCodeGraph(graph, snapshotRoot, paths, {
+    version: report.version, collectedAt: report.collectedAt, snapshotHash: report.snapshotHash, candidates: 2, partial: false,
+  }));
+  assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 24_000);
+  await assert.rejects(access(dirname(runner.calls[0].cwd)), { code: "ENOENT" });
+});
+
+test("CodeGraph rejects malformed large exports without exposing raw content and cleans up", async (t) => {
+  const root = await fixture(t, { "app.swift": "struct App {}" });
+  const runner = transport({ writeExport: async (path) => {
+    await writePaddedExport(path, '{"nodes":[', 'SYNTHETIC_PRIVATE_SOURCE_IS_NOT_JSON],"edges":[]}');
+    assert.ok((await stat(path)).size > 16_000_000);
+  } });
+  await assert.rejects(collectCodeGraph(root, ["app.swift"], runner.options), (error) => {
+    assert.match(error.message, /Invalid CodeGraph export JSON/);
+    assert.doesNotMatch(error.message, /SYNTHETIC_PRIVATE_SOURCE/);
+    return true;
+  });
+  await assert.rejects(access(dirname(runner.calls[0].cwd)), { code: "ENOENT" });
+});
+
+test("CodeGraph reports actual export size and limit separately from non-regular exports", async (t) => {
+  const root = await fixture(t, { "app.swift": "struct App {}" });
+  const oversized = transport({ writeExport: async (path) => {
+    const handle = await open(path, "wx");
+    try { await handle.truncate(256_000_001); }
+    finally { await handle.close(); }
+  } });
+  await assert.rejects(collectCodeGraph(root, ["app.swift"], oversized.options), (error) => {
+    assert.match(error.message, /256000001/);
+    assert.match(error.message, /256000000/);
+    assert.doesNotMatch(error.message, /regular file/);
+    return true;
+  });
+  await assert.rejects(access(dirname(oversized.calls[0].cwd)), { code: "ENOENT" });
+
+  const directory = transport({ writeExport: (path) => mkdir(path) });
+  await assert.rejects(collectCodeGraph(root, ["app.swift"], directory.options), /regular file/);
+  await assert.rejects(access(dirname(directory.calls[0].cwd)), { code: "ENOENT" });
 });
 
 test("CodeGraph rejects an empty eligible snapshot before building and cleans up", async (t) => {
@@ -231,6 +300,49 @@ test("CodeGraph summary rejects ambiguous qualified names and invalid symbol spa
   assert.ok(report.files.every((file) => file.maxSymbolLines === 0));
   assert.ok(report.relationships.every((entry) => entry.count === 0));
   assert.match(report.warnings.join("\n"), /ambiguous/);
+});
+
+test("CodeGraph summary caps distinct node identities without rejecting repeated identities", () => {
+  const snapshot = "/safe/snapshot", paths = ["app.swift"];
+  const graph = fileGraph(snapshot, paths);
+  for (let index = 1; index < 100_000; index++) graph.nodes.push({ kind: "Function", qualified_name: `symbol${index}`, file_path: paths[0] });
+  const report = summarizeCodeGraph(graph, snapshot, paths, metadata({ candidates: 1 }));
+  assert.equal(report.files[0].symbols, 99_999);
+  assert.equal(report.coverage.partial, false);
+
+  graph.nodes.push(graph.nodes.at(-1));
+  const duplicate = summarizeCodeGraph(graph, snapshot, paths, metadata({ candidates: 1 }));
+  assert.equal(duplicate.files[0].symbols, 99_999);
+  assert.equal(duplicate.coverage.partial, true);
+  graph.nodes.push({ kind: "Function", qualified_name: "SYNTHETIC_PRIVATE_NODE_NAME", file_path: paths[0] });
+  assert.throws(() => summarizeCodeGraph(graph, snapshot, paths, metadata({ candidates: 1 })), (error) => {
+    assert.match(error.message, /node budget exceeded.*100000/);
+    assert.doesNotMatch(error.message, /SYNTHETIC_PRIVATE_NODE_NAME/);
+    return true;
+  });
+});
+
+test("CodeGraph summary caps unique file-pair relationships while permitting repeated edges", () => {
+  const snapshot = "/safe/snapshot";
+  const paths = Array.from({ length: 225 }, (_, index) => `src/File${index}.swift`);
+  const graph = fileGraph(snapshot, paths);
+  for (let from = 0; from < paths.length && graph.edges.length < 50_001; from++) {
+    for (let to = 0; to < paths.length && graph.edges.length < 50_001; to++) {
+      if (from !== to) graph.edges.push({ kind: "CALLS", source: graph.nodes[from].qualified_name, target: graph.nodes[to].qualified_name });
+    }
+  }
+  const extra = graph.edges.pop();
+  const report = summarizeCodeGraph(graph, snapshot, paths, metadata({ candidates: paths.length }));
+  assert.equal(report.dependenciesOmitted, 49_980);
+  assert.equal(report.relationships.find((relation) => relation.kind === "CALLS").count, 50_000);
+
+  graph.edges.push(graph.edges[0]);
+  const repeated = summarizeCodeGraph(graph, snapshot, paths, metadata({ candidates: paths.length }));
+  assert.equal(repeated.dependenciesOmitted, 49_980);
+  assert.equal(repeated.dependencies[0].count, 2);
+  assert.equal(repeated.relationships.find((relation) => relation.kind === "CALLS").count, 50_001);
+  graph.edges.push(extra);
+  assert.throws(() => summarizeCodeGraph(graph, snapshot, paths, metadata({ candidates: paths.length })), /dependency budget exceeded.*50000/);
 });
 
 test("CodeGraph summary bounds ranked details and discloses heuristic, partial and unindexed coverage", () => {
