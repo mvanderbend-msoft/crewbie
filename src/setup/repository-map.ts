@@ -17,8 +17,17 @@ const MAP_FILES = 20_000;
 const PROMPT_DIRECTORIES = 400;
 const PROMPT_WORKSPACES = 100;
 const DIRECTORY_DEPTH = 4;
-const MANIFEST = /(^|\/)(?:package\.json|pyproject\.toml|setup\.py|go\.mod|Cargo\.toml|pom\.xml|build\.gradle(?:\.kts)?|composer\.json|Gemfile|[^/]+\.csproj|[^/]+\.fsproj)$/;
+const MANIFEST = /(^|\/)(?:package\.json|Package\.swift|pyproject\.toml|setup\.py|go\.mod|Cargo\.toml|pom\.xml|build\.gradle(?:\.kts)?|composer\.json|Gemfile|[^/]+\.csproj|[^/]+\.fsproj)$/;
+const XCODE_MANIFEST = /(^|\/)[^/]+\.(?:xcodeproj\/project\.pbxproj|xcworkspace\/contents\.xcworkspacedata)$/;
+const XCODE_CONTAINER = /(^|\/)[^/]+\.(?:xcodeproj|xcworkspace)(\/|$)/;
 const GENERATED = /^(?:\.crewbie\/|\.github\/agents\/crewbie-)/;
+
+/** Xcode bundles describe the containing project directory, not a workspace inside the bundle. */
+function workspaceDirectory(path: string): string | undefined {
+  const xcode = XCODE_MANIFEST.exec(path);
+  const directory = xcode ? path.slice(0, xcode.index) : MANIFEST.test(path) && path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  return directory && !XCODE_CONTAINER.test(directory) ? directory : undefined;
+}
 
 export function repositoryMap(paths: string[]): RepositoryMap {
   const directories = new Set<string>();
@@ -26,8 +35,7 @@ export function repositoryMap(paths: string[]): RepositoryMap {
     const parts = path.split("/").slice(0, -1);
     for (let depth = 1; depth <= Math.min(parts.length, DIRECTORY_DEPTH); depth++) directories.add(parts.slice(0, depth).join("/"));
   }
-  const workspaces = [...new Set(paths.filter((path) => MANIFEST.test(path) && path.includes("/"))
-    .map((path) => path.slice(0, path.lastIndexOf("/")))
+  const workspaces = [...new Set(paths.map(workspaceDirectory).filter((dir): dir is string => dir !== undefined)
     .filter((dir) => !/(^|\/)(?:node_modules|vendor|dist|build|fixtures?|examples?|test|tests|__tests__)(\/|$)/.test(dir)))].sort();
   const truncated = paths.length > MAP_FILES;
   const map: RepositoryMap = { truncated, directories: [...directories].sort(), workspaces };

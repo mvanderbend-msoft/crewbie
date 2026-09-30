@@ -294,6 +294,90 @@ quantities a task states that the source issue does not (and issue values no tas
 carries), overlapping acceptance criteria between implementation tasks, and task
 paths not in the repository.
 
+Swift packages (`Package.swift`) and Xcode projects/workspaces
+(`*.xcodeproj/project.pbxproj`, `*.xcworkspace/contents.xcworkspacedata`) also
+identify nested workspaces. Xcode containers map to their containing project
+directory, not their internal bundle directories. Root-level projects remain
+part of the repository root rather than becoming a nested workspace. Detection
+is names-only: it does not execute Swift manifests or inspect Xcode settings.
+
+### Optional CodeGraph structural assessment
+
+```sh
+crewbie init --code-graph
+# A trusted executable outside the repository, if not available on PATH:
+crewbie init --code-graph --code-graph-bin /absolute/path/to/code-review-graph
+# Inspect the exact static evidence offline first (no Copilot or GitHub calls):
+crewbie init --assessment-only --code-graph --out structural-assessment.json
+```
+
+`--code-graph` is an explicit per-invocation opt-in, not an installed repository
+policy or an MCP permission. With LLM onboarding it authorizes sending the
+bounded structural report to Copilot. It can also be used with `--update`, but
+never when applying a saved `--proposal`. It does not change hosted planning,
+cloud agents or existing model assignments. Without the flag, Crewbie neither
+looks for CodeGraph nor indexes source. `--code-graph-bin` requires the flag and
+an absolute executable path outside the checkout.
+
+Install and approve `code-review-graph` separately; Crewbie does not download
+packages, install hooks, start MCP servers or enable embeddings. The adapter is
+tested against 2.3.9 and accepts 2.3.9+ in the 2.x series, validating its version
+and export/status format. Missing or incompatible tools, malformed reports and
+timeouts stop before AI analysis; rerun without the flag to explicitly choose
+the normal names-only assessment. There is no silent fallback or paid retry.
+
+The collector copies selected non-ignored regular source files into a fresh
+temporary snapshot. It excludes hidden paths, symlinks, dependency/generated
+directories, repository graph configuration and unsupported extensions. It runs
+the trusted indexer's `build --skip-postprocess`, `status --json` and
+`visualize --format json` commands against that snapshot, with an empty sibling
+working directory and separate temporary graph/state directories. Credentials,
+Python injection settings and inherited CodeGraph configuration are not passed
+to the subprocess. Source files are parsed, not executed; no project build or
+test scripts run. The external executable is trusted software, **not an OS
+sandbox**. Only opt in with an installation you trust. Temporary snapshots and
+indexes are deleted when collection completes or fails.
+An abrupt process termination can leave a private `crewbie-code-graph-*`
+directory in the operating system's temporary directory; it contains the copied
+source and should be removed after confirming no collector is still using it.
+
+Only validated repository-relative file paths, extension counts, symbol counts
+and line spans, and counts of resolved call/import/inheritance/test relationships
+enter the assessment. Source bodies, symbol names, comments, signatures, tool
+diagnostics and absolute machine paths are withheld. File paths can themselves
+be sensitive; review the offline report before using the online opt-in. The
+saved setup JSON and Markdown retain the structural evidence, collection time,
+snapshot digest, omissions and warnings for review.
+
+Limits: 2,000 files, 1 MB per file, 20 MB total copied source; 120 seconds and
+1 MB diagnostic output per subprocess; 256 MB graph export and 24 KB final report
+(decimal byte limits). Exports are read incrementally in two passes, retaining
+only symbol-to-file lookups and aggregated relationships, not the full JSON or
+raw edge list. Each buffered record/value is limited to 1 MB, nesting to 64 levels,
+symbol identities to 100,000 and distinct file-pair relationships to 50,000.
+Increasing the local export allowance does not increase what is sent to Copilot.
+Oversized exports report their actual byte size and limit; non-regular exports
+have a separate error. Malformed, over-budget or interrupted reads fail before
+AI assessment, without including raw source or tool output in diagnostics.
+Reports contain at most 20 file representatives/hotspots and 20 inter-file
+dependency summaries, with omitted counts. The supported source allowlist
+includes Swift but **not Metal shader files or Xcode build settings**. Missing
+File nodes and parser errors are disclosed as incomplete evidence, not absence
+of code. The snapshot is rebuilt for each opted-in assessment, not reused as a
+potentially stale working-tree index; subsequent source edits are not reflected.
+
+Static relationships are heuristic and incomplete. Links to tests are not
+measured test coverage; connectivity and large functions do not establish
+reasoning difficulty or prove a particular model is suitable. The assessment
+must combine evidence with project intent, task requirements and consequences
+of errors, and state uncertainty. CodeGraph content remains untrusted data;
+the LLM still has no tools, cannot broaden guidance edits and must preserve
+installed models. Terminal review displays complexity, model-selection rationale
+and the selected profile, including when historical rationale is retained or
+no rationale was recorded. Recommendations remain proposals, not benchmarks.
+
+### Assessment responses and model access
+
 Model answers are parsed tolerantly: a prose preamble or fenced block around the
 JSON is accepted, finding dispositions accept harmless synonyms (keep, update), and
 an unknown disposition or an edit without replacement text becomes an explicit

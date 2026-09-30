@@ -155,11 +155,20 @@ Each release also includes a `SHA256SUMS` file to check the download.
 crewbie init
 ```
 
-Crewbie looks at your code and your existing instructions and agents. It then
+By default, Crewbie maps project directories and reviews your existing instructions and agents. It then
 proposes a team, such as a frontend engineer, a backend engineer and a
 reviewer, with a model for each. You review the proposal before anything is
 written. For a new project, describe what you want to build and init asks
 follow-up questions.
+
+For optional structural context, use `crewbie init --code-graph` with a separately
+installed, trusted [code-review-graph](https://github.com/tirth8205/code-review-graph)
+2.3.9+ (2.x). This explicitly permits local source indexing and sharing bounded
+file-level structural metadata with Copilot; source bodies are not included.
+The normal assessment remains tool-free and works without CodeGraph. Model
+complexity and selection rationale are shown during review, not only in the
+saved report. See [structural assessment details](docs/operations.md#optional-codegraph-structural-assessment)
+for coverage, privacy, limits and an offline preview.
 
 **3. Commit and push** the files init created to your default branch.
 

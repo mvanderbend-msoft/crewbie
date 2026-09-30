@@ -14,6 +14,44 @@ test("the repository map lists directories and manifest workspaces without conte
   assert.deepEqual(promptMap(map).workspaces, ["packages/api", "packages/web"]);
 });
 
+test("Swift packages and Xcode projects identify their owning directories without duplicate workspaces", () => {
+  const native = repositoryMap([
+    "ios/LibbyCore/Package.swift", "ios/LibbyCore/Sources/Core.swift",
+    "ios/Libby.xcodeproj/project.pbxproj", "ios/Libby.xcworkspace/contents.xcworkspacedata",
+    "ios/Libby.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+    "ios/Package.swift", "mac/App.xcodeproj/project.pbxproj",
+    "shared/Package.swift", "shared/package.json",
+  ]);
+  assert.deepEqual(native.workspaces, ["ios", "ios/LibbyCore", "mac", "shared"]);
+  assert.deepEqual(promptMap(native).workspaces, native.workspaces);
+  assert.deepEqual(unownedWorkspaces(native, ["Own ios and its LibbyCore package.", "Own shared."]), ["mac"]);
+});
+
+test("root native projects and Xcode bundle internals do not invent nested workspaces", () => {
+  const native = repositoryMap([
+    "Package.swift", "Libby.xcodeproj/project.pbxproj", "Libby.xcworkspace/contents.xcworkspacedata",
+    "Libby.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+    "Libby.xcodeproj/metadata/Package.swift", "Libby.xcworkspace/metadata/package.json",
+    "ios/Libby.xcodeproj/metadata/Nested.xcodeproj/project.pbxproj",
+    "ios/Libby.xcworkspace/metadata/Nested.xcworkspace/contents.xcworkspacedata",
+    "ios/project.pbxproj", "ios/contents.xcworkspacedata", "ios/package.swift",
+    "ios/Fake.xcodeproj/README.md", "ios/Fake.xcworkspace/README.md",
+  ]);
+  assert.deepEqual(native.workspaces, []);
+});
+
+test("native project discovery preserves dependency, build, fixture and example exclusions", () => {
+  const native = repositoryMap([
+    "vendor/Native/Package.swift", "node_modules/Native/App.xcodeproj/project.pbxproj",
+    "ios/build/App.xcodeproj/project.pbxproj", "dist/App.xcworkspace/contents.xcworkspacedata",
+    "fixtures/App.xcodeproj/project.pbxproj", "test/Native/Package.swift",
+    "tests/Native/App.xcworkspace/contents.xcworkspacedata", "__tests__/Native/Package.swift",
+    "examples/App.xcodeproj/project.pbxproj", "example/Native/Package.swift",
+    "ios/Native/Package.swift",
+  ]);
+  assert.deepEqual(native.workspaces, ["ios/Native"]);
+});
+
 test("path references ignore prose pairs, URLs and routes but catch code spans and path-shaped words", () => {
   const refs = pathReferences("Own `src/legacy/` and src/billing/invoice.ts, see https://example.com/a/b.ts, and/or input/output, route /api/users, frontend/backend, `packages/web`.", new Set(["packages"]));
   assert.deepEqual(refs.sort(), ["packages/web", "src/billing/invoice.ts", "src/legacy/"]);

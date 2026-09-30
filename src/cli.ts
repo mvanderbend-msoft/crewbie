@@ -47,6 +47,8 @@ SETUP AND GUIDANCE
     --model-policy cost-aware|fixed               New specialists: reviewed catalog choices (default cost-aware)
     --specialist-model MODEL                      Explicit new-specialist model override
     --model-profile economy|balanced|quality      Capability-aware selection (default balanced)
+    --code-graph                                 Opt in to local source indexing; send bounded structural metadata
+    --code-graph-bin /absolute/path               Trusted code-review-graph 2.3.9+ (2.x), outside the repository
     --description "project intent"                Greenfield context; asks again when unclear
     --repo owner/name                             Setup repository for labels and workflows
   init --assessment-only [--out setup.json]        Offline inventory; no LLM
@@ -119,6 +121,7 @@ async function main(): Promise<void> {
       agent: { type: "string" }, model: { type: "string" }, json: { type: "boolean" },
       "model-policy": { type: "string" }, "specialist-model": { type: "string" }, offline: { type: "boolean" },
       "model-profile": { type: "string" }, "batch-id": { type: "string" }, "run-id": { type: "string" },
+      "code-graph": { type: "boolean" }, "code-graph-bin": { type: "string" },
       "historical-attempts": { type: "string" },
       out: { type: "string" }, proposal: { type: "string" }, apply: { type: "boolean" },
       update: { type: "boolean" }, batch: { type: "string" }, yes: { type: "boolean" },
@@ -144,6 +147,7 @@ async function main(): Promise<void> {
   if (values.help || positionals.length === 0) { output.text(HELP); return; }
   if (positionals.length !== 1 && !(positionals[0] === "test" && positionals.length === 2)) throw new Error("Choose exactly one command.");
   const command = positionals[0];
+  if (command !== "init" && (values["code-graph"] || values["code-graph-bin"] !== undefined)) throw new Error("CodeGraph options require init.");
   if (command !== "init") output.heading(command!);
   if (values["review-loop"] && (command !== "publish" || values.batch || values.pr || values["dispatch-local"])) throw new Error("--review-loop requires publish and cannot be combined with batch/PR publication.");
   if (values.watch && (command !== "publish" || (!values["review-loop"] && (!values.batch || !values["dispatch-local"])))) throw new Error("--watch requires publish --batch and --dispatch-local, or publish --review-loop.");

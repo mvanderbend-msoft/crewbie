@@ -7,6 +7,7 @@ import { assessInstructions, instructionFile, type InstructionQuality } from "./
 import { assessTeam, type TeamAssessment } from "./team.js";
 import { inventory, type Inventory } from "./inventory.js";
 import { repositoryMap, type RepositoryMap } from "./repository-map.js";
+import type { CodeGraphEvidence } from "./code-graph.js";
 
 const SETUP_STEPS = ".github/workflows/copilot-setup-steps.yml";
 export interface Assessment {
@@ -23,6 +24,8 @@ export interface Assessment {
   installedRoles: Role[];
   /** Names-only working-tree map; absent in proposals saved before it existed. */
   repository?: RepositoryMap;
+  /** Explicit opt-in only; bounded metadata from a fresh, isolated static source snapshot. */
+  codeGraph?: CodeGraphEvidence;
 }
 export async function assess(root: string): Promise<Assessment> {
   const absolute = await realpath(resolve(root));

@@ -45,6 +45,21 @@ test("CLI rejects implicit approval and unsupported input formats", async (t) =>
   assert.match(result.stderr, /Convert Word\/PDF outside/);
 });
 
+test("CLI exposes CodeGraph opt-in and rejects orphaned or non-assessment flags before execution", async (t) => {
+  const root = await fixture(t, { "ios/App.swift": "struct App {}" });
+  assert.match(run(root, "--help"), /--code-graph\s+Opt in to local source indexing/);
+  assert.match(run(root, "--help"), /--code-graph-bin \/absolute\/path/);
+  for (const [args, expected] of [
+    [["status", "--code-graph"], /CodeGraph options require init/],
+    [["init", "--code-graph-bin", process.execPath], /requires --code-graph/],
+    [["init", "--proposal", "missing.json", "--code-graph"], /not installing a saved proposal/],
+  ]) {
+    const result = spawnSync(process.execPath, [cli, "--path", root, ...args], { encoding: "utf8" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, expected);
+  }
+});
+
 test("CLI exposes guarded controls, validates required identifiers and previews pause without remote writes", async (t) => {
   const root = await fixture(t, { ".crewbie/config.json": JSON.stringify(config()) });
   const pause = spawnSync(process.execPath, [cli, "--path", root, "pause"], { encoding: "utf8", env: { ...process.env, GH_TOKEN: "fixture-only" } });
