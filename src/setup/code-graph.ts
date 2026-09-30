@@ -220,7 +220,8 @@ async function summarizeExport(path: string, snapshot: string, paths: string[], 
   async function fingerprint(): Promise<string> {
     try {
       const stat = await lstat(path, { bigint: true });
-      return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(":");
+      // Windows updates ChangeTime when the export is merely read, so ctime would always report a change there.
+      return [stat.dev, stat.ino, stat.size, stat.mtimeNs, process.platform === "win32" ? 0n : stat.ctimeNs].join(":");
     } catch { throw new Error("CodeGraph export became unavailable while reading. No assessment was sent."); }
   }
   const before = await fingerprint();
