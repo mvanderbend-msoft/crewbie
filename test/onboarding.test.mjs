@@ -742,6 +742,9 @@ test("cost-aware init proposes catalog models by role complexity and preserves i
   assert.match(await readFile(join(root, "crewbie-setup.md"), "utf8"), /Model proposal \(complex\)/);
   proposed.roles[1].model = "invented";
   assert.throws(() => parseSetupReview(JSON.stringify(proposed), report, "", "assessment-model", models), /not in the inspected account catalog/);
+  proposed.roles[1].model = "efficient";
+  proposed.roles[1].modelReason = "word ".repeat(120).trim();
+  assert.equal(parseSetupReview(JSON.stringify(proposed), report, "", "assessment-model", models).config.roles[1].modelReason, proposed.roles[1].modelReason, "A long model reason is shown in review, not rejected.");
 });
 
 test("init reassesses without chosen models the cloud agent rejects and warns about installed ones", async (t) => {
