@@ -144,7 +144,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.51/crewbie-cli-0.1.0-alpha.51.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.52/crewbie-cli-0.1.0-alpha.52.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download.
