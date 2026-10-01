@@ -1,6 +1,6 @@
 import { PLANNING_LABEL } from "../config.js";
 
-export function planningWorkflow(setup: string, enabled: boolean): string {
+export function planningWorkflow(setup: string, enabled: boolean, install: string): string {
   return `name: Crewbie planning
 on:
 ${enabled ? "  issues:\n    types: [labeled]\n  issue_comment:\n    types: [created]\n" : ""}  workflow_dispatch:
@@ -39,6 +39,7 @@ jobs:
     outputs:
       ready: \${{ steps.context.outputs.ready }}
       model: \${{ steps.context.outputs.model }}
+      input_artifact: crewbie-planning-input-\${{ github.run_attempt }}
     steps:
 ${setup}      - name: Verify ready label and prepare coordinator context
         id: context
@@ -48,7 +49,7 @@ ${setup}      - name: Verify ready label and prepare coordinator context
       - uses: actions/upload-artifact@v7.0.1
         if: \${{ steps.context.outputs.ready == 'true' }}
         with:
-          name: crewbie-planning-input
+          name: crewbie-planning-input-\${{ github.run_attempt }}
           include-hidden-files: true
           retention-days: 1
           path: |
@@ -62,14 +63,16 @@ ${setup}      - name: Verify ready label and prepare coordinator context
     timeout-minutes: 9
     permissions:
       copilot-requests: write
+    outputs:
+      output_artifact: crewbie-planning-output-\${{ github.run_attempt }}
     steps:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
-      - uses: actions/download-artifact@v8.0.1
+${install}      - uses: actions/download-artifact@v8.0.1
         with:
-          name: crewbie-planning-input
-      - name: Run named coordinator planning
+          name: \${{ needs.prepare.outputs.input_artifact }}
+      - name: Generate and validate coordinator plan with bounded format correction
         env:
           GITHUB_TOKEN: \${{ github.token }}
           CREWBIE_PLANNING_MODEL: \${{ needs.prepare.outputs.model }}
@@ -78,13 +81,18 @@ ${setup}      - name: Verify ready label and prepare coordinator context
           [[ "$CREWBIE_COPILOT_VERSION" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || { echo "Set an approved exact Copilot CLI version."; exit 1; }
           test -n "$CREWBIE_PLANNING_MODEL" || { echo "Approve an explicit planning model."; exit 1; }
           npm install --prefix "$RUNNER_TEMP/copilot" --no-audit --no-fund "@github/copilot@$CREWBIE_COPILOT_VERSION"
-          "$RUNNER_TEMP/copilot/node_modules/.bin/copilot" --model "$CREWBIE_PLANNING_MODEL" --no-custom-instructions --disable-builtin-mcps --available-tools --silent --deny-tool shell write url --prompt "$(cat .crewbie-planning-prompt.txt)" > .crewbie-planning-output.txt
+          export CREWBIE_COPILOT_BIN="$RUNNER_TEMP/copilot/node_modules/.bin/copilot"
+          node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-plan --analyze
       - uses: actions/upload-artifact@v7.0.1
+        if: \${{ always() }}
         with:
-          name: crewbie-planning-output
+          name: crewbie-planning-output-\${{ github.run_attempt }}
           include-hidden-files: true
           retention-days: 1
-          path: .crewbie-planning-output.txt
+          path: |
+            .crewbie-planning-output.txt
+            .crewbie-planning-validation.json
+            .crewbie-planning-attempt-*.txt
           if-no-files-found: error
   publish:
     needs: [prepare, analyze]
@@ -98,10 +106,10 @@ ${setup}      - name: Verify ready label and prepare coordinator context
     steps:
 ${setup}      - uses: actions/download-artifact@v8.0.1
         with:
-          name: crewbie-planning-input
+          name: \${{ needs.prepare.outputs.input_artifact }}
       - uses: actions/download-artifact@v8.0.1
         with:
-          name: crewbie-planning-output
+          name: \${{ needs.analyze.outputs.output_artifact }}
       - name: Validate and publish planning PR only
         env:
           GH_TOKEN: \${{ github.token }}

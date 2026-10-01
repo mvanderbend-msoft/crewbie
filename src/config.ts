@@ -3,6 +3,7 @@ import { bounded, readJson, record, string, strings, slug, integer, safePath } f
 export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const RESTART_LABEL = "crewbie:restart";
+export const PLANNING_REPAIR_LIMIT = 2;
 export const DEFAULT_LIMITS = { spec: 600, hot: 600, constitution: 600, topic: 1500 };
 /** Anthropic's recommended maximum for always-loaded instruction files, also used by the AGENTS.md configuration-smells study (arXiv:2606.15828). */
 export const DEFAULT_GUIDANCE_LINES = 200;
@@ -31,7 +32,7 @@ export interface Config {
   nightly: { enabled: boolean; maxRecords: number; allowedPaths: string[] };
   ado: { organization: string; project: string; workItemType: string } | null;
   limits?: WordLimits;
-  planning?: { enabled: boolean; model: string; executeOnMerge?: boolean };
+  planning?: { enabled: boolean; model: string; executeOnMerge?: boolean; maxFormatRepairs?: number };
   modelProfile?: ModelProfile;
   execution?: ExecutionLimits;
   merge?: MergePolicy;
@@ -125,7 +126,8 @@ export function parseConfig(value: unknown): Config {
     if (model && (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(model) || model.toLowerCase() === "auto")) throw new Error("Choose an explicit planning model identifier, not auto.");
     if (value.executeOnMerge !== undefined && typeof value.executeOnMerge !== "boolean") throw new Error("planning.executeOnMerge must be true or false.");
     if (value.executeOnMerge === true && !value.enabled) throw new Error("Enable planning before opting into execution on merge.");
-    planning = { enabled: value.enabled, model, ...(value.executeOnMerge === undefined ? {} : { executeOnMerge: value.executeOnMerge }) };
+    planning = { enabled: value.enabled, model, ...(value.executeOnMerge === undefined ? {} : { executeOnMerge: value.executeOnMerge }),
+      ...(value.maxFormatRepairs === undefined ? {} : { maxFormatRepairs: integer(value.maxFormatRepairs, "planning.maxFormatRepairs", 0, PLANNING_REPAIR_LIMIT) }) };
   }
   const execution = data.execution === undefined ? undefined : record(data.execution, "execution limits");
   let merge: Config["merge"];

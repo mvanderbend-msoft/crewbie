@@ -490,7 +490,8 @@ Enable it in a reviewed setup proposal:
 {
   "planning": {
     "enabled": true,
-    "model": "gpt-5.4"
+    "model": "gpt-5.4",
+    "maxFormatRepairs": 2
   }
 }
 ```
@@ -540,6 +541,42 @@ but no repository write permission or available tools. This is a named-context
 Copilot CLI planning run in Actions, not a native Agent Tasks implementation
 session. Model selection is requested explicitly; runtime model/billing
 measurements are not inferred.
+
+Planning output is validated inside the analysis job using the same output
+contract used to generate its prompt. New tasks provide `scope` text and an
+`acceptanceCriteria` list; Crewbie renders their Markdown headings and bullets.
+Older `body` output remains supported, including headings such as
+`## Acceptance criteria (findings that block)`. An unambiguous `{ "note": "..." }`
+team suggestion becomes its unchanged text, and a decisions object containing
+only the fixed shared-decisions path and complete content becomes that content.
+Other ambiguous objects are rejected; text is never silently shortened or removed.
+
+Recoverable validation errors trigger at most two additional requests to the
+same approved model within that analysis job. Each correction receives the
+existing proposal, original requirements and revision feedback, output contract, approved role/model
+pairs, word limits and field-specific diagnostics. It does not repeat repository
+assessment. These requests can consume additional Copilot AI credits. Set
+`planning.maxFormatRepairs` to `0`, `1` or `2` (default `2`) to control this budget.
+Normalization alone needs no extra request. Self-approval, unapproved
+owner/model pairs, unauthorized file targets, ADO linkage and recognized secrets
+stop immediately; transport errors are not retried automatically.
+
+The `crewbie-planning-output-N` artifact (`N` is the workflow attempt) is uploaded
+even when validation fails. Artifact names are unique per attempt, and dependent
+jobs use the names emitted by the producer jobs; rerunning analysis does not
+overwrite an earlier output or accidentally consume it.
+It includes the canonical plan on success, bounded raw attempts with recognized
+credentials redacted, and `.crewbie-planning-validation.json` with each attempt's
+diagnostics and conversions. The Actions job summary shows the result and model
+call count. Persistent invalid output fails **analyze**, so **publish** does not
+start. Publication still independently validates the downloaded plan against the
+current configuration and rechecks source, approval and branch provenance.
+
+To adopt these changes in an existing repository, install the updated Crewbie
+release, review `crewbie update`, apply it with `crewbie update --apply`, and
+commit the regenerated workflow and configuration to the default branch. Old
+workflow runs keep their recorded workflow definition. Request a fresh plan
+after the upgrade rather than reusing an artifact that failed validation.
 
 The publisher rechecks the source, label approval, policy and default-branch
 revision. It creates a non-draft PR with `.crewbie/plans/<feature>-issue-N/` files: a concise

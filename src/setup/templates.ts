@@ -228,6 +228,12 @@ ${WRITING}
 `;
 
 export function workflows(nightlyEnabled = false, planningEnabled = false, executeOnMerge = false): Record<string, string> {
+  const install = `      - name: Install approved Crewbie package
+        env:
+          CREWBIE_PACKAGE: \${{ vars.CREWBIE_PACKAGE || '${PACKAGE_PIN}' }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
+`;
   const setup = `      - uses: actions/checkout@v7.0.1
         with:
           ref: \${{ github.event.repository.default_branch }}
@@ -235,14 +241,9 @@ export function workflows(nightlyEnabled = false, planningEnabled = false, execu
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
-      - name: Install approved Crewbie package
-        env:
-          CREWBIE_PACKAGE: \${{ vars.CREWBIE_PACKAGE || '${PACKAGE_PIN}' }}
-        run: |
-          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
-`;
+${install}`;
   return {
-    ".github/workflows/crewbie-plan.yml": planningWorkflow(setup, planningEnabled),
+    ".github/workflows/crewbie-plan.yml": planningWorkflow(setup, planningEnabled, install),
     ".github/workflows/crewbie-execute-plan.yml": executionWorkflow(setup, planningEnabled && executeOnMerge),
     ".github/workflows/crewbie-dispatch.yml": `name: Crewbie dispatch
 on:
