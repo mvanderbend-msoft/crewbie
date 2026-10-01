@@ -322,7 +322,19 @@ test("planning workflow is opt-in, label-gated and separates analysis from repos
   assert.equal(flow.jobs.publish.permissions.actions, "read", "Publication rechecks its GitHub Actions run provenance.");
   assert.equal(flow.jobs.publish.permissions["pull-requests"], "write");
   assert.equal(Object.values(flow.jobs).reduce((sum, job) => sum + job["timeout-minutes"], 0), 15);
-  assert.match(file, /--no-custom-instructions --disable-builtin-mcps --available-tools --silent --deny-tool shell write url/);
+  assert.ok(flow.jobs.analyze.steps.some((step) => step.name === "Install approved Crewbie package"));
+  assert.ok(flow.jobs.analyze.steps.every((step) => !step.uses?.startsWith("actions/checkout")), "Analysis gets approved context without checking out repository code.");
+  assert.match(file, /internal-plan --analyze/);
+  const artifact = flow.jobs.analyze.steps.find((step) => step.uses?.startsWith("actions/upload-artifact"));
+  assert.equal(artifact.if, "${{ always() }}");
+  assert.match(artifact.with.path, /crewbie-planning-validation\.json/);
+  assert.match(artifact.with.path, /crewbie-planning-attempt-\*\.txt/);
+  assert.equal(artifact.with.name, "crewbie-planning-output-${{ github.run_attempt }}");
+  assert.equal(flow.jobs.analyze.outputs.output_artifact, artifact.with.name);
+  const input = flow.jobs.analyze.steps.find((step) => step.uses?.startsWith("actions/download-artifact"));
+  assert.equal(input.with.name, "${{ needs.prepare.outputs.input_artifact }}");
+  const downloads = flow.jobs.publish.steps.filter((step) => step.uses?.startsWith("actions/download-artifact"));
+  assert.deepEqual(downloads.map((step) => step.with.name), ["${{ needs.prepare.outputs.input_artifact }}", "${{ needs.analyze.outputs.output_artifact }}"]);
   assert.doesNotMatch(file, /secrets\.|pull_request\.head|github\.event\.issue\.body|--allow-all/);
   for (const model of ["auto", "model\nready=true", "", "model;echo bad"]) {
     assert.throws(() => parseConfig(config({ planning: { enabled: true, model } })));

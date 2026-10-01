@@ -139,3 +139,16 @@ test("hosted planning preparation accepts label, PR-comment and revision-dispatc
   }
   assert.match(prepare("pull_request").stderr, /requires a GitHub issues, issue_comment or workflow_dispatch event/);
 });
+
+test("planning analysis validates its downloaded snapshot before config loading or GitHub authentication", async (t) => {
+  const active = config({ planning: { enabled: true, model: "planner" } });
+  const root = await fixture(t, { ".crewbie-planning-input.json": JSON.stringify({ schemaVersion: 1, config: active, configHash: "stale" }) });
+  const result = spawnSync(process.execPath, [cli, "--path", root, "internal-plan", "--analyze"], {
+    encoding: "utf8", env: { ...process.env, GH_TOKEN: "", GITHUB_TOKEN: "", CREWBIE_COPILOT_BIN: "/never-execute-copilot" },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /approved configuration snapshot/);
+  assert.doesNotMatch(result.stderr, /gh auth|installed|ENOENT/);
+  const report = JSON.parse(await readFile(join(root, ".crewbie-planning-validation.json"), "utf8"));
+  assert.equal(report.attempts.length, 0);
+});

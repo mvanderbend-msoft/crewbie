@@ -1,5 +1,7 @@
-import { bounded, hash, integer, record, slug, string, strings } from "../core.js";
+import { bounded, hash, integer, record, slug, string, strings, withoutComments } from "../core.js";
 import { limitsFor, type Config } from "../config.js";
+import { outputCheck, OutputValidationError, type OutputIssue } from "../structured-output.js";
+import { acceptanceCriteriaSection } from "./acceptance.js";
 
 export interface Task {
   id: string; title: string; body: string; owner: string; model: string;
@@ -47,13 +49,21 @@ export function parseBatch(value: unknown, config?: Config): Batch {
       ...(task.kind === undefined ? {} : { kind: taskKind(task.kind) }),
       ...(task.adoWorkItem === undefined ? {} : { adoWorkItem: integer(task.adoWorkItem, "ADO work item") }),
     };
-    bounded(result.body, limitsFor(config).spec, `${result.id} description`);
-    if (result.model.trim().toLowerCase() === "auto") throw new Error("Tasks require an explicit approved model.");
-    if (!/^#{1,3}\s+Acceptance criteria\s*$/im.test(result.body)) throw new Error(`${result.id} needs an Acceptance criteria heading.`);
-    if (config && !config.roles.some((role) => role.id === result.owner && role.model === result.model)) throw new Error(`${result.id} owner/model does not match approved configuration.`);
     return result;
   });
-  if (new Set(tasks.map((task) => task.id)).size !== tasks.length) throw new Error("Task IDs must be unique.");
+  const issues: OutputIssue[] = [];
+  for (const [index, task] of tasks.entries()) {
+    const path = `$.tasks[${index}]`;
+    outputCheck(issues, `${path}.body`, () => bounded(task.body, limitsFor(config).spec, `${task.id} description`));
+    if (task.model.trim().toLowerCase() === "auto") issues.push({ path: `${path}.model`, message: "Tasks require an explicit approved model." });
+    const criteria = acceptanceCriteriaSection(task.body);
+    if (criteria === null) issues.push({ path: `${path}.body`, message: `${task.id} needs an Acceptance criteria heading (for example, ## Acceptance criteria).` });
+    else if (!withoutComments(criteria).trim()) issues.push({ path: `${path}.body`, message: `${task.id} needs non-empty acceptance criteria under its heading.` });
+    if (config && !config.roles.some((role) => role.id === task.owner && role.model === task.model)) {
+      issues.push({ path: `${path}.owner`, message: `${task.id} owner/model does not match approved configuration.` });
+    }
+  }
+  if (new Set(tasks.map((task) => task.id)).size !== tasks.length) issues.push({ path: "$.tasks", message: "Task IDs must be unique." });
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const complete = new Set<string>();
   const visiting = new Set<string>();
@@ -67,9 +77,14 @@ export function parseBatch(value: unknown, config?: Config): Batch {
     visiting.delete(id);
     complete.add(id);
   }
-  for (const task of tasks) visit(task.id);
+  // Reset the traversal after a failed path, so independent graph problems are reported together.
+  for (const task of tasks) {
+    outputCheck(issues, "$.tasks", () => visit(task.id));
+    visiting.clear();
+  }
   const approval = data.approval == null ? null : record(data.approval, "approval");
   if (approval && typeof approval.execute !== "boolean") throw new Error("approval.execute must be boolean.");
+  if (issues.length) throw new OutputValidationError(issues.filter((issue, index) => issues.findIndex((other) => other.path === issue.path && other.message === issue.message) === index));
   return {
     schemaVersion: 1, id: slug(data.id, "batch ID"), spec, sources, tasks,
     approval: approval ? { digest: string(approval.digest, "approval digest"), execute: approval.execute === true } : null,
