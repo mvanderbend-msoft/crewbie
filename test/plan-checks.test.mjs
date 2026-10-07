@@ -37,3 +37,11 @@ test("a plan that carries the PRD's values into distinct tasks has no warnings",
   ]), "Return HTTP 429; reset every 60 s.", repositoryMap(["README.md"]));
   assert.deepEqual(warnings, []);
 });
+
+test("annotated Acceptance criteria headings are read consistently by validation and advisory checks", () => {
+  const warnings = planChecks(batch([
+    task("first", "## Acceptance criteria (findings that block)\n- Requests over the limit return a clear error"),
+    task("second", "# Acceptance criteria\n- Requests over the limit return a clear error"),
+  ]), "Keep requests bounded.", repositoryMap([]));
+  assert.ok(warnings.some((warning) => warning.includes("share an acceptance criterion")));
+});

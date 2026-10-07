@@ -1,5 +1,6 @@
 import type { Batch, Task } from "./batch.js";
 import { missingPaths, type RepositoryMap } from "../setup/repository-map.js";
+import { acceptanceCriteriaSection } from "./acceptance.js";
 
 /**
  * Deterministic checks of a proposed plan against its source issue and the working tree. They are advisory:
@@ -29,7 +30,7 @@ function words(line: string): Set<string> {
   return new Set(line.toLowerCase().replace(/`[^`]*`/g, (span) => span.replace(/[^\w]+/g, "_")).split(/[^\w/.-]+/).filter((word) => word.length >= 3 && !STOP.has(word)));
 }
 function criteria(task: Task): string[] {
-  const section = /^#{2,3}\s+Acceptance criteria\s*$([\s\S]*?)(?=^#{1,3}\s|(?![\s\S]))/im.exec(task.body)?.[1] ?? "";
+  const section = acceptanceCriteriaSection(task.body) ?? "";
   return section.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*]|\d+\.)\s+(?:\[[ x]\]\s+)?/i, "").trim()).filter((line) => line.length > 0);
 }
 function jaccard(a: Set<string>, b: Set<string>): number {

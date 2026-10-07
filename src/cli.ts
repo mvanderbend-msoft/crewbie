@@ -19,6 +19,8 @@ import { latestCopilotVersion } from "./setup/copilot-version.js";
 import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning, requestPlanningRevision } from "./specification/planning.js";
+import { analyzePlanning } from "./specification/planning-analysis.js";
+import { planningCliCompletion } from "./setup/copilot-cli.js";
 import { prepareReview, publishReview } from "./execution/pr-review.js";
 import { handleFeatureFixComment } from "./execution/fix.js";
 import { releaseMergedPlan } from "./execution/planning-approval.js";
@@ -134,7 +136,7 @@ async function main(): Promise<void> {
       "dispatch-local": { type: "boolean" },
       watch: { type: "boolean" }, "timeout-seconds": { type: "string" }, "poll-seconds": { type: "string" },
       memory: { type: "string" }, topic: { type: "string", multiple: true },
-      records: { type: "string" }, collect: { type: "boolean" }, prepare: { type: "boolean" },
+      records: { type: "string" }, collect: { type: "boolean" }, prepare: { type: "boolean" }, analyze: { type: "boolean" },
       "pages-mode": { type: "string" },
       pr: { type: "string" },
       "feedback-file": { type: "string" },
@@ -147,6 +149,7 @@ async function main(): Promise<void> {
   if (values.help || positionals.length === 0) { output.text(HELP); return; }
   if (positionals.length !== 1 && !(positionals[0] === "test" && positionals.length === 2)) throw new Error("Choose exactly one command.");
   const command = positionals[0];
+  if (values.analyze && command !== "internal-plan") throw new Error("--analyze requires internal-plan.");
   if (command !== "init" && (values["code-graph"] || values["code-graph-bin"] !== undefined)) throw new Error("CodeGraph options require init.");
   if (command !== "init") output.heading(command!);
   if (values["review-loop"] && (command !== "publish" || values.batch || values.pr || values["dispatch-local"])) throw new Error("--review-loop requires publish and cannot be combined with batch/PR publication.");
@@ -156,6 +159,14 @@ async function main(): Promise<void> {
   const pollMs = integer(Number(values["poll-seconds"] ?? 30), "poll seconds", 1, 300) * 1000;
   if (command === "publish" && values.pr !== undefined && values.batch) throw new Error("Choose either batch publication or PR finalization, not both.");
   const root = resolve(values.path ?? ".");
+  // The analysis job has only downloaded context and Copilot-request permission; it never loads GitHub credentials.
+  if (command === "internal-plan" && values.analyze) {
+    if (values.prepare || values.apply) throw new Error("Choose exactly one of --prepare, --analyze or --apply for planning.");
+    const executable = string(process.env.CREWBIE_COPILOT_BIN, "CREWBIE_COPILOT_BIN");
+    const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+    output.text(await analyzePlanning(root, (prompt, model) => planningCliCompletion(executable, root, prompt, model), summaryPath ? { summaryPath } : {}));
+    return;
+  }
   if (command === "init") {
     await initCommand(root, values, { client: () => api(token()), report: output.text, latestCopilotVersion });
     return;
