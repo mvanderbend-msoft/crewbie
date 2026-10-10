@@ -56,6 +56,4 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: node -e "if (process.env.RELEASE_TAG !== 'v' + require('./package.json').version) throw new Error('Release tag must match package.json')"
       - name: Publish with trusted publishing
-        run: |
-          TAG=$(node -p "require('./package.json').version.includes('-') ? 'next' : 'latest'")
-          npm publish --access public --provenance --tag "$TAG"
+        run: npm publish --access public --provenance --tag latest
