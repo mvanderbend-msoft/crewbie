@@ -335,7 +335,14 @@ test("planning workflow is opt-in, label-gated and separates analysis from repos
   assert.equal(input.with.name, "${{ needs.prepare.outputs.input_artifact }}");
   const downloads = flow.jobs.publish.steps.filter((step) => step.uses?.startsWith("actions/download-artifact"));
   assert.deepEqual(downloads.map((step) => step.with.name), ["${{ needs.prepare.outputs.input_artifact }}", "${{ needs.analyze.outputs.output_artifact }}"]);
-  assert.doesNotMatch(file, /secrets\.|pull_request\.head|github\.event\.issue\.body|--allow-all/);
+  const preflight = flow.jobs.prepare.steps.find((step) => step.name === "Check execution credential before paid planning");
+  assert.equal(preflight.env.GH_TOKEN, "${{ secrets.CREWBIE_USER_TOKEN }}");
+  assert.match(preflight.run, /internal-execution-preflight/);
+  const secretSteps = Object.values(flow.jobs).flatMap((job) => job.steps)
+    .filter((step) => JSON.stringify(step).includes("secrets."));
+  assert.ok(secretSteps.length > 0);
+  assert.ok(secretSteps.every((step) => step.name?.startsWith("Check execution credential")), "User credentials stay in preflight steps.");
+  assert.doesNotMatch(file.replaceAll("${{ secrets.CREWBIE_USER_TOKEN }}", ""), /secrets\.|pull_request\.head|github\.event\.issue\.body|--allow-all/);
   for (const model of ["auto", "model\nready=true", "", "model;echo bad"]) {
     assert.throws(() => parseConfig(config({ planning: { enabled: true, model } })));
   }
