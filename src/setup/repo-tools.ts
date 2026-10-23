@@ -38,11 +38,11 @@ async function slice(root: string, path: string, start: number, bytes: number): 
  * search them. Limited to Git-visible files (gitignored and secret-looking files are never read), confined by
  * safePath (no escapes, symlinks or .git), bounded per call and per interview, and redacted.
  */
-export function repositoryTools(root: string, files: readonly string[]): RepoTool[] {
+export function repositoryTools(root: string, files: readonly string[], options: { budget?: number; exhausted?: string } = {}): RepoTool[] {
   const tracked = new Set(files);
-  let budget = READ_BUDGET;
+  let budget = options.budget ?? READ_BUDGET;
   const spend = (content: string) => {
-    if (budget <= 0) return "Read budget for this interview is spent; ask the human instead.";
+    if (budget <= 0) return options.exhausted ?? "Read budget for this interview is spent; ask the human instead.";
     const kept = content.slice(0, budget);
     budget -= kept.length;
     return redact(kept);
@@ -95,4 +95,16 @@ export function repositoryTools(root: string, files: readonly string[]): RepoToo
       },
     },
   ];
+}
+
+/** The repository tools, announcing each call ("Copilot reads src/App.tsx") so the human sees what the model inspects. */
+export function reportedTools(tools: RepoTool[], report: (text: string) => void): RepoTool[] {
+  return tools.map((tool) => ({
+    ...tool,
+    handler: async (args) => {
+      const target = typeof args.path === "string" ? args.path : typeof args.text === "string" ? `"${args.text}"` : typeof args.prefix === "string" && args.prefix ? args.prefix : "files";
+      report(`  Copilot ${tool.name === "repo_read_file" ? "reads" : tool.name === "repo_search" ? "searches" : "lists"} ${target.slice(0, 80)}`);
+      return tool.handler(args);
+    },
+  }));
 }

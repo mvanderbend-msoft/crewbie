@@ -1,6 +1,6 @@
 import { bounded, readJson, record, string, strings, slug, integer, safePath } from "./core.js";
 
-export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string }
+export interface Role { id: string; purpose: string; model: string; modelReason?: string; complexity?: "routine" | "standard" | "complex"; checks?: string[]; nonNegotiables?: string[]; contextPaths?: string[]; sourceAgent?: string; knowledge?: string[] }
 export const PLANNING_LABEL = "crewbie:ready-for-planning";
 export const RESTART_LABEL = "crewbie:restart";
 export const PLANNING_REPAIR_LIMIT = 2;
@@ -73,8 +73,8 @@ export function parseConfig(value: unknown): Config {
     const result = { id: slug(role.id, "role id"), purpose: string(role.purpose, "role purpose"), model: string(role.model, "role model", true) };
     if (result.model.trim().toLowerCase() === "auto") throw new Error("Choose an explicit approved model, not auto.");
     if (["coordinator", "improver"].includes(result.id)) throw new Error(`${result.id} is reserved for a framework role.`);
-    const guidance: Pick<Role, "checks" | "nonNegotiables" | "contextPaths"> = {};
-    for (const key of ["checks", "nonNegotiables", "contextPaths"] as const) {
+    const guidance: Pick<Role, "checks" | "nonNegotiables" | "contextPaths" | "knowledge"> = {};
+    for (const key of ["knowledge", "checks", "nonNegotiables", "contextPaths"] as const) {
       if (role[key] === undefined) continue;
       const entries = strings(role[key], `role ${key}`);
       if (entries.length > 10 || entries.some((entry) => !entry.trim())) throw new Error(`Role ${key} needs at most ten nonempty entries.`);

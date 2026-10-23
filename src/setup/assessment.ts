@@ -10,7 +10,7 @@ import { repositoryMap, type RepositoryMap } from "./repository-map.js";
 import type { CodeGraphEvidence } from "./code-graph.js";
 import { projectEvidence, type ProjectEvidence } from "./project-evidence.js";
 
-const SETUP_STEPS = ".github/workflows/copilot-setup-steps.yml";
+import { SETUP_STEPS } from "./setup-steps.js";
 export interface Assessment {
   schemaVersion: 1;
   findings: { area: string; status: "ready" | "gap" | "unknown"; evidence: string[]; detail: string }[];
@@ -50,7 +50,7 @@ export async function assess(root: string): Promise<Assessment> {
   ];
   const findings: Assessment["findings"] = [
     { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "No AI guidance yet. Propose global and path-scoped instructions grounded in the project description, manifests and CI." },
-    { area: "Decisions", status: existingConstitution ? "ready" : "gap", evidence: existingConstitution ? [existingConstitution] : [], detail: "Reuse the existing constitution." },
+    { area: "Decisions", status: existingConstitution ? "ready" : "gap", evidence: existingConstitution ? [existingConstitution] : [], detail: existingConstitution ? "Reuse the existing constitution." : "No constitution yet; a short one may be proposed for separate approval." },
     { area: "Cloud execution", status: "unknown", evidence: ci.slice(0, 5), detail: "Run doctor with a selected repository and specialist. Account permissions and model support require separate verification." },
     ci.includes(SETUP_STEPS)
       ? { area: "Agent environment", status: "ready", evidence: [SETUP_STEPS], detail: "Cloud agents start with the setup steps in this workflow." }

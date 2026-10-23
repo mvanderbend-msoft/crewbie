@@ -210,7 +210,7 @@ test("real SDK assessment survives local context-link repair and saves the revie
   for (const request of requests) {
     assert.match(request.path, /chat\/completions/);
     assert.equal(request.body.model, "gpt-4.1");
-    assert.equal(request.body.tools?.length ?? 0, 0);
+    assert.deepEqual((request.body.tools ?? []).map((tool) => tool.function?.name ?? tool.name).sort(), ["repo_list_files", "repo_read_file", "repo_search"]);
     assert.match(JSON.stringify(request.body.messages), /synthetic test/);
   }
   assert.equal(await realpath(dirname(directory)), await realpath(alias));

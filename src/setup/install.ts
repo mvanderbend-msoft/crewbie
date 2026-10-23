@@ -7,6 +7,7 @@ import { editableGuidance, validateInstructionScope } from "./instruction-qualit
 import { LEGACY_DECISIONS, SHARED_HOT, SHARED_INDEX } from "../memory/context.js";
 import { MCP_FILE, parseMcpServers, vscodeMcpConfig } from "./mcp.js";
 import { DESTINATION_FILE } from "./interview.js";
+import { parseSetupSteps, SETUP_STEPS } from "./setup-steps.js";
 
 async function hasPrTemplate(root: string): Promise<boolean> {
   for (const directory of ["", ".github", "docs"]) {
@@ -117,6 +118,9 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
   const servers = parseMcpServers(data.mcpServers);
   // Existing MCP configuration is the human's; proposals for it stay in the assessment for manual merging.
   if (servers.length && await optionalText(await safePath(root, MCP_FILE)) === null) files[MCP_FILE] = vscodeMcpConfig(servers);
+  // A reviewed environment workflow is created, never merged into one the human already has.
+  const steps = parseSetupSteps(data.setupSteps);
+  if (steps && await optionalText(await safePath(root, SETUP_STEPS)) === null) files[SETUP_STEPS] = steps;
   // The interview's map is the human's own product direction: installed with the team, never over an existing file.
   if (typeof data.destination === "string" && data.destination.trim() && await optionalText(await safePath(root, DESTINATION_FILE)) === null) {
     files[DESTINATION_FILE] = data.destination.endsWith("\n") ? data.destination : data.destination + "\n";

@@ -21,6 +21,8 @@ const MANIFEST = /(^|\/)(?:package\.json|Package\.swift|pyproject\.toml|setup\.p
 const XCODE_MANIFEST = /(^|\/)[^/]+\.(?:xcodeproj\/project\.pbxproj|xcworkspace\/contents\.xcworkspacedata)$/;
 const XCODE_CONTAINER = /(^|\/)[^/]+\.(?:xcodeproj|xcworkspace)(\/|$)/;
 const GENERATED = /^(?:\.crewbie\/|\.github\/agents\/crewbie-)/;
+/** Build output and installed dependencies are never committed, so their absence from the map proves nothing. */
+const BUILD_OUTPUT = /^(?:dist|build|out|coverage|node_modules|target|\.next|\.nuxt|\.svelte-kit|\.vercel|\.output)(?:\/|$)/;
 
 /** Xcode bundles describe the containing project directory, not a workspace inside the bundle. */
 function workspaceDirectory(path: string): string | undefined {
@@ -59,7 +61,7 @@ export function promptMap(map: RepositoryMap): { directories: string[]; director
   };
 }
 
-const REFERENCE = /(?<![\w/.:@~-])((?:\.{0,2}[\w@-][\w.@-]*\/)+(?:[\w.*@-]*[\w*])?\/?)(?![\w/(])/g;
+const REFERENCE = /(?<![\w/.:@~<-])((?:\.{0,2}[\w@-][\w.@-]*\/)+(?:[\w.*@-]*[\w*])?\/?)(?![\w/(:])/g;
 const PROSE = /^(?:and\/or|either\/or|input\/output|read\/write|yes\/no|on\/off|true\/false|client\/server|ci\/cd|i\/o|n\/a|w\/o|pass\/fail|get\/set|frontend\/backend|front-end\/back-end|pros\/cons|[a-z]+\/[a-z]+)$/i;
 
 /**
@@ -94,11 +96,21 @@ export function pathExists(map: RepositoryMap, reference: string): boolean {
   return files.some((file) => file.endsWith(`/${base}`) || file.includes(`/${base}/`));
 }
 
-/** Cited paths absent from the working tree, excluding files the proposal itself creates. */
+const base = (path: string) => path.replace(/\*.*$/, "").replace(/\/+$/, "");
+/** True when the path is, contains or lies inside one of the listed paths. */
+function covered(path: string, listed: string[]): boolean {
+  const cited = base(path);
+  return listed.some((entry) => {
+    const other = base(entry);
+    return other !== "" && cited !== "" && (other === cited || other.startsWith(`${cited}/`) || cited.startsWith(`${other}/`));
+  });
+}
+
+/** Cited paths absent from the working tree, excluding build output and paths the proposal creates or declares as planned. */
 export function missingPaths(map: RepositoryMap, text: string, created: string[] = []): string[] {
   if (map.truncated || !map.files) return [];
   const roots = new Set(map.directories.filter((dir) => !dir.includes("/")));
-  return pathReferences(text, roots).filter((path) => !GENERATED.test(path) && !created.includes(path.replace(/\/$/, "")) && !pathExists(map, path));
+  return pathReferences(text, roots).filter((path) => !GENERATED.test(path) && !BUILD_OUTPUT.test(path) && !covered(path, created) && !pathExists(map, path));
 }
 
 /** Workspaces that no role names by path or directory name. */

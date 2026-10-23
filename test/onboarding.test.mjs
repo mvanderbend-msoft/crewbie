@@ -260,7 +260,8 @@ test("unguided repositories get the adaptive Crewbie Compass interview that char
   assert.match(interview.prompts[2], /^Answer: Personal AI blog/);
   assert.match(interview.prompts[4], /^Accepted your recommendation: Vercel/);
   assert.match(prompt, /# Destination[\s\S]*Google page 1[\s\S]*## Decisions so far[\s\S]*\*\*Authoring\*\*: Admin portal/);
-  assert.match(prompt, /saved as docs\/destination\.md/);
+  assert.match(prompt, /Setup creates docs\/destination\.md/);
+      assert.match(prompt, /treat it as existing and cite it/);
   assert.match(prompt, /"build": "vite build"/);
   assert.doesNotMatch(prompt, /SOURCE-MUST-NOT-BE-SENT/);
   const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
@@ -647,6 +648,74 @@ test("existing constitution remains referenced in team-only setup", async (t) =>
   const proposal = parseSetupReview(JSON.stringify(response(report)), report, "Catalogue", "chosen-model");
   assert.equal(selectGuidance(proposal, false).config.constitution, ".specify/memory/constitution.md");
   assert.throws(() => parseSetupReview(JSON.stringify(response(report, { constitutionText: "Rewrite policy" })), report, "", "chosen-model"), /Reuse the existing constitution/);
+});
+
+test("a constitution edit finding is satisfied by constitutionText instead of being reported as missing text", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};" });
+  const report = await assess(root);
+  assert.match(report.findings.find((finding) => finding.area === "Decisions").detail, /No constitution yet/);
+  const value = response(report, { constitutionText: "Humans approve scope and merges." });
+  Object.assign(value.findings.find((finding) => finding.area === "constitution"), { action: "edit", recommendation: "Add a short constitution." });
+  const proposal = parseSetupReview(JSON.stringify(value), report, "Catalogue", "chosen-model");
+  const finding = proposal.review.findings.find((item) => item.area === "constitution");
+  assert.equal(finding.action, "edit");
+  assert.deepEqual(finding.editPaths, [".crewbie/constitution.md"]);
+  assert.equal(finding.deferReason, undefined);
+  assert.doesNotMatch(renderSetupReview(proposal), /supplied no replacement text/);
+});
+
+test("a new-MCP edit finding is satisfied by mcpServers, and paths declared as planned in assumptions are not warned about", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};" });
+  const report = await assess(root);
+  const value = response(report, {
+    mcpServers: [{ name: "context7", purpose: "Library docs.", type: "local", command: "npx", args: ["-y", "@upstash/context7-mcp@1"], env: [], tools: ["*"], cloud: true }],
+    assumptions: ["The OAuth function will live in `api/` and the admin UI in `public/admin`."],
+  });
+  Object.assign(value.findings.find((item) => item.area === "mcp" && item.path === null), { action: "edit", recommendation: "Add Context7." });
+  value.roles[0].purpose = "Own `src/catalogue.ts`, the planned `api/oauth.ts` and `public/admin/index.html`; never commit `dist/`.";
+  const proposal = parseSetupReview(JSON.stringify(value), report, "Catalogue", "chosen-model");
+  const finding = proposal.review.findings.find((item) => item.area === "mcp" && item.path === null);
+  assert.equal(finding.action, "edit");
+  assert.equal(finding.deferReason, undefined);
+  assert.doesNotMatch(renderSetupReview(proposal), /supplied no replacement text/);
+  assert.doesNotMatch((proposal.review.warnings ?? []).join("\n"), /cites paths missing/);
+});
+
+test("roles carry technical working knowledge into their charters and the setup prompt shapes a small, non-overlapping team", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};" });
+  const report = await assess(root);
+  const value = response(report);
+  value.roles[0].knowledge = ["src/catalogue.ts exports the catalogue; extend it rather than adding a second source."];
+  const proposal = parseSetupReview(JSON.stringify(value), report, "Catalogue", "chosen-model");
+  const charter = profile(proposal.config.roles[0], proposal.config);
+  assert.match(charter, /## Working knowledge\n- src\/catalogue\.ts exports the catalogue/);
+  const prompt = setupPrompt(report, "A blog. No external services.", [], { tools: true });
+  assert.match(prompt, /durable areas of the codebase, not the current milestone/);
+  assert.match(prompt, /Ownership must not overlap/);
+  assert.match(prompt, /Owners write and update the tests for their own changes/);
+  assert.match(prompt, /smallest set of roles/);
+  assert.match(prompt, /they do not rule out developer tooling such as MCP servers/);
+  assert.match(prompt, /propose setupSteps/);
+  assert.doesNotMatch(setupPrompt(report, "A blog.", []), /repo_\* tools/);
+});
+
+test("a proposed copilot-setup-steps workflow is validated, reviewed, created only when absent and skipped with guidance", async (t) => {
+  const steps = "name: Copilot setup steps\non: workflow_dispatch\njobs:\n  copilot-setup-steps:\n    runs-on: ubuntu-latest\n    permissions:\n      contents: read\n    steps:\n      - uses: actions/checkout@v5\n      - uses: actions/setup-node@v5\n        with:\n          node-version: 24\n          cache: npm\n      - run: npm ci\n";
+  const root = await fixture(t, { "package.json": "{\"scripts\":{\"build\":\"vite build\"}}" });
+  const report = await assess(root);
+  const proposal = parseSetupReview(JSON.stringify(response(report, { setupSteps: steps })), report, "Catalogue", "chosen-model");
+  assert.equal(proposal.setupSteps, steps);
+  assert.match(renderSetupReview(proposal), /AGENT ENVIRONMENT \| \.github\/workflows\/copilot-setup-steps\.yml/);
+  assert.equal((await installation(root, proposal)).find((change) => change.path === ".github/workflows/copilot-setup-steps.yml")?.after, steps);
+  assert.ok(!(await installation(root, selectGuidance(proposal, false))).some((change) => change.path === ".github/workflows/copilot-setup-steps.yml"));
+  for (const [bad, error] of [
+    [steps.replace("npm ci", "npm ci --token ${{ secrets.NPM }}"), /must not reference secrets/],
+    [steps.replace("contents: read", "contents: write"), /read-only permissions/],
+    [steps.replace("copilot-setup-steps:", "setup:"), /exactly one job named copilot-setup-steps/],
+  ]) assert.throws(() => parseSetupReview(JSON.stringify(response(report, { setupSteps: bad })), report, "Catalogue", "chosen-model"), error);
+  const existing = await fixture(t, { ".github/workflows/copilot-setup-steps.yml": "on: workflow_dispatch\n" });
+  const present = await assess(existing);
+  assert.equal(parseSetupReview(JSON.stringify(response(present, { setupSteps: steps })), present, "Catalogue", "chosen-model").setupSteps, undefined);
 });
 
 function githubLabels() {

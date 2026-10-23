@@ -68,7 +68,7 @@ ${role.purpose}
 
 ${Object.hasOwn(duties, role.id) ? duties[role.id] : ""}
 
-${role.checks?.length ? `## Repository checks\n${role.checks.map((check) => `- ${check}`).join("\n")}\n` : ""}${role.nonNegotiables?.length ? `## Repository non-negotiables\n${role.nonNegotiables.map((rule) => `- ${rule}`).join("\n")}\n` : ""}
+${role.knowledge?.length ? `## Working knowledge\n${role.knowledge.map((fact) => `- ${fact}`).join("\n")}\n\n` : ""}${role.checks?.length ? `## Repository checks\n${role.checks.map((check) => `- ${check}`).join("\n")}\n` : ""}${role.nonNegotiables?.length ? `## Repository non-negotiables\n${role.nonNegotiables.map((rule) => `- ${rule}`).join("\n")}\n` : ""}
 
 ${MANAGED_START}
 ## Context and handoff

@@ -4,7 +4,7 @@ import type { Converse } from "./copilot.js";
 import { containsSecret, redact } from "./inventory.js";
 import { detectedStack } from "./project-evidence.js";
 import { promptMap } from "./repository-map.js";
-import { repositoryTools, type RepoTool } from "./repo-tools.js";
+import { reportedTools, repositoryTools, type RepoTool } from "./repo-tools.js";
 import type { SetupPrompts } from "./terminal.js";
 
 /** Where the charted destination is saved; agents and later init runs read it instead of re-interviewing. */
@@ -173,14 +173,7 @@ export async function destinationInterview(
   const answered: { topic: string; decision: string }[] = [];
   const overview = await projectOverview(root, assessment);
   const files = assessment.repository?.files ?? [];
-  const tools: RepoTool[] = repositoryTools(root, files).map((tool) => ({
-    ...tool,
-    handler: async (args) => {
-      const target = typeof args.path === "string" ? args.path : typeof args.text === "string" ? `"${args.text}"` : typeof args.prefix === "string" && args.prefix ? args.prefix : "files";
-      io.report(`  Copilot ${tool.name === "repo_read_file" ? "reads" : tool.name === "repo_search" ? "searches" : "lists"} ${target.slice(0, 80)}`);
-      return tool.handler(args);
-    },
-  }));
+  const tools: RepoTool[] = reportedTools(repositoryTools(root, files), io.report);
   io.report("  Copilot is exploring the repository...");
   return io.converse(model, async (send) => {
     let output = await send(brief(assessment, overview, files.length > 0));

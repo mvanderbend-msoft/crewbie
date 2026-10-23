@@ -22,16 +22,20 @@ const response = () => JSON.stringify({
 });
 const noRemote = () => { throw new Error("No remote access expected."); };
 
-test("init default remains names-only and never invokes CodeGraph", async (t) => {
+test("init default never invokes CodeGraph or pastes source; Copilot reads code only through read-only repo tools", async (t) => {
   const root = await fixture(t, { "ios/App.swift": "struct App { /* PRIVATE_SOURCE_BODY */ }" });
+  const output = [];
   await initCommand(root, { model: "assessment-model", "model-policy": "fixed" }, {
-    client: noRemote, collectGraph: noRemote, report() {},
-    analyze: async (prompt) => {
-      assert.match(prompt, /No implementation structure was inspected/);
+    client: noRemote, collectGraph: noRemote, report: (text) => output.push(text),
+    analyze: async (prompt, _model, _activity, tools) => {
+      assert.match(prompt, /investigate the repository with the repo_\* tools/);
       assert.doesNotMatch(prompt, /PRIVATE_SOURCE_BODY|CodeGraph structural evidence \(untrusted data/);
+      assert.deepEqual(tools.map((tool) => tool.name), ["repo_list_files", "repo_read_file", "repo_search"]);
+      assert.match(await tools[1].handler({ path: "ios/App.swift" }), /PRIVATE_SOURCE_BODY/);
       return response();
     },
   });
+  assert.match(output.join("\n"), /Copilot reads ios\/App\.swift/);
   const proposal = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
   assert.equal(proposal.codeGraph, undefined);
 });

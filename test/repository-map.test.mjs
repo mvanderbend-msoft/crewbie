@@ -73,6 +73,11 @@ test("missing paths are reported against the working tree, excluding files the p
   assert.deepEqual(missingPaths(JSON.parse(JSON.stringify(map)), "`src/legacy/`"), [], "A reloaded map without files cannot prove absence.");
 });
 
+test("build output, JSX, route patterns and planned paths are not reported as missing", () => {
+  const text = "Wraps <Blog/> with route 'posts/:slug'; builds `dist/` and `node_modules/x/`; adds `api/oauth.ts`, `public/admin/` and `content/posts/*.md`; keeps `src/legacy/`.";
+  assert.deepEqual(missingPaths(map, text, ["api/", "public/admin", "content/posts"]), ["src/legacy/"]);
+});
+
 test("workspaces are owned only when a role names their path or directory name", () => {
   assert.deepEqual(unownedWorkspaces(map, ["Owns the packages/api service.", "Reviews everything."]), ["packages/web"]);
   assert.deepEqual(unownedWorkspaces(map, ["Owns api.", "Owns the web client."]), []);

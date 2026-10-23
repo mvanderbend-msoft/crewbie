@@ -8,6 +8,7 @@ import { assess } from "./assessment.js";
 import { applyInstallation, installation, setupConfiguration } from "./install.js";
 import { needsInterview, proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
 import { DESTINATION_FILE, destinationInterview, renderDestination } from "./interview.js";
+import { reportedTools, repositoryTools } from "./repo-tools.js";
 import { cloudMcpConfig, cloudMcpInstructions, parseMcpServers } from "./mcp.js";
 import { converseWithCopilot, explicitModel, listCopilotModels, transcriptConverse, type Converse, type ModelChoice } from "./copilot.js";
 import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
@@ -56,7 +57,7 @@ export async function installSetup(root: string, value: unknown, options: { appl
   const config = setupConfiguration(raw);
   const existingConstitution = config.constitution && await optionalText(await safePath(root, config.constitution)) !== null ? config.constitution : null;
   const proposal = options.guidance === "apply" ? { ...raw, config } : {
-    ...raw, instructions: [], constitutionText: null, mcpServers: [],
+    ...raw, instructions: [], constitutionText: null, mcpServers: [], setupSteps: null,
     config: { ...config, constitution: raw.constitutionText ? existingConstitution : config.constitution },
   };
   const kept: string[] = [];
@@ -110,7 +111,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
       if (!options.json) report(`Readable assessment: ${markdown}`);
       const hasGuidance = (Array.isArray(proposal.instructions) && proposal.instructions.length > 0) || proposal.constitutionText
-        || (Array.isArray(proposal.mcpServers) && proposal.mcpServers.length > 0);
+        || (Array.isArray(proposal.mcpServers) && proposal.mcpServers.length > 0) || typeof proposal.setupSteps === "string";
       if (!hasGuidance && !options.json) report("No existing guidance edits proposed; recommendations in the assessment are advisory only.");
       let guidance = options.guidance;
       if (options.apply && hasGuidance && !guidance && select) guidance = await select("Apply proposed guidance and constitution too?", [
@@ -185,16 +186,18 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       } else if (ask && needsInterview(assessment)) {
         const converse = io.converse ?? (io.analyze ? transcriptConverse(io.analyze) : converseWithCopilot);
         destination = renderDestination(await destinationInterview(root, assessment, model, { converse, ask, select, report }));
-        description = `${destination}\n(This map is saved as ${DESTINATION_FILE}. Global guidance may point agents to it for product direction; do not duplicate it.)`;
+        description = `${destination}\n(Setup creates ${DESTINATION_FILE} with exactly this map when the proposal is installed.)`;
       }
     }
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield") {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
-    report(`\n1. Assess\n  Model: ${model}\n  ${assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata, plus manifest summaries and CI workflows; application source is not read, only file names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
+    const files = assessment.repository?.files ?? [];
+    const tools = files.length ? reportedTools(repositoryTools(root, files, { budget: 250_000, exhausted: "Read budget for this assessment is spent; propose from what you have read and state the remaining uncertainty." }), report) : undefined;
+    report(`\n1. Assess\n  Model: ${model}\n  ${tools ? "Reviewing instructions, agents, constitution and MCP metadata, manifests and CI workflows. Copilot reads the code it needs with read-only tools (tracked text files only, never secrets or .gitignored files) so the team and guidance name real files and patterns." : assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata, plus manifest summaries and CI workflows; application source is not read, only file names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
     const propose = async () => {
       const result = await proposeSetup(assessment, description, model, {
-        ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
+        ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), ...(tools ? { tools } : {}), report,
         models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
       });
       return destination ? { ...result, destination } : result;
@@ -240,7 +243,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     }
     const choices = [
       { value: "team", name: "Team", description: "Adopt/create the proposed agents; leave existing guidance unchanged." },
-      { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}${proposal.mcpServers?.length ? ` and ${proposal.mcpServers.length} MCP servers` : ""}.` },
+      { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}${proposal.mcpServers?.length ? ` and ${proposal.mcpServers.length} MCP servers` : ""}${proposal.setupSteps ? " and the agent setup workflow" : ""}.` },
       { value: "save", name: "Save", description: "Keep the assessment and proposal for later. No installation or GitHub changes." },
     ];
     const choice = select ? await select("Install this proposal?", choices, "save")

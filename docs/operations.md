@@ -99,7 +99,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.59 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.60 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -273,8 +273,15 @@ including archives, the constitution and sanitized MCP metadata) plus bounded,
 redacted build evidence: package manifest summaries (package manager, scripts,
 dependency names and versions, engines), other root manifests, non-Crewbie
 `.github/workflows/*.yml` files and root file names (from alpha.55). This lets
-the proposed `## Commands` match what CI runs. Application source, READMEs and
-ADRs are not sent; manifests and workflows are never edited or executed.
+the proposed `## Commands` match what CI runs. From alpha.60 the analysis model
+also reads application code itself through the same read-only `repo_*` tools as
+Crewbie Compass (250K characters per analysis), so each role carries
+**Working knowledge**: concrete facts about its files, conventions and commands,
+written into its charter. The prompt shapes the smallest team that owns durable,
+non-overlapping code areas (typically 2 to 4 roles for a small single-package
+repository); owners write the tests for their own changes. Product constraints
+such as "no external services" do not rule out agent tooling or MCP servers.
+Manifests and workflows are never edited or executed.
 Proposed edits outside the
 supported guidance paths are shown as deferred recommendations rather than
 failing installation. Text inspection has a 256 KB total/64 KB per-file
@@ -295,6 +302,16 @@ exist, using password inputs for secrets, and prints a Copilot cloud agent
 snippet to paste into **Settings > Copilot > MCP servers** with `COPILOT_MCP_*`
 Agents secrets. GitHub and Playwright are never duplicated for the cloud agent
 because they are enabled by default.
+
+When `.github/workflows/copilot-setup-steps.yml` is missing, the proposal also
+drafts one (shown under **AGENT ENVIRONMENT**) that installs dependencies before
+each agent session. It must be a single `copilot-setup-steps` job with no
+secrets, no write permissions and no `pull_request_target`/`workflow_run`
+triggers; Crewbie writes it with the guidance choice, only when absent.
+
+Repository checks ignore build output (`dist/`, `node_modules/` and similar),
+JSX tags and route patterns, and paths the proposal creates or names as planned
+in its **Assumptions**.
 
 From alpha.44 the assessment and hosted planning also receive a names-only
 repository map: directories to depth 4 and workspaces (directories with their own
@@ -467,7 +484,8 @@ Questions are multiple choice (2 to 4 options, recommended one preselected, plus
 "Type your own answer", Skip and Done) or open with a recommended answer. It
 stops by 30 questions. The resulting map (destination, notes,
 decisions, not yet specified, out of scope) is shown in the review and
-written to `docs/destination.md` on apply, only when that file is absent. Later
+written to `docs/destination.md` on apply, only when that file is absent.
+Guidance cites that file instead of repeating it. Later
 runs reuse an existing `docs/destination.md` instead of interviewing again.
 `--description` skips the interview. If the model returns invalid interview
 output, init builds the map from the answers collected so far and continues.

@@ -1,3 +1,4 @@
+import { SETUP_STEPS } from "./setup-steps.js";
 import { agentArchivePath, DEFAULT_EXECUTION_LIMITS } from "../config.js";
 import { json, record, string } from "../core.js";
 import { LEGACY_DECISIONS } from "../memory/context.js";
@@ -78,6 +79,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     lines.push(`### ${role.id}`, "");
     if (role.sourceAgent) lines.push(`Original: \`${role.sourceAgent}\` -> \`.github/agents/crewbie-${role.id}.agent.md\`.`,
       `Archive: \`${agentArchivePath(role.sourceAgent)}\` (backup provenance). The active charter contains the complete original instructions, with tool restrictions and persona preserved; only lines that just point to guidance Copilot loads automatically are left out.`, "");
+    if (role.knowledge?.length) lines.push("**Working knowledge**", ...role.knowledge.map((fact) => `- ${fact}`), "");
     if (role.checks?.length) lines.push("**Checks**", ...role.checks.map((check) => `- ${check}`), "");
     else if (!role.sourceAgent) lines.push("**Checks:** none. Crewbie no longer ships generic advice; add the repository's own observable checks (commands, fixtures, invariants a model cannot infer from the code) to this role in `.crewbie/config.json`.", "");
     if (role.modelReason) lines.push(`**Model proposal (${role.complexity ?? "unclassified"}):** ${role.modelReason}`, "");
@@ -102,6 +104,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     typeof instruction.reason === "string" ? instruction.reason : "Reviewed replacement text.", "",
     block(string(instruction.content, "guidance content")), "");
   if (typeof data.constitutionText === "string") lines.push("### Proposed constitution", "", block(data.constitutionText), "");
+  if (typeof data.setupSteps === "string") lines.push(`### ${SETUP_STEPS}`, "", "Runs before each Copilot cloud agent session so agents start with dependencies installed. Created only when absent; applied with the guidance choice.", "", block(data.setupSteps.trimEnd(), "yaml"), "");
   const servers = parseMcpServers(data.mcpServers);
   if (servers.length) {
     const cloud = cloudMcpConfig(servers);

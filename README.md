@@ -122,7 +122,7 @@ Never put the token in a file, an issue or a command argument. See
 - **Save tokens with a setup workflow.** Every step an agent takes resends its
   whole context. Add `.github/workflows/copilot-setup-steps.yml` to install your
   dependencies before the agent starts; otherwise each session spends turns
-  installing them. `crewbie init` tells you when it is missing.
+  installing them. `crewbie init` proposes one when it is missing.
 - Default limits: 2 agents at the same time, 3 tries per task and 20 launches
   per plan. You can change these in `.crewbie/config.json`. They limit launches,
   not money.
@@ -144,7 +144,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.59/crewbie-cli-0.1.0-alpha.59.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.60/crewbie-cli-0.1.0-alpha.60.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download.
