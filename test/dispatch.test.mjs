@@ -654,6 +654,12 @@ test("a finished task PR merges only after its own checks and trusted acceptance
   assert.match(work[0].reason, /requested changes on aaaaaaa\. Crewbie asks crewbie-developer to fix it when a session slot frees \(1\/1\)/, "Task #3 holds the only slot.");
   assert.equal(fixture.continuations.length, 0);
   const roomy = reviewing({ maxActive: 2 });
+  fixture.probeStatus = 403;
+  work = await dispatch(fixture.client, roomy);
+  assert.match(work[0].reason, /cannot ask crewbie-developer for a fix: CREWBIE_USER_TOKEN cannot create agent tasks \(HTTP 403\)\. Grant it Repository permissions → Agent tasks: read and write/);
+  assert.equal(fixture.continuations.length, 0);
+  assert.ok(!fixture.prComments[101]?.some((comment) => /crewbie-task-fix/.test(comment.body)), "A credential that cannot create tasks gets no fix marker, so a later dispatch retries.");
+  delete fixture.probeStatus;
   work = await dispatch(fixture.client, roomy);
   assert.match(work[0].reason, /requested changes on aaaaaaa\. Crewbie asked crewbie-developer to fix it on this PR \(attempt 2 of 3\)/);
   assert.equal(work[0].state, "running");

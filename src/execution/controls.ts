@@ -235,18 +235,21 @@ const PROBE_BRANCH = "crewbie/model-check-never-exists";
  * model before the base branch, so a nonexistent branch answers without starting a session (it leaves a failed task).
  */
 export async function cloudAgentAccepts(client: GitHubApi, repository: string, model: string): Promise<boolean> {
+  const probe = await probeCloudAgent(client, repository, model);
+  // Assignment-only credentials cannot create tasks; an unverifiable model must not block launches that would work.
+  if (probe.forbidden) console.warn(`Crewbie: could not verify that the cloud agent accepts ${model} (the credential cannot create agent tasks; grant Agent tasks read and write to enable the check). Launching without the check. ${probe.forbidden}`);
+  return probe.accepted;
+}
+/** Probes the tasks API with a nonexistent branch: 400 rejects the model, 412 accepts it, 403 means the credential cannot create agent tasks. */
+export async function probeCloudAgent(client: GitHubApi, repository: string, model: string): Promise<{ accepted: boolean; forbidden?: string }> {
   try {
     await client.request("POST", `/agents/repos/${repository}/tasks`, {
       model, prompt: "Crewbie model availability check; never runs.", base_ref: PROBE_BRANCH, create_pull_request: false,
     });
   } catch (error) {
-    if (error instanceof GitHubError && error.status === 400) return false;
-    if (error instanceof GitHubError && error.status === 412) return true;
-    // Assignment-only credentials cannot create tasks; an unverifiable model must not block launches that would work.
-    if (error instanceof GitHubError && error.status === 403) {
-      console.warn(`Crewbie: could not verify that the cloud agent accepts ${model} (the credential cannot create agent tasks; grant Agent tasks read and write to enable the check). Launching without the check. ${error.message}`);
-      return true;
-    }
+    if (error instanceof GitHubError && error.status === 400) return { accepted: false };
+    if (error instanceof GitHubError && error.status === 412) return { accepted: true };
+    if (error instanceof GitHubError && error.status === 403) return { accepted: true, forbidden: error.message };
     throw error;
   }
   throw new Error(`The cloud-agent model check for ${model} unexpectedly created a task; inspect the Agents tab.`);

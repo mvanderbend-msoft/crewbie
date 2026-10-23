@@ -5,7 +5,7 @@ import { integer, record, string } from "../core.js";
 import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { setStatus } from "../tracking/issues.js";
 import { cloudTasks, pullTaskIds } from "../tracking/native.js";
-import { checkLaunchModels, launchAllowance, reserveLaunch, type DiscoverModels } from "./controls.js";
+import { checkLaunchModels, launchAllowance, modelRejection, probeCloudAgent, reserveLaunch, type DiscoverModels } from "./controls.js";
 import { parseFindings, type Finding, type TrustedReview } from "./pr-review.js";
 import type { Work } from "./dispatch.js";
 
@@ -62,8 +62,13 @@ export async function requestTaskFix(client: GitHubApi, config: Config, item: Wo
   if (context.active >= config.maxActive) return `${lead}. Crewbie asks crewbie-${owner} to fix it when a session slot frees (${context.active}/${config.maxActive}).`;
   const allowance = await launchAllowance(client, config, item.metadata, issue);
   if (allowance.blocked) return `${lead}. Crewbie cannot ask for a fix: ${allowance.blocked} Push fixes yourself or merge manually.`;
-  try { await checkLaunchModels(await context.discoverModels(), [item.metadata.task], config, client); }
-  catch (error) { return `${lead}. Crewbie cannot ask for a fix: ${error instanceof Error ? error.message : "model check failed"}`; }
+  try {
+    await checkLaunchModels(await context.discoverModels(), [item.metadata.task], config);
+    // Fix sessions use the tasks API, unlike issue assignment; probe before the marker and reservation so a missing permission costs nothing and is retried.
+    const probe = await probeCloudAgent(client, config.repository, model);
+    if (probe.forbidden) return `${lead}. Crewbie cannot ask crewbie-${owner} for a fix: CREWBIE_USER_TOKEN cannot create agent tasks (HTTP 403). Grant it Repository permissions → Agent tasks: read and write; the next dispatch then asks for the fix. Or push fixes yourself.`;
+    if (!probe.accepted) return `${lead}. Crewbie cannot ask for a fix: ${modelRejection(model, owner)}`;
+  } catch (error) { return `${lead}. Crewbie cannot ask for a fix: ${error instanceof Error ? error.message : "model check failed"}`; }
   await context.verify();
   const snapshot = await cloudTasks(client, config.repository);
   if (snapshot.warning) return `${lead}. Crewbie cannot ask for a fix: ${snapshot.warning}`;

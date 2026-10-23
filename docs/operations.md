@@ -17,8 +17,10 @@ Do not print tokens, put them in command arguments, or commit them.
 For a repository-restricted fine-grained PAT, issue assignment requires Metadata
 read and Actions, Contents, Issues and Pull requests read/write. Crewbie also
 needs **Agent tasks: read** to correlate sessions and release completed capacity;
-assignment permissions alone do not grant telemetry access. The optional
-same-PR correction loop needs **Agent tasks: read/write**. See GitHub's
+assignment permissions alone do not grant telemetry access. The same-PR
+correction loop, which asks the specialist to fix a changes-requested task
+review, needs **Agent tasks: read/write**; without it dispatch reports the
+missing permission on the task and retries once it is granted. See GitHub's
 [Agent Tasks permissions](https://docs.github.com/en/rest/agent-tasks/agent-tasks).
 
 The same personally owned fine-grained PAT also needs **Account permissions →
@@ -112,7 +114,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.72 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.73 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:

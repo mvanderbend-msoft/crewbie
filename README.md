@@ -117,8 +117,8 @@ Do this once per repository. `crewbie init` creates the labels and the
 For `CREWBIE_USER_TOKEN`, create a fine-grained personal access token for this
 repository, owned by a user with write access, with:
 
-- **Repository permissions, read:** Metadata, Agent tasks
-- **Repository permissions, read and write:** Actions, Contents, Issues, Pull requests
+- **Repository permissions, read:** Metadata
+- **Repository permissions, read and write:** Actions, Agent tasks, Contents, Issues, Pull requests
 - **Account permissions, read:** Copilot Requests (select the **Account** tab, then **Add permissions**)
 
 The token's resource owner must be your personal account. Copilot Requests is
@@ -166,7 +166,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.72/crewbie-cli-0.1.0-alpha.72.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.73/crewbie-cli-0.1.0-alpha.73.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download. Run
