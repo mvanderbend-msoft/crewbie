@@ -53,10 +53,11 @@ function existingGuidance(assessment: Assessment): string[] {
   return [...assessment.inventory.files.filter((file) => file.kind !== "archive").map((file) => file.path), ...assessment.inventory.mcp.map((file) => file.path)];
 }
 
-function brief(assessment: Assessment, overview: Record<string, unknown>, explore: boolean): string {
+function brief(assessment: Assessment, overview: Record<string, unknown>, explore: boolean, previous?: string): string {
   const guidance = existingGuidance(assessment);
   const evidence = {
     existingGuidance: guidance,
+    ...(previous ? { existingProjectContext: redact(previous.slice(0, 16_000)) } : {}),
     detectedStack: detectedStack(assessment.project) || null,
     manifests: (assessment.project?.manifests ?? []).map(({ path, packageManager, scripts, dependencies }) => ({ path, packageManager, scripts, dependencies })),
     ciWorkflows: (assessment.project?.workflows ?? []).map((workflow) => workflow.path),
@@ -66,7 +67,8 @@ function brief(assessment: Assessment, overview: Record<string, unknown>, explor
   };
   return `Run the Crewbie Compass interview so an AI coding crew can be set up for this repository.
 ${guidance.length ? `The repository already has AI guidance (evidence.existingGuidance).${explore ? " Read it with repo_read_file before your first question." : ""} Never re-ask what it already settles; focus on what it leaves unclear and where it is outdated, missing or conflicting.` : "The repository has no AI guidance yet."} Your map becomes ${DESTINATION_FILE} and grounds the team, instructions and MCP servers.
-
+${previous ? `${DESTINATION_FILE} already exists (evidence.existingProjectContext) and the human chose to revisit it. It is your starting point: your FIRST question summarises what it says about the project, users and constraints and asks whether that still holds. Keep what still holds without re-asking it. Drop milestones, roadmaps, feature plans and task lists; they belong in issues. Ask only about what is missing, outdated or contradicted by the code. The final map is a complete replacement for the file.
+` : ""}
 0. Dig into the repository first, like a new teammate would.${explore ? " Use repo_list_files, repo_read_file and repo_search: read the README, entry points, routes and pages, content and data folders, config (for example vercel.json, index.html), tests and CI." : ""} Work out what this project is, for whom, what already exists and how far along it is. Your FIRST question states that reading as the recommended answer in an open question ("options": []), for example "This looks like <what> for <whom>; <state>. Is that right, or what is it?". If the evidence is thin, say so and recommend your best reading.
 1. Understand the project: building on the confirmed reading, sharpen what the product is, who uses it and what matters most to them, until it is unambiguous. This interview is about understanding the project and its constraints, not planning work: do not ask about milestones, roadmaps, next features, task order or acceptance criteria; those belong in issues. Ask about future direction at most once, and only when it changes which expertise the crew needs (for example payments or authentication arriving).
 The human's words are authoritative: never reframe the product as another category (for example a blog is not a portfolio), and never re-ask what an answer already settled.
@@ -174,15 +176,16 @@ async function answerQuestion(
 export async function destinationInterview(
   root: string, assessment: Assessment, model: string,
   io: { converse: Converse; ask: (question: string) => Promise<string>; select?: SetupPrompts["select"] | undefined; report: (text: string) => void },
+  previous?: string,
 ): Promise<DestinationMap> {
-  io.report(`\nCrewbie Compass\n  ${existingGuidance(assessment).length ? "First pin down the project and its constraints; existing guidance is read, not re-asked." : "No AI guidance yet, so first pin down the project and its constraints."} Copilot explores the repository (read-only: tracked text files, never secrets or .gitignored files), then asks one\n  question at a time, starting with its reading of the project and digging further before each question.\n  Enter accepts the recommendation; you can also type your own answer, skip (Copilot assumes) or finish. At most ${INTERVIEW_QUESTIONS} questions; each turn is a small AI request.\n  The result is saved as ${DESTINATION_FILE} when you install.\n`);
+  io.report(`\nCrewbie Compass\n  ${previous ? `Revisiting ${DESTINATION_FILE}: Copilot confirms what still holds and asks only about gaps or outdated parts.` : existingGuidance(assessment).length ? "First pin down the project and its constraints; existing guidance is read, not re-asked." : "No AI guidance yet, so first pin down the project and its constraints."} Copilot explores the repository (read-only: tracked text files, never secrets or .gitignored files), then asks one\n  question at a time, starting with its reading of the project and digging further before each question.\n  Enter accepts the recommendation; you can also type your own answer, skip (Copilot assumes) or finish. At most ${INTERVIEW_QUESTIONS} questions; each turn is a small AI request.\n  The result ${previous ? "replaces" : "is saved as"} ${DESTINATION_FILE} when you install.\n`);
   const answered: { topic: string; decision: string }[] = [];
   const overview = await projectOverview(root, assessment);
   const files = assessment.repository?.files ?? [];
   const tools: RepoTool[] = reportedTools(repositoryTools(root, files), io.report);
   io.report("  Copilot is exploring the repository...");
   return io.converse(model, async (send) => {
-    let output = await send(brief(assessment, overview, files.length > 0));
+    let output = await send(brief(assessment, overview, files.length > 0, previous));
     let repairs = 0, asked = 0, finishing = false;
     while (true) {
       let turn: Turn;

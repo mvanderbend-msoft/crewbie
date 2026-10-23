@@ -181,15 +181,24 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (options["specialist-model"]) explicitModel(options["specialist-model"]);
     let description = options.description ?? "";
     let destination: string | undefined;
+    let destinationBeforeHash: string | undefined;
     if (!description.trim()) {
       const charted = await optionalText(await safePath(root, DESTINATION_FILE));
-      if (charted?.trim()) {
+      const revisit = charted?.trim() && ask ? select
+        ? await select(`${DESTINATION_FILE} already describes the project. Use it as is?`, [
+          { value: "keep", name: "Keep it", description: "Use the file as the project context; no interview" },
+          { value: "revisit", name: "Revisit with Crewbie Compass", description: "Confirm what still holds and update gaps or outdated parts; the new version is reviewed before it replaces the file" },
+        ], "keep") === "revisit"
+        : /^(r|revisit)$/i.test((await ask(`${DESTINATION_FILE} already describes the project. Press Enter to keep it, or type "revisit" to update it with Crewbie Compass.`)).trim())
+        : false;
+      if (charted?.trim() && !revisit) {
         description = `${charted.slice(0, 16_000)}\n(From ${DESTINATION_FILE}.)`;
-        report(`\nUsing ${DESTINATION_FILE} as the project destination; edit it or pass --description to change direction.`);
+        report(`\nUsing ${DESTINATION_FILE} as the project context; edit it, revisit it in interactive init, or pass --description to override it.`);
       } else if (ask) {
         const converse = io.converse ?? (io.analyze ? transcriptConverse(io.analyze) : converseWithCopilot);
-        destination = renderDestination(await destinationInterview(root, assessment, model, { converse, ask, select, report }));
-        description = `${destination}\n(Setup creates ${DESTINATION_FILE} with exactly this map when the proposal is installed.)`;
+        destination = renderDestination(await destinationInterview(root, assessment, model, { converse, ask, select, report }, revisit ? charted! : undefined));
+        if (revisit) destinationBeforeHash = textHash(charted!);
+        description = `${destination}\n(Setup ${revisit ? "replaces" : "creates"} ${DESTINATION_FILE} with exactly this map when the proposal is installed.)`;
       }
     }
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield") {
@@ -206,7 +215,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
         models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
         ...(revision ? { revision } : {}), onOutput: (value) => { raw = value; },
       });
-      return destination ? { ...result, destination } : result;
+      return destination ? { ...result, destination, ...(destinationBeforeHash ? { destinationBeforeHash } : {}) } : result;
     };
     let proposal = await propose();
     if (options.start !== undefined) proposal.config.local = { start: parseConfig({ ...proposal.config, local: { start: options.start } }).local!.start };

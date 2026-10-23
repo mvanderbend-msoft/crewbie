@@ -121,9 +121,17 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
   // A reviewed environment workflow is created, never merged into one the human already has.
   const steps = parseSetupSteps(data.setupSteps);
   if (steps && await optionalText(await safePath(root, SETUP_STEPS)) === null) files[SETUP_STEPS] = steps;
-  // The interview's map is the human's own product direction: installed with the team, never over an existing file.
-  if (typeof data.destination === "string" && data.destination.trim() && await optionalText(await safePath(root, DESTINATION_FILE)) === null) {
-    files[DESTINATION_FILE] = data.destination.endsWith("\n") ? data.destination : data.destination + "\n";
+  // The interview's map is the human's own project context: created when absent, and replaced only when the human chose to
+  // revisit it and the file is unchanged since the assessment.
+  if (typeof data.destination === "string" && data.destination.trim()) {
+    const content = data.destination.endsWith("\n") ? data.destination : data.destination + "\n";
+    const current = await optionalText(await safePath(root, DESTINATION_FILE));
+    if (current === null) files[DESTINATION_FILE] = content;
+    else if (data.destinationBeforeHash !== undefined && textHash(current) !== textHash(content)) {
+      if (!matchesTextHash(current, data.destinationBeforeHash)) throw new Error(`${DESTINATION_FILE} changed since assessment. Reassess before applying.`);
+      files[DESTINATION_FILE] = content;
+      adopted[DESTINATION_FILE] = hash(current);
+    }
   }
   if (data.adopt !== undefined) {
     for (const [path, digest] of Object.entries(record(data.adopt, "approved adoption hashes"))) {

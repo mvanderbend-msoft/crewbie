@@ -112,7 +112,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.64 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.65 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -507,8 +507,13 @@ Questions are multiple choice (2 to 4 options, recommended one preselected, plus
 stops by 30 questions. The resulting map (purpose, notes and constraints,
 decisions, not yet specified, out of scope) is shown in the review and
 written to `docs/destination.md` on apply, only when that file is absent.
-Guidance cites that file instead of repeating it. Later
-runs reuse an existing `docs/destination.md` instead of interviewing again.
+Guidance cites that file instead of repeating it. When
+`docs/destination.md` exists, interactive init (including `--update`) asks
+whether to keep it (default, no interview) or revisit it: Compass then starts
+from the file, keeps what still holds, drops milestones and plans, and asks only
+about gaps or outdated parts. The revised map replaces the file on install only
+if its hash still matches the assessed version; otherwise apply stops and asks
+for a reassessment. Noninteractive runs always keep the file.
 `--description` skips the interview. If the model returns invalid interview
 output, init builds the map from the answers collected so far and continues.
 The model may then ask at most one round of questions; the next pass

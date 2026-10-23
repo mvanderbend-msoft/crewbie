@@ -155,7 +155,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.64/crewbie-cli-0.1.0-alpha.64.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.65/crewbie-cli-0.1.0-alpha.65.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download. Run
@@ -229,8 +229,13 @@ turn is a small AI request.
 
 The result is saved as `docs/destination.md` when you install: purpose,
 constraints, decisions, notes, what is not yet specified and what is out of scope. Guidance
-and agents point to that file instead of repeating it. Later runs reuse it
-instead of asking again; use `--description "..."` to skip the interview.
+and agents point to that file instead of repeating it. Keep it current like
+any other doc. Later runs, including `crewbie init --update`, ask whether to
+keep it (the default) or **revisit it with Compass**: Copilot starts from the
+file, confirms what still holds, drops plans that belong in issues and asks
+only about gaps or outdated parts. The revised file is shown in the review and
+replaces the old one on install, unless it was edited in the meantime. Use
+`--description "..."` to skip the interview.
 When the repository already has instructions or agents, Compass reads them
 first and asks only what it leaves unclear and where it is outdated, missing
 or conflicting.

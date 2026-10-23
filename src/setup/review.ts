@@ -44,7 +44,7 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
     : path === ".crewbie/instructions.md" ? ["Crewbie-managed", "Single shared working policy referenced by specialists, not duplicated into each charter."]
     : /pull_request_template/i.test(path) ? ["Crewbie-managed", "Prompt for concise implementation evidence, handoffs and learning."]
     : path === MCP_FILE ? ["Reviewed MCP configuration", "Proposed local MCP servers; secrets are prompted when a server starts and never written. Created only when absent."]
-    : path === DESTINATION_FILE ? ["User knowledge", "Purpose, users, constraints, decisions, open questions and scope charted in the setup interview; agents read it for project context. Created only when absent."]
+    : path === DESTINATION_FILE ? ["User knowledge", "Purpose, users, constraints, decisions, open questions and scope charted in the setup interview; agents read it for project context. Created when absent; replaced only when revisited in init."]
     : ["Reviewed guidance", "Apply only the separately approved instruction replacement; preserve subsequent edits."];
   return { ...change, ownership: detail[0]!, purpose: detail[1]! };
 }
@@ -66,7 +66,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
       "Copilot chose these defaults where evidence or answers were missing. Correct any that are wrong in the guidance or roles before applying.", "",
       ...data.assumptions.map((assumption) => `- ${string(assumption, "assumption")}`), ""] : []),
     ...(typeof data.destination === "string" && data.destination.trim() ? [`## Destination (${DESTINATION_FILE})`, "",
-      "Charted in the setup interview. Installed only when the file does not exist yet.", "", block(data.destination.trimEnd(), "markdown"), ""] : []),
+      data.destinationBeforeHash ? "Revisited in the setup interview. Replaces the existing file on install, unless it changed since the assessment." : "Charted in the setup interview. Installed only when the file does not exist yet.", "", block(data.destination.trimEnd(), "markdown"), ""] : []),
     "## Proposed crew", "",
     "| Specialist | Action | Model | Responsibility |", "| --- | --- | --- | --- |",
     ...config.roles.map((role) => `| ${cell(role.id)} | ${installed.has(role.id) ? "Keep/update installed specialist" : role.sourceAgent ? `Adopt ${cell(role.sourceAgent)}` : "New specialist"} | ${cell(role.model)} | ${cell(role.purpose)} |`),

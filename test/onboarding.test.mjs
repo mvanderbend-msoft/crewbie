@@ -370,7 +370,38 @@ test("an existing docs/destination.md replaces the interview and is never overwr
   const changes = await installation(root, { ...saved, destination: "# Destination\n\nOther.\n" });
   assert.ok(!changes.some((file) => file.path === "docs/destination.md"));
 });
-test("MCP proposals reject unsafe launchers, credentials and existing files", async (t) => {
+test("init can revisit docs/destination.md with Compass and replaces it on install only when unchanged since assessment", async (t) => {
+  const old = "# Destination\n\nA charted AI blog.\n\n## Decisions so far\n\n- **Next milestone**: Ship 3 posts\n";
+  const root = await fixture(t, { "src/App.tsx": "export {};", "docs/destination.md": old });
+  const assessment = await assess(root);
+  const interview = interviewer([question("The file says this is an AI blog for engineers; still right?", "Yes", "destination", []), finalMap()]);
+  const menus = [], reports = [];
+  let prompt = "";
+  await initCommand(root, { model: "chosen-model" }, {
+    converse: interview.converse,
+    ask: async () => "",
+    analyze: async (value) => { prompt = value; return JSON.stringify(response(assessment)); },
+    select: async (message, choices, fallback) => { menus.push({ message, choices, fallback }); return menus.length === 1 ? "revisit" : "save"; },
+    report: (text) => reports.push(text), client() { throw new Error("No GitHub writes"); },
+  });
+  assert.equal(menus[0].message, "docs/destination.md already describes the project. Use it as is?");
+  assert.deepEqual(menus[0].choices.map((choice) => choice.value), ["keep", "revisit"]);
+  assert.equal(menus[0].fallback, "keep", "Keeping the file is the default.");
+  assert.match(reports.join("\n"), /Revisiting docs\/destination\.md/);
+  assert.match(interview.prompts[0], /already exists \(evidence\.existingProjectContext\) and the human chose to revisit it[\s\S]*Drop milestones, roadmaps/);
+  assert.match(interview.prompts[0], /"existingProjectContext": "# Destination[^"]*Ship 3 posts/);
+  assert.match(prompt, /Google page 1[\s\S]*Setup replaces docs\/destination\.md/);
+  const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.match(saved.destination, /Google page 1/);
+  assert.match(saved.destinationBeforeHash, /^[a-f0-9]{64}$/);
+  assert.match(await readFile(join(root, "crewbie-setup.md"), "utf8"), /Revisited in the setup interview\. Replaces the existing file/);
+  const changes = await installation(root, saved);
+  const change = changes.find((file) => file.path === "docs/destination.md");
+  assert.equal(change.before, old);
+  assert.match(change.after, /Google page 1/);
+  await writeFile(join(root, "docs/destination.md"), old + "\nEdited by hand.\n");
+  await assert.rejects(installation(root, saved), /docs\/destination\.md changed since assessment/);
+});test("MCP proposals reject unsafe launchers, credentials and existing files", async (t) => {
   const root = await fixture(t, { ".vscode/mcp.json": "{\"servers\":{}}" });
   const assessment = await assess(root);
   const parse = (server, overrides = {}) => parseSetupReview(JSON.stringify(response(assessment, { mcpServers: [{ name: "x", purpose: "p", type: "local", env: [], tools: ["*"], cloud: true, ...server }], ...overrides })), assessment, "", "model");
