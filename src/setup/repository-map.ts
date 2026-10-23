@@ -61,7 +61,7 @@ export function promptMap(map: RepositoryMap): { directories: string[]; director
   };
 }
 
-const REFERENCE = /(?<![\w/.:@~<-])((?:\.{0,2}[\w@-][\w.@-]*\/)+(?:[\w.*@-]*[\w*])?\/?)(?![\w/(:])/g;
+const REFERENCE = /(?<![\w/.:@~<-])((?:\.{0,2}[\w@-][\w.@-]*\/)+(?:[\w.*@-]*[\w*])?\/?)(?![\w/(:'"])/g;
 const PROSE = /^(?:and\/or|either\/or|input\/output|read\/write|yes\/no|on\/off|true\/false|client\/server|ci\/cd|i\/o|n\/a|w\/o|pass\/fail|get\/set|frontend\/backend|front-end\/back-end|pros\/cons|[a-z]+\/[a-z]+)$/i;
 
 /**

@@ -75,6 +75,7 @@ Each role also needs knowledge: the technical facts an engineer needs to work in
 Adopt suitable EXISTING specialists first: preserve frontend, backend, testing and review responsibilities rather than merging them into invented end-to-end roles. maxActive limits concurrent sessions, NOT team size.
 For each adopted role, set sourceAgent to its exact existing agent path and use a recognizable role ID derived from that agent. The installer copies the complete original instructions into the active Crewbie charter and archives the original as backup provenance. Tool restrictions and professional persona boundaries remain in the active file. Never narrow an adopted persona or voice (for example to "conversational only") unless the original says so; it applies to everything the specialist writes for humans. Put adoption mechanics in agentDecisions.reason, not in checks or nonNegotiables; those fields contain actual domain behavior only. Supply only useful additional checks, not summaries replacing the original expertise.
 Shape the team around durable areas of the codebase, not the current milestone: each role owns concrete existing paths and names them. Planned features join the role whose area they extend; propose a role for a planned area only when it needs distinct expertise (for example authentication and secrets), and say which paths it will create. Record every planned path that does not exist yet in assumptions; Crewbie treats paths named there as planned rather than stale.
+Split by change coupling, not by file type or layer: files that usually change together for one feature belong to the same role. Each cross-cutting concern (for example page metadata and SEO, routing and rendering, authentication, data access, build and deployment) has exactly one owner, including the component or hook code that implements it; other roles call into it rather than reimplementing it. Name each role after the concern it owns, not after an artifact type or a milestone. Before answering, walk through the main changes the destination's next milestone needs: each should land with one role, or with one owner plus a clearly smaller, separable task for another. When a typical change needs two roles editing the same files, redraw the boundaries or merge the roles. Give the stronger model to the role whose area carries the riskiest changes.
 Ownership must not overlap: when roles share a directory, name the distinct files or subdirectories each owns. Owners write and update the tests for their own changes; add a dedicated testing role only when an existing testing agent exists or test infrastructure is itself a substantial area.
 Size the team to the repository: propose the smallest set of roles that covers its code areas, planned work and independent review. A small single-package repository usually needs two to four. Every role must have work that it alone is best placed to do. Consider domain depth, independent verification, performance, accessibility, data and integration boundaries, explaining each role's distinct contribution and collaboration boundary; avoid aliases and idle roles.
 Set reviewer to the id of one proposed role that independently reviews each feature PR (a whole plan's merged work) before a human merges it into the default branch. Prefer an existing review or verification specialist; otherwise choose the role best placed to judge cross-cutting correctness.
@@ -379,6 +380,14 @@ function repositoryWarnings(assessment: Assessment, proposal: SetupProposal): st
   }
   const unowned = unownedWorkspaces(map, [...proposal.config.roles.flatMap((role) => [role.id, role.purpose, ...(role.checks ?? []), ...(role.nonNegotiables ?? [])]), ...originals]);
   if (unowned.length) warnings.push(`No specialist names these workspaces, so nobody clearly owns them: ${listed(unowned)}. Add an owner to a role before planning work there.`);
+  const owners = new Map<string, string[]>();
+  for (const role of proposal.config.roles) {
+    if (role.id === proposal.config.review?.role) continue;
+    for (const path of new Set(pathReferences(role.purpose).filter((path) => /\.[A-Za-z0-9]+$/.test(path)))) owners.set(path, [...owners.get(path) ?? [], role.id]);
+  }
+  for (const [path, ids] of owners) {
+    if (ids.length > 1) warnings.push(`${ids.map((id) => `crewbie-${id}`).join(" and ")} both claim \`${path}\`. Give it one owner so tasks do not edit the same file in parallel.`);
+  }
   return warnings;
 }
 

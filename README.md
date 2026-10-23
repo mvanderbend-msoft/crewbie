@@ -155,7 +155,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.61/crewbie-cli-0.1.0-alpha.61.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.62/crewbie-cli-0.1.0-alpha.62.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download. Run
@@ -264,7 +264,8 @@ finding as retain, edit or defer, and nothing is written until you approve it.
 
 The team fits your repository; there is no fixed list of roles. Init proposes
 the smallest team that owns durable, non-overlapping parts of the code, often
-two to four specialists for a small project. Owners write the tests for their
+two to four specialists for a small project. Roles follow what changes together,
+not file types: a concern such as SEO or authentication has exactly one owner. Owners write the tests for their
 own changes. A typical web app might get:
 
 | Role | Does |

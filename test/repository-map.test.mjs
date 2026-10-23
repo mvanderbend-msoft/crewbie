@@ -74,7 +74,7 @@ test("missing paths are reported against the working tree, excluding files the p
 });
 
 test("build output, JSX, route patterns and planned paths are not reported as missing", () => {
-  const text = "Wraps <Blog/> with route 'posts/:slug'; builds `dist/` and `node_modules/x/`; adds `api/oauth.ts`, `public/admin/` and `content/posts/*.md`; keeps `src/legacy/`.";
+  const text = "Wraps <Blog/> with route 'posts/:slug'; builds `dist/` and `node_modules/x/`; adds `api/oauth.ts`, `public/admin/` and `content/posts/*.md`; uses Consolas/'Courier New' monospace; keeps `src/legacy/`.";
   assert.deepEqual(missingPaths(map, text, ["api/", "public/admin", "content/posts"]), ["src/legacy/"]);
 });
 

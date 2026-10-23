@@ -696,7 +696,21 @@ test("roles carry technical working knowledge into their charters and the setup 
   assert.match(prompt, /smallest set of roles/);
   assert.match(prompt, /they do not rule out developer tooling such as MCP servers/);
   assert.match(prompt, /propose setupSteps/);
+  assert.match(prompt, /Split by change coupling, not by file type or layer/);
+  assert.match(prompt, /Each cross-cutting concern .* has exactly one owner/);
+  assert.match(prompt, /walk through the main changes the destination's next milestone needs/);
   assert.doesNotMatch(setupPrompt(report, "A blog.", []), /repo_\* tools/);
+});
+
+test("two implementing roles claiming the same file are warned about; the reviewer may name it", async (t) => {
+  const root = await fixture(t, { "src/catalogue.ts": "export const catalogue = {};", "src/view.tsx": "export {};" });
+  const report = await assess(root);
+  const role = (id, purpose) => ({ id, purpose, checks: ["Check it."], nonNegotiables: ["Keep it."], contextPaths: [] });
+  const value = response(report, { roles: [role("data", "Own src/catalogue.ts and its loading."), role("ui", "Own src/view.tsx and the meta tags in src/catalogue.ts."), role("review", "Review src/catalogue.ts and src/view.tsx changes.")], reviewer: "review" });
+  const proposal = parseSetupReview(JSON.stringify(value), report, "Catalogue", "chosen-model");
+  const warnings = (proposal.review.warnings ?? []).join("\n");
+  assert.match(warnings, /crewbie-data and crewbie-ui both claim `src\/catalogue\.ts`/);
+  assert.doesNotMatch(warnings, /claim `src\/view\.tsx`/);
 });
 
 test("a proposed copilot-setup-steps workflow is validated, reviewed, created only when absent and skipped with guidance", async (t) => {

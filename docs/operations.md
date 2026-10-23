@@ -112,7 +112,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.61 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.62 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -292,7 +292,12 @@ Crewbie Compass (250K characters per analysis), so each role carries
 **Working knowledge**: concrete facts about its files, conventions and commands,
 written into its charter. The prompt shapes the smallest team that owns durable,
 non-overlapping code areas (typically 2 to 4 roles for a small single-package
-repository); owners write the tests for their own changes. Product constraints
+repository); owners write the tests for their own changes. From alpha.62 roles
+are split by change coupling rather than file type: each cross-cutting concern
+(such as metadata and SEO, routing, auth or data access) has exactly one owner,
+and the model checks that the next milestone's main changes each land with one
+role. Two implementing roles naming the same file in their purpose produce a
+repository-check warning. Product constraints
 such as "no external services" do not rule out agent tooling or MCP servers.
 Manifests and workflows are never edited or executed.
 Proposed edits outside the
