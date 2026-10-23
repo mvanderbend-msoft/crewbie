@@ -141,6 +141,101 @@ test("init asks the LLM for a domain team and creates no fixed implementation pr
   assert.doesNotMatch(charter, /Trace the changed behavior/);
 });
 
+test("noninteractive setup never stops for clarification: open questions become recorded assumptions", async (t) => {
+  const root = await fixture(t);
+  const report = await assess(root);
+  await assert.rejects(proposeSetup(report, "An app", "chosen-model", {
+    analyze: async () => JSON.stringify(response(report, { questions: ["Which users and behavior?"], roles: [] })), report() {},
+  }), /final setup pass/);
+  const proposal = await proposeSetup(report, "An app", "chosen-model", {
+    analyze: async (prompt) => {
+      assert.match(prompt, /final pass: questions MUST be \[\]/);
+      return JSON.stringify(response(report, { questions: ["Which users and behavior?"], assumptions: ["Readers on mobile first; affects layout checks."] }));
+    },
+    report() {},
+  });
+  assert.equal(proposal.status, "ready");
+  assert.deepEqual(proposal.questions, []);
+  assert.deepEqual(proposal.assumptions, ["Readers on mobile first; affects layout checks.", "Open question: Which users and behavior?"]);
+  assert.match(renderSetupReview(proposal), /ASSUMPTIONS[\s\S]*Open question: Which users/);
+});
+
+test("a blank interactive answer continues to a final pass instead of stopping", async (t) => {
+  const root = await fixture(t);
+  const report = await assess(root);
+  const prompts = [];
+  const proposal = await proposeSetup(report, "An app", "chosen-model", {
+    analyze: async (prompt) => {
+      prompts.push(prompt);
+      return JSON.stringify(prompts.length === 1 ? response(report, { questions: ["Who reads it?"], roles: [] }) : response(report));
+    },
+    ask: async () => "",
+    report() {},
+  });
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /No answer: choose a sensible default/);
+  assert.match(prompts[1], /final pass/);
+  assert.equal(proposal.status, "ready");
+});
+
+test("unguided repositories get a breadth-first interview that reads manifests and proposes guidance and MCP", async (t) => {
+  const root = await fixture(t, {
+    "package.json": JSON.stringify({ scripts: { dev: "vite", build: "vite build", lint: "eslint ." }, dependencies: { react: "^19.0.0" }, devDependencies: { vite: "^6.0.0" } }),
+    "package-lock.json": "{}",
+    ".github/workflows/ci.yml": "jobs:\n  build:\n    steps:\n      - run: npm ci\n      - run: npm run build\n",
+    "src/App.tsx": "export const App = 'SOURCE-MUST-NOT-BE-SENT';",
+  });
+  const assessment = await assess(root);
+  assert.equal(assessment.inventory.mode, "brownfield");
+  const questions = [];
+  let prompt = "";
+  await initCommand(root, { model: "chosen-model" }, {
+    ask: async (question) => { questions.push(question); return questions.length === 1 ? "Personal AI blog shared on LinkedIn" : ""; },
+    analyze: async (value) => {
+      prompt = value;
+      return JSON.stringify(response(assessment, {
+        instructions: [
+          { path: ".github/copilot-instructions.md", content: "# Blog\n\n## Commands\n\n- `npm run build`\n", reason: "No global guidance." },
+          { path: ".github/instructions/seo.instructions.md", content: "---\napplyTo: \"src/**\"\n---\nEvery page has a unique title and meta description.\n", reason: "SEO is a quality priority." },
+        ],
+        mcpServers: [{ name: "vercel", purpose: "Inspect deployments.", type: "http", url: "https://mcp.vercel.com", env: [], tools: ["*"], cloud: false }],
+      }));
+    },
+    select: async () => "save",
+    report() {}, client() { throw new Error("No GitHub writes"); },
+  });
+  assert.equal(questions.length, 6);
+  assert.match(questions[2], /Press Enter to keep what was detected \(react, vite; npm\)/);
+  assert.match(prompt, /Destination: Personal AI blog shared on LinkedIn/);
+  assert.match(prompt, /Stack and hosting: Detected: react, vite; npm/);
+  assert.match(prompt, /Out of scope: \(not answered; choose a sensible default/);
+  assert.match(prompt, /"build": "vite build"/);
+  assert.match(prompt, /npm run build/);
+  assert.doesNotMatch(prompt, /SOURCE-MUST-NOT-BE-SENT/);
+  const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.equal(saved.status, "ready");
+  assert.equal(saved.mcpServers[0].name, "vercel");
+  const changes = await installation(root, saved);
+  assert.ok(changes.some((file) => file.path === ".github/instructions/seo.instructions.md"));
+  const mcp = changes.find((file) => file.path === ".vscode/mcp.json");
+  assert.deepEqual(JSON.parse(mcp.after).servers.vercel, { type: "http", url: "https://mcp.vercel.com/" });
+  const markdown = await readFile(join(root, "crewbie-setup.md"), "utf8");
+  assert.match(markdown, /Proposed MCP servers[\s\S]*\.vscode\/mcp\.json[\s\S]*mcp\.vercel\.com/);
+  assert.doesNotMatch(markdown, /Copilot cloud agent/, "Local-only servers are not offered to the cloud agent.");
+});
+
+test("MCP proposals reject unsafe launchers, credentials and existing files", async (t) => {
+  const root = await fixture(t, { ".vscode/mcp.json": "{\"servers\":{}}" });
+  const assessment = await assess(root);
+  const parse = (server) => parseSetupReview(JSON.stringify(response(assessment, { mcpServers: [{ name: "x", purpose: "p", type: "local", env: [], tools: ["*"], cloud: true, ...server }] })), assessment, "", "model");
+  assert.throws(() => parse({ command: "bash", args: ["-c", "curl"] }), /npx|uvx|docker/);
+  assert.throws(() => parse({ type: "http", url: "http://example.com" }), /https/);
+  assert.throws(() => parse({ command: "npx", args: ["pkg"], env: ["lowercase"] }), /UPPER_SNAKE|environment/i);
+  const proposal = parse({ name: "context7", command: "npx", args: ["-y", "@upstash/context7-mcp"], env: ["CONTEXT7_API_KEY"] });
+  const changes = await installation(root, proposal);
+  assert.ok(!changes.some((file) => file.path === ".vscode/mcp.json"), "An existing user MCP file is never overwritten.");
+});
+
 test("greenfield clarification repeats with answers before generating the team", async (t) => {
   const root = await fixture(t);
   const report = await assess(root);
@@ -158,22 +253,6 @@ test("greenfield clarification repeats with answers before generating the team",
   });
   assert.equal(calls, 2);
   assert.equal(proposal.status, "ready");
-});
-
-test("noninteractive insufficient input persists questions but cannot install guessed roles", async (t) => {
-  const root = await fixture(t);
-  const report = await assess(root);
-  const proposal = await proposeSetup(report, "An app", "chosen-model", {
-    analyze: async () => JSON.stringify(response(report, { questions: ["Which users and behavior?"], roles: [] })), report() {},
-  });
-  assert.equal(proposal.status, "clarification");
-  await assert.rejects(installation(root, proposal), /clarification/);
-  await assert.rejects(initCommand(root, { model: "chosen-model", description: "An app" }, {
-    client() { throw new Error("No remote calls"); }, report() {},
-    analyze: async () => JSON.stringify(response(report, { questions: ["Which users and behavior?"], roles: [] })),
-  }), /needs clarification/);
-  assert.equal(JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8")).status, "clarification");
-  await assert.rejects(readFile(join(root, ".crewbie/config.json")), /ENOENT/);
 });
 
 test("incomplete assessment, invented context and generic team output are rejected", async (t) => {
@@ -676,7 +755,7 @@ test("interactive model menu uses live choices and reprompts invalid entries", a
   const assessment = await assess(root);
   const answers = ["auto", "99", "2", "save"], reports = [];
   let discovery = 0;
-  await initCommand(root, {}, {
+  await initCommand(root, { description: "A catalogue" }, {
     client() { throw new Error("No GitHub writes"); },
     listModels: async () => { discovery++; return [{ id: "first", name: "First model" }, { id: "second", name: "Second model", multiplier: 2 }]; },
     ask: async () => { assert.ok(answers.length); return answers.shift(); },
@@ -843,7 +922,7 @@ test("every guidance finding requires an explicit disposition and deferrals requ
 test("interactive setup offers Team All Save through the selector without typed keywords", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export {};" });
   const assessment = await assess(root), menus = [], messages = [];
-  await initCommand(root, { model: "chosen-model" }, {
+  await initCommand(root, { model: "chosen-model", description: "A catalogue" }, {
     analyze: async () => JSON.stringify(response(assessment)),
     ask: async () => { throw new Error("Use a selection menu, not a typed keyword."); },
     select: async (message, choices, defaultValue) => {
@@ -909,7 +988,7 @@ test("selection and confirmation menus apply All or Team only with final consent
 test("menu cancellation leaves the saved proposal but never installs", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export {};" });
   const assessment = await assess(root);
-  await assert.rejects(initCommand(root, { model: "chosen-model" }, {
+  await assert.rejects(initCommand(root, { model: "chosen-model", description: "A catalogue" }, {
     analyze: async () => JSON.stringify(response(assessment)),
     ask: async () => { throw new Error("No text input expected"); },
     select: async () => { const error = new Error("Cancelled"); error.name = "ExitPromptError"; throw error; },

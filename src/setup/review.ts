@@ -2,6 +2,7 @@ import { agentArchivePath, DEFAULT_EXECUTION_LIMITS } from "../config.js";
 import { json, record, string } from "../core.js";
 import { LEGACY_DECISIONS } from "../memory/context.js";
 import { setupConfiguration, type FileChange } from "./install.js";
+import { cloudMcpConfig, cloudMcpInstructions, MCP_FILE, parseMcpServers, vscodeMcpConfig } from "./mcp.js";
 
 function cell(value: string): string { return value.replaceAll("|", "\\|").replace(/\r?\n/g, " "); }
 function block(content: string, language = "markdown"): string {
@@ -40,6 +41,7 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
     : path === ".github/skills/crewbie/SKILL.md" ? ["Crewbie-managed", "Discover the local implementation workflow on demand instead of always loading it."]
     : path === ".crewbie/instructions.md" ? ["Crewbie-managed", "Single shared working policy referenced by specialists, not duplicated into each charter."]
     : /pull_request_template/i.test(path) ? ["Crewbie-managed", "Prompt for concise implementation evidence, handoffs and learning."]
+    : path === MCP_FILE ? ["Reviewed MCP configuration", "Proposed local MCP servers; secrets are prompted when a server starts and never written. Created only when absent."]
     : ["Reviewed guidance", "Apply only the separately approved instruction replacement; preserve subsequent edits."];
   return { ...change, ownership: detail[0]!, purpose: detail[1]! };
 }
@@ -57,6 +59,9 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
   const lines = [
     "# Crewbie assessment", "",
     review ? string(review.summary, "assessment summary") : "Reviewed setup proposal.", "",
+    ...(Array.isArray(data.assumptions) && data.assumptions.length ? ["## Assumptions", "",
+      "Copilot chose these defaults where evidence or answers were missing. Correct any that are wrong in the guidance or roles before applying.", "",
+      ...data.assumptions.map((assumption) => `- ${string(assumption, "assumption")}`), ""] : []),
     "## Proposed crew", "",
     "| Specialist | Action | Model | Responsibility |", "| --- | --- | --- | --- |",
     ...config.roles.map((role) => `| ${cell(role.id)} | ${installed.has(role.id) ? "Keep/update installed specialist" : role.sourceAgent ? `Adopt ${cell(role.sourceAgent)}` : "New specialist"} | ${cell(role.model)} | ${cell(role.purpose)} |`),
@@ -93,6 +98,14 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     typeof instruction.reason === "string" ? instruction.reason : "Reviewed replacement text.", "",
     block(string(instruction.content, "guidance content")), "");
   if (typeof data.constitutionText === "string") lines.push("### Proposed constitution", "", block(data.constitutionText), "");
+  const servers = parseMcpServers(data.mcpServers);
+  if (servers.length) {
+    const cloud = cloudMcpConfig(servers);
+    lines.push("## Proposed MCP servers", "", "Applied with the guidance choice. Crewbie creates the local file only when it does not exist; never store secret values in it.", "",
+      ...servers.map((server) => `- **${server.name}** (${server.type}${server.cloud ? ", also cloud agent" : ""}): ${server.purpose}`), "",
+      `### ${MCP_FILE}`, "", block(vscodeMcpConfig(servers).trimEnd(), "json"), "");
+    if (cloud) lines.push("### Copilot cloud agent", "", cloudMcpInstructions(config.repository, cloud), "", block(cloud.config.trimEnd(), "json"), "");
+  }
   lines.push("## Hosted planning", "", config.planning?.enabled
     ? `Enabled with model \`${config.planning.model}\`. The ready-for-planning label authorizes a potentially billable planning run. Execution after exact-head human approval and merge: **${config.planning.executeOnMerge ? "enabled (paid work authorized by that approval and merge)" : "disabled (manual execution approval required)"}**.`
     : "**Disabled.** The ready-for-planning label will not create a plan. Dispatch only handles published, approved implementation tasks.", "");

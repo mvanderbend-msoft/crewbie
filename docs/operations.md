@@ -99,7 +99,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.54 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.55 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -268,20 +268,33 @@ approval, execution or exit-code semantics.
 Use `init --proposal FILE --json` for the machine-readable installation preview.
 
 Init includes every inventoried instruction, custom-agent and MCP configuration
-path in its assessment. The LLM receives only AI guidance: instructions, custom
-agents (including archives), the constitution and sanitized MCP metadata.
-Application code, READMEs, manifests, ADRs and other project files are not sent,
-so the assessment reviews and edits AI guidance only. Proposed edits outside the
+path in its assessment. The LLM receives AI guidance (instructions, custom agents
+including archives, the constitution and sanitized MCP metadata) plus bounded,
+redacted build evidence: package manifest summaries (package manager, scripts,
+dependency names and versions, engines), other root manifests, non-Crewbie
+`.github/workflows/*.yml` files and root file names (from alpha.55). This lets
+the proposed `## Commands` match what CI runs. Application source, READMEs and
+ADRs are not sent; manifests and workflows are never edited or executed.
+Proposed edits outside the
 supported guidance paths are shown as deferred recommendations rather than
-failing installation (from alpha.14; earlier releases also sent
-READMEs, manifests and sampled source files). The static team hints above still use file paths and
-bounded manifest detection. Text inspection has a 256 KB total/64 KB per-file
+failing installation. Text inspection has a 256 KB total/64 KB per-file
 budget. Omissions are explicit, not a claim
 of complete semantic coverage. MCP JSON/JSONC files expose only server names,
 transport, executable basename and environment-variable names; values, arguments,
 headers and URLs are withheld. Servers are not started or connectivity-tested.
-Personal/global and ignored settings are not read. MCP configuration changes
-remain recommendations for manual review, not automatic credential-bearing edits.
+Personal/global and ignored settings are not read. Changes to existing MCP
+configuration remain recommendations for manual review.
+
+Repositories without AI guidance get a global `.github/copilot-instructions.md`
+(or root `AGENTS.md` when it exists) plus path-scoped
+`.github/instructions/<domain>.instructions.md` files with `applyTo`. The
+proposal may also suggest up to six MCP servers (`npx`, `uvx` or `docker`
+launchers, or HTTPS endpoints; secrets only as `UPPER_SNAKE_CASE` names). With the
+guidance choice, Crewbie writes `.vscode/mcp.json` only when that file does not
+exist, using password inputs for secrets, and prints a Copilot cloud agent
+snippet to paste into **Settings > Copilot > MCP servers** with `COPILOT_MCP_*`
+Agents secrets. GitHub and Playwright are never duplicated for the cloud agent
+because they are enabled by default.
 
 From alpha.44 the assessment and hosted planning also receive a names-only
 repository map: directories to depth 4 and workspaces (directories with their own
@@ -437,9 +450,15 @@ whole proposal still passes validation and human review before installation.
 Noninteractive runs fail explicitly on invalid links rather than guessing fixes.
 
 No fallback roster is installed if analysis fails. `--assessment-only` keeps the
-offline inventory path explicit. Greenfield setup requires a description or
-requirements in the repository; interactive clarification repeats, while
-noninteractive runs persist questions and stop without installing a team.
+offline inventory path explicit. Init never stops to ask for a rerun. When a
+repository has no Crewbie config and no AI guidance, interactive init first asks
+six free, breadth-first questions (destination, platforms, stack and hosting,
+quality priorities, external services, out of scope), after Matt Pocock's
+wayfinder skill. Press Enter to skip any question. `--description` skips the
+interview. The model may then ask at most one round of questions; the next pass
+is final and must propose a team. Unanswered points, and any questions left in a
+noninteractive run, become **Assumptions** in the review instead of blocking
+setup. Noninteractive greenfield setup still requires `--description`.
 
 `init --proposal FILE --apply --guidance skip` installs the team without proposed
 guidance changes; `--guidance apply` includes them. Both create all workflow and

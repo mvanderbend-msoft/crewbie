@@ -6,7 +6,8 @@ import { requireWriter } from "../tracking/github.js";
 import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
 import { applyInstallation, installation, setupConfiguration } from "./install.js";
-import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
+import { needsInterview, proposeSetup, selectGuidance, setupInterview, type Analyze } from "./onboarding.js";
+import { cloudMcpConfig, cloudMcpInstructions, parseMcpServers } from "./mcp.js";
 import { explicitModel, listCopilotModels, type ModelChoice } from "./copilot.js";
 import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
 import { terminalPrompts, type SetupPrompts } from "./terminal.js";
@@ -53,7 +54,7 @@ export async function installSetup(root: string, value: unknown, options: { appl
   const config = setupConfiguration(raw);
   const existingConstitution = config.constitution && await optionalText(await safePath(root, config.constitution)) !== null ? config.constitution : null;
   const proposal = options.guidance === "apply" ? { ...raw, config } : {
-    ...raw, instructions: [], constitutionText: null,
+    ...raw, instructions: [], constitutionText: null, mcpServers: [],
     config: { ...config, constitution: raw.constitutionText ? existingConstitution : config.constitution },
   };
   const kept: string[] = [];
@@ -77,7 +78,9 @@ export async function installSetup(root: string, value: unknown, options: { appl
     }
   }
   const variable = planning && client ? ` ${await planningVariable(client, config.repository, copilotVersion)}` : "";
-  return `Applied ${changes.length} reviewed file changes (${changes.filter((change) => change.before !== null && change.after !== null).length} existing files updated, ${changes.filter((change) => change.after === null).length} original agents archived). ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}${variable}`;
+  const cloud = cloudMcpConfig(parseMcpServers(options.guidance === "apply" ? raw.mcpServers : []));
+  const mcp = cloud ? `\n\nCopilot cloud agent MCP servers: ${cloudMcpInstructions(config.repository, cloud)}\n${cloud.config}` : "";
+  return `Applied ${changes.length} reviewed file changes (${changes.filter((change) => change.before !== null && change.after !== null).length} existing files updated, ${changes.filter((change) => change.after === null).length} original agents archived). ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}${variable}${mcp}`;
 }
 
 export async function initCommand(root: string, options: InitOptions, io: InitIO): Promise<void> {
@@ -104,7 +107,8 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       const markdown = setupReportPath(options.proposal);
       await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
       if (!options.json) report(`Readable assessment: ${markdown}`);
-      const hasGuidance = (Array.isArray(proposal.instructions) && proposal.instructions.length > 0) || proposal.constitutionText;
+      const hasGuidance = (Array.isArray(proposal.instructions) && proposal.instructions.length > 0) || proposal.constitutionText
+        || (Array.isArray(proposal.mcpServers) && proposal.mcpServers.length > 0);
       if (!hasGuidance && !options.json) report("No existing guidance edits proposed; recommendations in the assessment are advisory only.");
       let guidance = options.guidance;
       if (options.apply && hasGuidance && !guidance && select) guidance = await select("Apply proposed guidance and constitution too?", [
@@ -170,13 +174,11 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (dynamic && !catalog?.length) throw new Error("No available models were returned for specialist selection.");
     if (options["specialist-model"]) explicitModel(options["specialist-model"]);
     let description = options.description ?? "";
-    if (!description && assessment.inventory.mode === "greenfield" && ask) {
-      description = await ask("Describe the greenfield project: purpose, users, main behavior, platform/stack (or freedom to choose), and constraints.");
-    }
+    if (!description.trim() && ask && needsInterview(assessment)) description = await setupInterview(assessment, ask, report);
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield") {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
-    report(`\n1. Assess\n  Model: ${model}\n  ${assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata; application code and project files are not read, only their names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
+    report(`\n1. Assess\n  Model: ${model}\n  ${assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata, plus manifest summaries and CI workflows; application source is not read, only file names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
     const propose = () => proposeSetup(assessment, description, model, {
       ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
       models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
@@ -216,16 +218,13 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     await writeAtomic(root, output, json(proposal));
     await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
     report(`\nSaved for review\n  Assessment: ${markdown}\n  Editable setup: ${output}\n`);
-    if (proposal.status === "clarification") {
-      throw new Error(`Setup needs clarification; questions saved in ${output}. Rerun init with an expanded --description. No team was installed.`);
-    }
     if (!ask) {
       report(`Assessment and tailored team saved to ${output}. Review, then run init --proposal ${output} --apply --guidance apply|skip. GitHub labels are created on apply.`);
       return;
     }
     const choices = [
       { value: "team", name: "Team", description: "Adopt/create the proposed agents; leave existing guidance unchanged." },
-      { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}.` },
+      { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}${proposal.mcpServers?.length ? ` and ${proposal.mcpServers.length} MCP servers` : ""}.` },
       { value: "save", name: "Save", description: "Keep the assessment and proposal for later. No installation or GitHub changes." },
     ];
     const choice = select ? await select("Install this proposal?", choices, "save")

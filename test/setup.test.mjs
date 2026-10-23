@@ -12,7 +12,7 @@ import { agentPrompt, bounded, hash, safePath } from "../dist/core.js";
 import { parseConfig } from "../dist/config.js";
 import { fixture, config } from "./helpers.mjs";
 
-test("brownfield assessment reuses guidance, sends no project files to the LLM, and executes no scripts", async (t) => {
+test("brownfield assessment reuses guidance, sends only manifest evidence to the LLM, and executes no scripts", async (t) => {
   const root = await fixture(t, {
     "package.json": JSON.stringify({ scripts: { test: "MUST-NOT-EXECUTE" } }),
     "README.md": "PROJECT-README-MUST-NOT-BE-SENT",
@@ -25,7 +25,9 @@ test("brownfield assessment reuses guidance, sends no project files to the LLM, 
   assert.equal(report.config.constitution, ".specify/memory/constitution.md");
   assert.deepEqual(report.inventory.files.map((file) => file.path).sort(), [".specify/memory/constitution.md", "AGENTS.md"]);
   assert.ok(!report.findings.some((f) => ["Build and tests", "Code structure"].includes(f.area)));
-  assert.doesNotMatch(setupPrompt(report, ""), /MUST-NOT-BE-SENT|MUST-NOT-EXECUTE/);
+  const prompt = setupPrompt(report, "");
+  assert.doesNotMatch(prompt, /MUST-NOT-BE-SENT/);
+  assert.match(prompt, /"test": "MUST-NOT-EXECUTE"/, "script text is evidence for commands; it is never run");
   assert.ok(report.config.roles.some((role) => role.id === "frontend"));
   assert.equal(report.constitutionText, null);
   assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "Preserve existing API behavior.");

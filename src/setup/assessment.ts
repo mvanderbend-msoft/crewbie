@@ -8,6 +8,7 @@ import { assessTeam, type TeamAssessment } from "./team.js";
 import { inventory, type Inventory } from "./inventory.js";
 import { repositoryMap, type RepositoryMap } from "./repository-map.js";
 import type { CodeGraphEvidence } from "./code-graph.js";
+import { projectEvidence, type ProjectEvidence } from "./project-evidence.js";
 
 const SETUP_STEPS = ".github/workflows/copilot-setup-steps.yml";
 export interface Assessment {
@@ -24,6 +25,8 @@ export interface Assessment {
   installedRoles: Role[];
   /** Names-only working-tree map; absent in proposals saved before it existed. */
   repository?: RepositoryMap;
+  /** Bounded, redacted manifest summaries, CI workflow text and root file names; absent in older proposals. */
+  project?: ProjectEvidence;
   /** Explicit opt-in only; bounded metadata from a fresh, isolated static source snapshot. */
   codeGraph?: CodeGraphEvidence;
 }
@@ -46,7 +49,7 @@ export async function assess(root: string): Promise<Assessment> {
     ...team.suggestions.filter(({ role }) => !installed?.roles.some((existing) => existing.id === role.id)).map(({ role }) => role),
   ];
   const findings: Assessment["findings"] = [
-    { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "Propose agent-specific guidance only for useful missing context." },
+    { area: "Instructions", status: guidance.length ? "unknown" : "gap", evidence: guidance.slice(0, 12), detail: guidance.length ? "Guidance exists; presence does not establish quality. Review the evidence-linked instruction signals and resolve policy conflicts." : "No AI guidance yet. Propose global and path-scoped instructions grounded in the project description, manifests and CI." },
     { area: "Decisions", status: existingConstitution ? "ready" : "gap", evidence: existingConstitution ? [existingConstitution] : [], detail: "Reuse the existing constitution." },
     { area: "Cloud execution", status: "unknown", evidence: ci.slice(0, 5), detail: "Run doctor with a selected repository and specialist. Account permissions and model support require separate verification." },
     ci.includes(SETUP_STEPS)
@@ -67,7 +70,7 @@ export async function assess(root: string): Promise<Assessment> {
       : "No selected static warning was found. This is not a quality certification; review repository-specific value and the disclosed inspection coverage.",
   });
   return {
-    schemaVersion: 1, findings, instructionQuality, team, inventory: context, installedRoles: installed?.roles ?? [], repository: repositoryMap(paths),
+    schemaVersion: 1, findings, instructionQuality, team, inventory: context, installedRoles: installed?.roles ?? [], repository: repositoryMap(paths), project: await projectEvidence(root, paths),
     configBeforeHash: installedText === null ? null : textHash(installedText),
     questions: [
       "Which existing constraints are intentional, and which are legacy debt?",
