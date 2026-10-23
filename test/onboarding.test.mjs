@@ -179,10 +179,11 @@ test("a blank interactive answer continues to a final pass instead of stopping",
 });
 
 function interviewer(replies) {
-  const prompts = [];
+  const prompts = [], toolsSeen = [];
   return {
-    prompts,
-    converse: async (_model, run) => run(async (prompt) => {
+    prompts, toolsSeen,
+    converse: async (_model, run, tools = []) => run(async (prompt) => {
+      if (!prompts.length) toolsSeen.push(...tools);
       prompts.push(prompt);
       const reply = replies.shift();
       assert.ok(reply !== undefined, `No scripted interview reply for: ${prompt.slice(0, 80)}`);
@@ -204,17 +205,22 @@ test("unguided repositories get the adaptive Crewbie Compass interview that char
     "package-lock.json": "{}",
     ".github/workflows/ci.yml": "jobs:\n  build:\n    steps:\n      - run: npm ci\n      - run: npm run build\n",
     "src/App.tsx": "export const App = 'SOURCE-MUST-NOT-BE-SENT';",
+    "src/pages/BlogPost.tsx": "export {};",
+    "public/hero.png": "x",
+    "README.md": "# Michael's AI blog\n\nPosts about agents in the SDLC.\n",
+    "index.html": "<html><head><title>Michael van der Bend</title><meta name=\"description\" content=\"Writing on AI agents\"></head><body>BODY-NOT-SENT</body></html>",
   });
   const assessment = await assess(root);
   assert.equal(assessment.inventory.mode, "brownfield");
   const interview = interviewer([
+    question("This looks like a personal AI blog; is that right?", "A personal AI blog for engineers", "destination", []),
     question("What is the blog for and who reads it?", "A personal AI blog for engineers"),
     question("How are new posts published?", "Markdown files in the repository", "frontier"),
     question("Where is it hosted?", "Vercel", "frontier"),
     finalMap(),
   ]);
   const asked = [], picked = [];
-  const answers = ["Personal AI blog shared on LinkedIn; must rank on Google page 1", "An admin portal to upload posts"];
+  const answers = ["", "Personal AI blog shared on LinkedIn; must rank on Google page 1", "An admin portal to upload posts"];
   let prompt = "";
   await initCommand(root, { model: "chosen-model" }, {
     converse: interview.converse,
@@ -236,16 +242,23 @@ test("unguided repositories get the adaptive Crewbie Compass interview that char
     },
     report() {}, client() { throw new Error("No GitHub writes"); },
   });
+  assert.match(asked.shift(), /^1\. This looks like a personal AI blog[\s\S]*Recommended: A personal AI blog for engineers/, "Open questions use free text with a recommendation.");
   assert.equal(picked.length, 3);
-  assert.equal(picked[0].message, "1. What is the blog for and who reads it?");
+  assert.equal(picked[0].message, "2. What is the blog for and who reads it?");
   assert.deepEqual(picked[0].choices.map((choice) => choice.name), ["A. A personal AI blog for engineers (recommended)", "B. Something else", "C. Type your own answer", "Skip", "Done"]);
   assert.equal(picked[0].fallback, "A personal AI blog for engineers");
   assert.deepEqual(asked, ["C. Your answer:", "C. Your answer:"]);
-  assert.match(interview.prompts[0], /Crewbie Compass[\s\S]*breadth-first[\s\S]*ONE question per turn[\s\S]*2 to 4 short, distinct answer options/);
+  assert.match(interview.prompts[0], /Crewbie Compass[\s\S]*Dig into the repository first[\s\S]*repo_search[\s\S]*FIRST question states that reading[\s\S]*breadth-first[\s\S]*ONE question per turn[\s\S]*2 to 4 short, distinct options[\s\S]*before EVERY question/);
+  assert.deepEqual(interview.toolsSeen.map((tool) => tool.name), ["repo_list_files", "repo_read_file", "repo_search"]);
   assert.match(interview.prompts[0], /"build": "vite build"/);
+  assert.match(interview.prompts[0], /Michael's AI blog[\s\S]*Posts about agents/);
+  assert.match(interview.prompts[0], /title: Michael van der Bend[\s\S]*description: Writing on AI agents/);
+  assert.match(interview.prompts[0], /src\/pages\/BlogPost\.tsx/);
+  assert.doesNotMatch(interview.prompts[0], /hero\.png|BODY-NOT-SENT/);
   assert.doesNotMatch(interview.prompts[0], /SOURCE-MUST-NOT-BE-SENT/);
-  assert.match(interview.prompts[1], /^Answer: Personal AI blog/);
-  assert.match(interview.prompts[3], /^Accepted your recommendation: Vercel/);
+  assert.match(interview.prompts[1], /^Accepted your recommendation: A personal AI blog/);
+  assert.match(interview.prompts[2], /^Answer: Personal AI blog/);
+  assert.match(interview.prompts[4], /^Accepted your recommendation: Vercel/);
   assert.match(prompt, /# Destination[\s\S]*Google page 1[\s\S]*## Decisions so far[\s\S]*\*\*Authoring\*\*: Admin portal/);
   assert.match(prompt, /saved as docs\/destination\.md/);
   assert.match(prompt, /"build": "vite build"/);
@@ -274,7 +287,7 @@ test("interview handles skip, done and invalid replies without stopping setup", 
     question("Another question after done", "x"), finalMap({ decisions: [] }),
   ]);
   const answers = ["b", "skip", "done"];
-  const map = await destinationInterview(assessment, "model", { converse: interview.converse, ask: async () => answers.shift(), report() {} });
+  const map = await destinationInterview(root, assessment, "model", { converse: interview.converse, ask: async () => answers.shift(), report() {} });
   assert.match(interview.prompts[1], /Your reply was invalid/);
   assert.match(interview.prompts[2], /^Answer: Something else/, "A letter picks that option in the text fallback.");
   assert.match(interview.prompts[3], /^Skipped: choose a sensible default/);
@@ -283,8 +296,36 @@ test("interview handles skip, done and invalid replies without stopping setup", 
   assert.equal(map.destination, finalMap().destination);
 
   const broken = interviewer([question("What is it?", "A blog"), "bad", "bad", "bad"]);
-  const fallback = await destinationInterview(assessment, "model", { converse: broken.converse, ask: async () => "An AI blog", report() {} });
+  const fallback = await destinationInterview(root, assessment, "model", { converse: broken.converse, ask: async () => "An AI blog", report() {} });
   assert.deepEqual(fallback.decisions, [{ topic: "What is it?", decision: "An AI blog" }], "Invalid model output falls back to the collected answers.");
+});
+
+test("interview repository tools read tracked text files only, never secrets, ignored files or paths outside the repository", async (t) => {
+  const root = await fixture(t, {
+    "README.md": "# AI blog\n\nghp_abcdefghijklmnopqrstuvwxyz0123456789\n",
+    "src/pages/Post.tsx": "export const Post = () => 'renders a blog post';",
+    "content/posts/first.md": "# First post\n",
+    ".env": "API_KEY=supersecretvalue",
+    ".gitignore": "drafts/\n",
+    "drafts/private.md": "private draft",
+    "public/logo.png": "png",
+  });
+  const assessment = await assess(root);
+  const { repositoryTools } = await import("../dist/setup/repo-tools.js");
+  const tools = Object.fromEntries(repositoryTools(root, assessment.repository.files).map((tool) => [tool.name, tool.handler]));
+  const listed = await tools.repo_list_files({});
+  assert.match(listed, /content\/posts\/first\.md/);
+  assert.doesNotMatch(listed, /drafts\/private\.md/, "Gitignored files are invisible.");
+  assert.match(await tools.repo_list_files({ prefix: "src/" }), /^src\/pages\/Post\.tsx$/);
+  const readme = await tools.repo_read_file({ path: "README.md" });
+  assert.match(readme, /# AI blog/);
+  assert.doesNotMatch(readme, /ghp_/, "Tool output is redacted.");
+  assert.match(await tools.repo_read_file({ path: ".env" }), /not readable here/);
+  assert.match(await tools.repo_read_file({ path: "public/logo.png" }), /not readable here/);
+  assert.match(await tools.repo_read_file({ path: "drafts/private.md" }), /not a repository file/);
+  assert.match(await tools.repo_read_file({ path: "../outside.txt" }), /not a repository file/);
+  assert.match(await tools.repo_search({ text: "blog post" }), /^src\/pages\/Post\.tsx:1: /);
+  assert.doesNotMatch(await tools.repo_search({ text: "secret" }), /supersecretvalue/);
 });
 
 test("an existing docs/destination.md replaces the interview and is never overwritten", async (t) => {

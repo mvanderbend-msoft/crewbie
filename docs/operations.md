@@ -99,7 +99,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.58 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.59 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -453,10 +453,18 @@ No fallback roster is installed if analysis fails. `--assessment-only` keeps the
 offline inventory path explicit. Init never stops to ask for a rerun. When a
 repository has no Crewbie config and no AI guidance, interactive init first runs
 an adaptive interview called Crewbie Compass (inspired by Matt Pocock's wayfinder
-skill). The selected model names the destination first, then maps the frontier
-breadth-first, asking one multiple-choice question at a time. Each question has
-2 to 4 options grounded in manifests and CI, with the recommended one marked and
-preselected, plus "Type your own answer", Skip (Copilot assumes) and Done. It
+skill). The selected model first digs into the repository with three read-only,
+in-process tools (`repo_list_files`, `repo_read_file`, `repo_search`). These
+see only Git-visible text files: `.gitignore`d files, secret-looking files
+(`.env*`, keys, `.npmrc`), binaries and build output are refused. Paths are
+confined to the repository (no symlinks or `.git`), output is redacted, and
+reads are capped per call and per interview. No built-in Copilot tools, shell or
+MCP servers are available. The first question states the model's reading of the
+project for you to confirm or correct. It then names the destination and maps
+the frontier breadth-first, checking the code again before each question so it
+asks only about intent, priorities and trade-offs that the code cannot answer.
+Questions are multiple choice (2 to 4 options, recommended one preselected, plus
+"Type your own answer", Skip and Done) or open with a recommended answer. It
 stops by 30 questions. The resulting map (destination, notes,
 decisions, not yet specified, out of scope) is shown in the review and
 written to `docs/destination.md` on apply, only when that file is absent. Later
