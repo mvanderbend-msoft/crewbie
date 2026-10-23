@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { AGENT_PROMPT_CHARACTERS, agentPrompt, bounded, boundedLines, json, modelJson, record, slug, string, strings } from "../core.js";
 import { agentArchivePath, guidanceLinesFor, isExistingAgentPath, isRoleContextPath, limitsFor, parseConfig } from "../config.js";
 import type { Assessment } from "./assessment.js";
-import { redact } from "./inventory.js";
+import { containsSecret, redact } from "./inventory.js";
 import { profile } from "./templates.js";
 import { editableGuidance, instructionFile, validateInstructionScope } from "./instruction-quality.js";
 import { adoptedProfile } from "./agents.js";
@@ -136,7 +136,7 @@ export function parseSetupReview(output: string, assessment: Assessment, descrip
     throw new Error(`Copilot returned incomplete or invalid JSON (${error.message}) Retry the assessment or narrow its context; no setup was saved or applied.`);
   }
   const data = record(value, "setup analysis");
-  if (redact(json(data)) !== json(data)) throw new Error("Setup analysis appears to contain a secret; nothing was saved or applied.");
+  if (containsSecret(json(data))) throw new Error("Setup analysis appears to contain a secret; nothing was saved or applied.");
   const summary = string(data.summary, "assessment summary");
   if (!Array.isArray(data.findings)) throw new Error("Setup findings must be a list.");
   const undisposed = new Set<object>();

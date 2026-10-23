@@ -19,6 +19,19 @@ export function redact(text: string): string {
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, "$1<REDACTED>@");
 }
 
+/**
+ * Detects credentials in generated output. Unlike `redact`, a keyword assignment only counts when its value looks like a
+ * credential, so guidance prose ("token: use env vars") and secret names (VERCEL_TOKEN, ${input:x}) are allowed.
+ */
+export function containsSecret(text: string): boolean {
+  if (/-----BEGIN [^-]*PRIVATE KEY-----|\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b|https?:\/\/[^\s/@]+:[^\s/@]+@/.test(text)) return true;
+  for (const match of text.matchAll(/(?:token|password|secret|api[_-]?key)\s*["']?\s*[:=]\s*["']?([^\s"',;}]+)/gi)) {
+    const value = match[1]!;
+    if (value.length >= 16 && /[a-z]/.test(value) && /[A-Z0-9]/.test(value) && !/^[$<{]|^[A-Z][A-Z0-9_]*$/.test(value)) return true;
+  }
+  return false;
+}
+
 export async function inventory(root: string, paths: string[]): Promise<Inventory> {
   const implementation = paths.filter((path) => !/(^|\/)(?:\.git|\.github|\.crewbie|\.claude|\.copilot|node_modules|vendor|dist|build|coverage|test|tests|docs)\//.test(path)
     && /\.(?:[cm]?[jt]sx?|py|go|rs|java|cs|rb|php|swift|kt|tf|bicep|vue|svelte)$/.test(path));

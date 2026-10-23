@@ -1,5 +1,5 @@
 import { json, record, string, strings } from "../core.js";
-import { redact } from "./inventory.js";
+import { containsSecret } from "./inventory.js";
 
 /** A reviewed MCP server proposal. Secrets are referenced by name only; values never enter files or prompts. */
 export interface McpServer {
@@ -32,7 +32,7 @@ export function parseMcpServers(value: unknown, configured: readonly string[] = 
   const names = new Set<string>();
   return value.map((raw) => {
     const server = record(raw, "proposed MCP server");
-    if (redact(JSON.stringify(server)) !== JSON.stringify(server)) throw new Error("A proposed MCP server appears to contain a secret.");
+    if (containsSecret(JSON.stringify(server))) throw new Error("A proposed MCP server appears to contain a secret.");
     const name = string(server.name, "MCP server name");
     if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(name)) throw new Error(`MCP server name ${JSON.stringify(name)} must use lowercase letters, digits and hyphens.`);
     if (names.has(name) || configured.includes(name)) throw new Error(`MCP server ${name} is duplicated or already configured.`);

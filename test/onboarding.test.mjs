@@ -227,7 +227,12 @@ test("unguided repositories get a breadth-first interview that reads manifests a
 test("MCP proposals reject unsafe launchers, credentials and existing files", async (t) => {
   const root = await fixture(t, { ".vscode/mcp.json": "{\"servers\":{}}" });
   const assessment = await assess(root);
-  const parse = (server) => parseSetupReview(JSON.stringify(response(assessment, { mcpServers: [{ name: "x", purpose: "p", type: "local", env: [], tools: ["*"], cloud: true, ...server }] })), assessment, "", "model");
+  const parse = (server, overrides = {}) => parseSetupReview(JSON.stringify(response(assessment, { mcpServers: [{ name: "x", purpose: "p", type: "local", env: [], tools: ["*"], cloud: true, ...server }], ...overrides })), assessment, "", "model");
+  assert.ok(parse({ name: "vercel", type: "http", url: "https://mcp.vercel.com", bearerSecret: "VERCEL_TOKEN" }, {
+    instructions: [{ path: ".github/copilot-instructions.md", content: "# Blog\n\nNever commit the Vercel token: use environment variables. api_key = ${input:key}\n", reason: "Global guidance." }],
+  }), "Secret names and guidance prose about tokens are not secrets.");
+  assert.throws(() => parse({ command: "npx", args: ["pkg"] }, { summary: "Use token: a8Fq2LmZ9xYt4RkP7wNc" }), /appears to contain a secret/);
+  assert.throws(() => parse({ type: "http", url: "https://mcp.example.com", purpose: `token ghp_${"a".repeat(30)}` }), /appears to contain a secret/);
   assert.throws(() => parse({ command: "bash", args: ["-c", "curl"] }), /npx|uvx|docker/);
   assert.throws(() => parse({ type: "http", url: "http://example.com" }), /https/);
   assert.throws(() => parse({ command: "npx", args: ["pkg"], env: ["lowercase"] }), /UPPER_SNAKE|environment/i);
