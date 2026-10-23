@@ -112,7 +112,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.62 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.63 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -485,9 +485,8 @@ whole proposal still passes validation and human review before installation.
 Noninteractive runs fail explicitly on invalid links rather than guessing fixes.
 
 No fallback roster is installed if analysis fails. `--assessment-only` keeps the
-offline inventory path explicit. Init never stops to ask for a rerun. When a
-repository has no Crewbie config and no AI guidance, interactive init first runs
-an adaptive interview called Crewbie Compass (inspired by Matt Pocock's wayfinder
+offline inventory path explicit. Init never stops to ask for a rerun. Unless `docs/destination.md` exists or `--description` is
+given, interactive init first runs an adaptive interview called Crewbie Compass (inspired by Matt Pocock's wayfinder
 skill). The selected model first digs into the repository with three read-only,
 in-process tools (`repo_list_files`, `repo_read_file`, `repo_search`). These
 see only Git-visible text files: `.gitignore`d files, secret-looking files
@@ -498,6 +497,9 @@ MCP servers are available. The first question states the model's reading of the
 project for you to confirm or correct. It then names the destination and maps
 the frontier breadth-first, checking the code again before each question so it
 asks only about intent, priorities and trade-offs that the code cannot answer.
+In a repository that already has instructions, agents or MCP configuration,
+Compass reads that guidance first and never re-asks what it settles; it focuses
+on the next milestone and where the guidance is outdated, missing or conflicting.
 Questions are multiple choice (2 to 4 options, recommended one preselected, plus
 "Type your own answer", Skip and Done) or open with a recommended answer. It
 stops by 30 questions. The resulting map (destination, notes,
@@ -511,6 +513,14 @@ The model may then ask at most one round of questions; the next pass
 is final and must propose a team. Unanswered points, and any questions left in a
 noninteractive run, become **Assumptions** in the review instead of blocking
 setup. Noninteractive greenfield setup still requires `--description`.
+
+After the review, interactive init offers **Request changes** next to Team,
+All and Save. Describe the change in your own words (for example "merge the two
+UI roles" or "use a cheaper model for the reviewer"). Copilot revises its
+previous answer in one AI request: it applies the request, keeps earlier
+requests, leaves everything else unchanged and starts the summary with what
+changed. The revised review is shown and saved, and the menu returns. A run
+allows at most five revisions; a failed revision keeps the previous proposal.
 
 `init --proposal FILE --apply --guidance skip` installs the team without proposed
 guidance changes; `--guidance apply` includes them. Both create all workflow and

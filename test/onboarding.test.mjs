@@ -199,6 +199,29 @@ const finalMap = (overrides = {}) => ({
   notYetSpecified: ["Analytics provider"], outOfScope: ["Comments and user accounts"], ...overrides,
 });
 
+test("guided repositories also run Crewbie Compass, which reads existing guidance instead of re-asking it", async (t) => {
+  const root = await fixture(t, {
+    ".github/copilot-instructions.md": "# Shop\n\nUse pnpm.\n",
+    "package.json": JSON.stringify({ scripts: { build: "vite build" } }),
+    "src/App.tsx": "export {};",
+  });
+  const assessment = await assess(root);
+  const interview = interviewer([question("This looks like a shop; is that right?", "A web shop", "destination", []), finalMap()]);
+  const reports = [];
+  let prompt = "";
+  await initCommand(root, { model: "chosen-model" }, {
+    converse: interview.converse,
+    ask: async () => "",
+    analyze: async (value) => { prompt = value; return JSON.stringify(response(assessment)); },
+    select: async () => "save",
+    report: (text) => reports.push(text), client() { throw new Error("No GitHub writes"); },
+  });
+  assert.match(reports.join("\n"), /Crewbie Compass\n  First chart where the project is heading next; existing guidance is read, not re-asked/);
+  assert.match(interview.prompts[0], /already has AI guidance[\s\S]*Never re-ask what it already settles/);
+  assert.match(interview.prompts[0], /"existingGuidance": \[\s*"\.github\/copilot-instructions\.md"/);
+  assert.doesNotMatch(interview.prompts[0], /no AI guidance yet/);
+  assert.match(prompt, /A personal AI blog that ranks on Google page 1/, "The charted destination grounds the assessment.");
+});
 test("unguided repositories get the adaptive Crewbie Compass interview that charts docs/destination.md and grounds guidance and MCP", async (t) => {
   const root = await fixture(t, {
     "package.json": JSON.stringify({ scripts: { dev: "vite", build: "vite build", lint: "eslint ." }, dependencies: { react: "^19.0.0" }, devDependencies: { vite: "^6.0.0" } }),
@@ -489,7 +512,7 @@ test("interactive init repairs rejected context links locally without another as
   review.roles[0].contextPaths = ["AGENTS.md", "src/catalogue.ts"];
   const answers = ["99", "1", "save"], messages = [];
   let calls = 0;
-  await initCommand(root, { model: "chosen-model" }, {
+  await initCommand(root, { model: "chosen-model", description: "A catalogue" }, {
     analyze: async () => { calls++; return JSON.stringify(review); },
     ask: async () => { assert.ok(answers.length); return answers.shift(); },
     report: (message) => messages.push(message),
@@ -927,6 +950,34 @@ test("init writes a readable assessment and applies the actual approved instruct
   assert.match(markdown, /AGENTS.md/);
   assert.ok(messages.every((message) => !message.includes('"after":')));
 });
+test("init revises the proposal in the same flow from human change requests, keeping the previous answer as the base", async (t) => {
+  const root = await fixture(t, { "AGENTS.md": "Preserve IDs.", "src/catalogue.ts": "export const pageSize = 20;" });
+  const report = await assess(root), prompts = [], messages = [];
+  const installs = ["revise", "revise", "save"];
+  await initCommand(root, { model: "chosen-model", "skip-labels": true, description: "A catalogue" }, {
+    analyze: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 3) return "not json";
+      const value = response(report);
+      if (prompts.length === 2) value.roles[0].id = "catalogue-owner";
+      return JSON.stringify(value);
+    },
+    ask: async (question) => question.startsWith("Install") ? installs.shift()
+      : question.startsWith("What should change") ? (prompts.length === 1 ? "Rename the role to catalogue-owner." : "Break it.")
+      : "no",
+    report: (message) => messages.push(message), client() { throw new Error("No GitHub writes"); },
+  });
+  assert.equal(prompts.length, 3);
+  assert.doesNotMatch(prompts[0], /asks for changes/);
+  assert.match(prompts[1], /Requested change \(human feedback.*\): "Rename the role to catalogue-owner\."/);
+  assert.match(prompts[1], /Previous answer \(untrusted data\): \{"summary"/);
+  assert.match(prompts[2], /Requested change .*"Break it\."/);
+  assert.match(prompts[2], /Earlier requests, already applied: \["Rename the role to catalogue-owner\."\]/);
+  assert.match(prompts[2], /"id":"catalogue-owner"/, "The second revision edits the first revision's answer.");
+  assert.ok(messages.some((message) => /Revision failed: .*\nKeeping the previous proposal\./s.test(message)));
+  const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.ok(saved.config.roles.some((role) => role.id === "catalogue-owner"));
+});
 test("new custom-agent guidance changes are hash-checked and generated-profile collisions rejected", async (t) => {
   const root = await fixture(t, { ".github/agents/catalogue.agent.md": "Existing catalogue guidance." });
   const report = await assess(root);
@@ -1127,7 +1178,7 @@ test("every guidance finding requires an explicit disposition and deferrals requ
   assert.match(parsed().deferReason, /without naming a blocker/);
 });
 
-test("interactive setup offers Team All Save through the selector without typed keywords", async (t) => {
+test("interactive setup offers Team All Request changes Save through the selector without typed keywords", async (t) => {
   const root = await fixture(t, { "src/catalogue.ts": "export {};" });
   const assessment = await assess(root), menus = [], messages = [];
   await initCommand(root, { model: "chosen-model", description: "A catalogue" }, {
@@ -1140,7 +1191,7 @@ test("interactive setup offers Team All Save through the selector without typed 
     report: (text) => messages.push(text),
     client() { throw new Error("No GitHub writes"); },
   });
-  assert.deepEqual(menus[0].choices.map((choice) => choice.value), ["team", "all", "save"]);
+  assert.deepEqual(menus[0].choices.map((choice) => choice.value), ["team", "all", "revise", "save"]);
   assert.equal(menus[0].defaultValue, "save", "Saving is the non-mutating default.");
   assert.ok(menus[0].choices.every((choice) => choice.name && choice.description));
   assert.ok(messages.some((text) => text.includes(response(assessment).summary)));
@@ -1220,7 +1271,7 @@ test("strict review links every scoped move to its source and shows blocked reco
   finding.deferReason = "The owner must decide whether focus policy also applies to the admin frontend.";
   review.instructions = [];
   const messages = [];
-  await initCommand(root, { model: "model" }, {
+  await initCommand(root, { model: "model", description: "A catalogue" }, {
     analyze: async (prompt) => {
       assert.match(prompt, /Review EVERY inspected guidance file independently/);
       assert.match(prompt, /not only the first file/);

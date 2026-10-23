@@ -155,7 +155,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.62/crewbie-cli-0.1.0-alpha.62.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.63/crewbie-cli-0.1.0-alpha.63.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download. Run
@@ -179,9 +179,11 @@ servers. It then proposes:
 - `.github/workflows/copilot-setup-steps.yml` when it is missing;
 - an optional short constitution.
 
-You review the proposal before anything is written. Init never stops to ask you
-to rerun it: open points become assumptions you can check in the review. A
-repository without AI guidance first gets a short interview, [Crewbie Compass](#crewbie-compass).
+You review the proposal before anything is written. Not quite right? Choose
+**Request changes**, describe what to change, and Copilot revises the proposal
+in the same run. Init never stops to ask you
+to rerun it: open points become assumptions you can check in the review. Interactive
+init first runs a short interview, [Crewbie Compass](#crewbie-compass).
 
 For optional structural context, use `crewbie init --code-graph` with a separately
 installed, trusted [code-review-graph](https://github.com/tirth8205/code-review-graph)
@@ -207,8 +209,8 @@ branch protection still applies. To resume an already merged plan, follow
 
 ## Crewbie Compass
 
-When a repository has no AI guidance yet, init first charts where the project
-is going. Copilot explores the repository with the same read-only tools, then
+Interactive init first charts where the project is going, whether the
+repository is new or already has AI guidance. Copilot explores the repository with the same read-only tools, then
 asks one question at a time:
 
 1. Its reading of the project, for you to confirm or correct.
@@ -226,6 +228,9 @@ The result is saved as `docs/destination.md` when you install: destination,
 decisions, notes, what is not yet specified and what is out of scope. Guidance
 and agents point to that file instead of repeating it. Later runs reuse it
 instead of asking again; use `--description "..."` to skip the interview.
+When the repository already has instructions or agents, Compass reads them
+first and asks only where the project is heading next and where that guidance
+is outdated, missing or conflicting.
 
 ## What init checks in your instructions
 

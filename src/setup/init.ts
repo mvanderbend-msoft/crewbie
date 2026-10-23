@@ -6,7 +6,7 @@ import { requireWriter } from "../tracking/github.js";
 import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
 import { applyInstallation, installation, setupConfiguration } from "./install.js";
-import { needsInterview, proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
+import { proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
 import { DESTINATION_FILE, destinationInterview, renderDestination } from "./interview.js";
 import { reportedTools, repositoryTools } from "./repo-tools.js";
 import { cloudMcpConfig, cloudMcpInstructions, parseMcpServers } from "./mcp.js";
@@ -85,6 +85,9 @@ export async function installSetup(root: string, value: unknown, options: { appl
   const mcp = cloud ? `\n\nCopilot cloud agent MCP servers: ${cloudMcpInstructions(config.repository, cloud)}\n${cloud.config}` : "";
   return `Applied ${changes.length} reviewed file changes (${changes.filter((change) => change.before !== null && change.after !== null).length} existing files updated, ${changes.filter((change) => change.after === null).length} original agents archived). ${options.skipLabels ? "GitHub labels explicitly skipped." : "All Crewbie workflow and specialist labels are available."}${variable}${mcp}`;
 }
+
+/** Change requests per init run; each is one paid AI request. */
+const MAX_REVISIONS = 5;
 
 export async function initCommand(root: string, options: InitOptions, io: InitIO): Promise<void> {
   const report = io.report ?? console.log;
@@ -183,7 +186,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       if (charted?.trim()) {
         description = `${charted.slice(0, 16_000)}\n(From ${DESTINATION_FILE}.)`;
         report(`\nUsing ${DESTINATION_FILE} as the project destination; edit it or pass --description to change direction.`);
-      } else if (ask && needsInterview(assessment)) {
+      } else if (ask) {
         const converse = io.converse ?? (io.analyze ? transcriptConverse(io.analyze) : converseWithCopilot);
         destination = renderDestination(await destinationInterview(root, assessment, model, { converse, ask, select, report }));
         description = `${destination}\n(Setup creates ${DESTINATION_FILE} with exactly this map when the proposal is installed.)`;
@@ -195,10 +198,13 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     const files = assessment.repository?.files ?? [];
     const tools = files.length ? reportedTools(repositoryTools(root, files, { budget: 250_000, exhausted: "Read budget for this assessment is spent; propose from what you have read and state the remaining uncertainty." }), report) : undefined;
     report(`\n1. Assess\n  Model: ${model}\n  ${tools ? "Reviewing instructions, agents, constitution and MCP metadata, manifests and CI workflows. Copilot reads the code it needs with read-only tools (tracked text files only, never secrets or .gitignored files) so the team and guidance name real files and patterns." : assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata, plus manifest summaries and CI workflows; application source is not read, only file names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
+    let raw = "";
+    let revision: { previous: string; requests: string[] } | undefined;
     const propose = async () => {
       const result = await proposeSetup(assessment, description, model, {
         ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), ...(tools ? { tools } : {}), report,
         models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
+        ...(revision ? { revision } : {}), onOutput: (value) => { raw = value; },
       });
       return destination ? { ...result, destination } : result;
     };
@@ -214,7 +220,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     }
     // The CLI catalog includes models the cloud agent rejects; check only the chosen ones, since each check leaves a failed task.
     const checked = new Map<string, boolean>();
-    while (proposal.status === "ready" && proposal.config.repository) {
+    const checkModels = async () => { while (proposal.status === "ready" && proposal.config.repository) {
       const installed = new Map(assessment.installedRoles.map((role) => [role.id, role.model]));
       const unchecked = [...new Set(proposal.config.roles.map((role) => role.model))].filter((id) => !checked.has(id));
       if (unchecked.length) {
@@ -231,23 +237,48 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
       if (!catalog.length) throw new Error("The Copilot cloud agent accepts none of the catalog models for this account; no team was installed.");
       report(`  The Copilot cloud agent rejects ${rejected.join(", ")} for this account, although the CLI lists it. Reassessing without it.`);
       proposal = await propose();
-    }
+    } };
+    await checkModels();
     const output = options.out ?? "crewbie-setup.json";
     const markdown = setupReportPath(output);
-    await writeAtomic(root, output, json(proposal));
-    await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
-    report(`\nSaved for review\n  Assessment: ${markdown}\n  Editable setup: ${output}\n`);
-    if (!ask) {
-      report(`Assessment and tailored team saved to ${output}. Review, then run init --proposal ${output} --apply --guidance apply|skip. GitHub labels are created on apply.`);
-      return;
+    const requests: string[] = [];
+    let choice: string;
+    for (;;) {
+      await writeAtomic(root, output, json(proposal));
+      await writeAtomic(root, markdown, renderSetupMarkdown(proposal));
+      report(`\nSaved for review\n  Assessment: ${markdown}\n  Editable setup: ${output}\n`);
+      if (!ask) {
+        report(`Assessment and tailored team saved to ${output}. Review, then run init --proposal ${output} --apply --guidance apply|skip. GitHub labels are created on apply.`);
+        return;
+      }
+      const revisable = proposal.status === "ready" && raw !== "" && requests.length < MAX_REVISIONS;
+      const choices = [
+        { value: "team", name: "Team", description: "Adopt/create the proposed agents; leave existing guidance unchanged." },
+        { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}${proposal.mcpServers?.length ? ` and ${proposal.mcpServers.length} MCP servers` : ""}${proposal.setupSteps ? " and the agent setup workflow" : ""}.` },
+        ...(revisable ? [{ value: "revise", name: "Request changes", description: `Tell Copilot what to change (roles, models, guidance, MCP); it revises this proposal in one AI request (${requests.length + 1} of ${MAX_REVISIONS}).` }] : []),
+        { value: "save", name: "Save", description: "Keep the assessment and proposal for later. No installation or GitHub changes." },
+      ];
+      choice = select ? await select("Install this proposal?", choices, "save")
+        : (await ask(`Install this proposal? Enter team (adopt/create agents; skip guidance edits), all (also apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " and the proposed constitution" : ""}),${revisable ? " revise (request changes)," : ""} or save (no installation).`)).trim().toLowerCase();
+      if (choice !== "revise" || !revisable) break;
+      const request = (await ask("What should change? For example: merge two roles, use a cheaper model for the reviewer, add an accessibility specialist. Leave empty to go back.")).trim();
+      if (!request) continue;
+      const previous = proposal;
+      const previousRaw = raw;
+      requests.push(request);
+      revision = { previous: raw, requests: [...requests] };
+      report(`\nRevising the proposal (${requests.length} of ${MAX_REVISIONS}); this is one AI request and changes nothing yet.`);
+      try {
+        proposal = await propose();
+        if (previous.config.local?.start && !proposal.config.local?.start) proposal.config.local = previous.config.local;
+        await checkModels();
+      } catch (error) {
+        requests.pop();
+        proposal = previous;
+        raw = previousRaw;
+        report(`Revision failed: ${error instanceof Error ? error.message : String(error)}\nKeeping the previous proposal.`);
+      }
     }
-    const choices = [
-      { value: "team", name: "Team", description: "Adopt/create the proposed agents; leave existing guidance unchanged." },
-      { value: "all", name: "All", description: `Create the team and apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " plus the proposed constitution" : ""}${proposal.mcpServers?.length ? ` and ${proposal.mcpServers.length} MCP servers` : ""}${proposal.setupSteps ? " and the agent setup workflow" : ""}.` },
-      { value: "save", name: "Save", description: "Keep the assessment and proposal for later. No installation or GitHub changes." },
-    ];
-    const choice = select ? await select("Install this proposal?", choices, "save")
-      : (await ask(`Install this proposal? Enter team (adopt/create agents; skip guidance edits), all (also apply ${proposal.instructions.length} guidance edits${proposal.constitutionText ? " and the proposed constitution" : ""}), or save (no installation).`)).trim().toLowerCase();
     if (!["team", "all", "save"].includes(choice)) throw new Error(`Unknown choice; proposal saved to ${output}. Nothing installed.`);
     if (choice === "save") { report(`Saved only. No files installed or GitHub labels changed.\nResume: crewbie init --proposal "${output}" --apply --guidance apply|skip`); return; }
     if (!proposal.config.planning?.enabled) {

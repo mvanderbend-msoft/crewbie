@@ -49,8 +49,14 @@ export async function projectOverview(root: string, assessment: Assessment): Pro
   };
 }
 
+function existingGuidance(assessment: Assessment): string[] {
+  return [...assessment.inventory.files.filter((file) => file.kind !== "archive").map((file) => file.path), ...assessment.inventory.mcp.map((file) => file.path)];
+}
+
 function brief(assessment: Assessment, overview: Record<string, unknown>, explore: boolean): string {
+  const guidance = existingGuidance(assessment);
   const evidence = {
+    existingGuidance: guidance,
     detectedStack: detectedStack(assessment.project) || null,
     manifests: (assessment.project?.manifests ?? []).map(({ path, packageManager, scripts, dependencies }) => ({ path, packageManager, scripts, dependencies })),
     ciWorkflows: (assessment.project?.workflows ?? []).map((workflow) => workflow.path),
@@ -59,7 +65,7 @@ function brief(assessment: Assessment, overview: Record<string, unknown>, explor
     overview,
   };
   return `Run the Crewbie Compass interview so an AI coding crew can be set up for this repository.
-The repository has no AI guidance yet. Your map becomes ${DESTINATION_FILE} and grounds the team, instructions and MCP servers.
+${guidance.length ? `The repository already has AI guidance (evidence.existingGuidance).${explore ? " Read it with repo_read_file before your first question." : ""} Never re-ask what it already settles; focus on where the project is heading next and where that guidance is outdated, missing or conflicting.` : "The repository has no AI guidance yet."} Your map becomes ${DESTINATION_FILE} and grounds the team, instructions and MCP servers.
 
 0. Dig into the repository first, like a new teammate would.${explore ? " Use repo_list_files, repo_read_file and repo_search: read the README, entry points, routes and pages, content and data folders, config (for example vercel.json, index.html), tests and CI." : ""} Work out what this project is, for whom, what already exists and how far along it is. Your FIRST question states that reading as the recommended answer in an open question ("options": []), for example "This looks like <what> for <whom>; <state>. Is that right, or what is it?". If the evidence is thin, say so and recommend your best reading.
 1. Name the destination: sharpen what reaching the next milestone looks like (what the product is, who it is for, what success means), building on the confirmed reading. Grill until it is unambiguous.
@@ -169,7 +175,7 @@ export async function destinationInterview(
   root: string, assessment: Assessment, model: string,
   io: { converse: Converse; ask: (question: string) => Promise<string>; select?: SetupPrompts["select"] | undefined; report: (text: string) => void },
 ): Promise<DestinationMap> {
-  io.report(`\nCrewbie Compass\n  No AI guidance yet, so first chart the destination. Copilot explores the repository (read-only: tracked text files, never secrets or .gitignored files), then asks one\n  question at a time, starting with its reading of the project and digging further before each question.\n  Enter accepts the recommendation; you can also type your own answer, skip (Copilot assumes) or finish. At most ${INTERVIEW_QUESTIONS} questions; each turn is a small AI request.\n  The result is saved as ${DESTINATION_FILE} when you install.\n`);
+  io.report(`\nCrewbie Compass\n  ${existingGuidance(assessment).length ? "First chart where the project is heading next; existing guidance is read, not re-asked." : "No AI guidance yet, so first chart the destination."} Copilot explores the repository (read-only: tracked text files, never secrets or .gitignored files), then asks one\n  question at a time, starting with its reading of the project and digging further before each question.\n  Enter accepts the recommendation; you can also type your own answer, skip (Copilot assumes) or finish. At most ${INTERVIEW_QUESTIONS} questions; each turn is a small AI request.\n  The result is saved as ${DESTINATION_FILE} when you install.\n`);
   const answered: { topic: string; decision: string }[] = [];
   const overview = await projectOverview(root, assessment);
   const files = assessment.repository?.files ?? [];
