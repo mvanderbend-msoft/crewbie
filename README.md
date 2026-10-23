@@ -155,7 +155,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.63/crewbie-cli-0.1.0-alpha.63.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.64/crewbie-cli-0.1.0-alpha.64.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download. Run
@@ -209,14 +209,17 @@ branch protection still applies. To resume an already merged plan, follow
 
 ## Crewbie Compass
 
-Interactive init first charts where the project is going, whether the
-repository is new or already has AI guidance. Copilot explores the repository with the same read-only tools, then
+Interactive init first pins down what the project is and which constraints the
+crew must respect, whether the repository is new or already has AI guidance.
+Compass is not a planning step: it does not ask about milestones or next
+features, which belong in issues. Copilot explores the repository with the same read-only tools, then
 asks one question at a time:
 
 1. Its reading of the project, for you to confirm or correct.
-2. The destination: what the next milestone looks like when it is done.
-3. Focused follow-ups that the code cannot answer, such as intent, priorities,
-   trade-offs and what is out of scope. Copilot checks the code again before
+2. Purpose and users: what the product is, who uses it and what matters most.
+3. Constraints the code cannot show, such as platforms, compatibility,
+   security and privacy, quality priorities, external services, team
+   conventions and what is out of scope. Copilot checks the code again before
    each question, so the questions name real files and behaviour.
 
 Most questions are multiple choice with the recommended option preselected.
@@ -224,13 +227,13 @@ Press Enter to accept it, pick another option, type your own answer, skip
 (Copilot assumes and records it) or finish. Compass stops by 30 questions. Each
 turn is a small AI request.
 
-The result is saved as `docs/destination.md` when you install: destination,
-decisions, notes, what is not yet specified and what is out of scope. Guidance
+The result is saved as `docs/destination.md` when you install: purpose,
+constraints, decisions, notes, what is not yet specified and what is out of scope. Guidance
 and agents point to that file instead of repeating it. Later runs reuse it
 instead of asking again; use `--description "..."` to skip the interview.
 When the repository already has instructions or agents, Compass reads them
-first and asks only where the project is heading next and where that guidance
-is outdated, missing or conflicting.
+first and asks only what it leaves unclear and where it is outdated, missing
+or conflicting.
 
 ## What init checks in your instructions
 

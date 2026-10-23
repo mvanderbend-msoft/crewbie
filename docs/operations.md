@@ -112,7 +112,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.63 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.64 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -295,7 +295,7 @@ non-overlapping code areas (typically 2 to 4 roles for a small single-package
 repository); owners write the tests for their own changes. From alpha.62 roles
 are split by change coupling rather than file type: each cross-cutting concern
 (such as metadata and SEO, routing, auth or data access) has exactly one owner,
-and the model checks that the next milestone's main changes each land with one
+and the model checks that the project's typical changes each land with one
 role. Two implementing roles naming the same file in their purpose produce a
 repository-check warning. Product constraints
 such as "no external services" do not rule out agent tooling or MCP servers.
@@ -499,10 +499,12 @@ the frontier breadth-first, checking the code again before each question so it
 asks only about intent, priorities and trade-offs that the code cannot answer.
 In a repository that already has instructions, agents or MCP configuration,
 Compass reads that guidance first and never re-asks what it settles; it focuses
-on the next milestone and where the guidance is outdated, missing or conflicting.
+on what the guidance leaves unclear and where it is outdated, missing or
+conflicting. Compass captures purpose, users and constraints, not plans: it does
+not ask about milestones or next features, which belong in issues.
 Questions are multiple choice (2 to 4 options, recommended one preselected, plus
 "Type your own answer", Skip and Done) or open with a recommended answer. It
-stops by 30 questions. The resulting map (destination, notes,
+stops by 30 questions. The resulting map (purpose, notes and constraints,
 decisions, not yet specified, out of scope) is shown in the review and
 written to `docs/destination.md` on apply, only when that file is absent.
 Guidance cites that file instead of repeating it. Later

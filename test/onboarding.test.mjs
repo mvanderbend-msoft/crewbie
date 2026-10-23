@@ -216,10 +216,12 @@ test("guided repositories also run Crewbie Compass, which reads existing guidanc
     select: async () => "save",
     report: (text) => reports.push(text), client() { throw new Error("No GitHub writes"); },
   });
-  assert.match(reports.join("\n"), /Crewbie Compass\n  First chart where the project is heading next; existing guidance is read, not re-asked/);
+  assert.match(reports.join("\n"), /Crewbie Compass\n  First pin down the project and its constraints; existing guidance is read, not re-asked/);
   assert.match(interview.prompts[0], /already has AI guidance[\s\S]*Never re-ask what it already settles/);
   assert.match(interview.prompts[0], /"existingGuidance": \[\s*"\.github\/copilot-instructions\.md"/);
   assert.doesNotMatch(interview.prompts[0], /no AI guidance yet/);
+  assert.match(interview.prompts[0], /not planning work: do not ask about milestones, roadmaps, next features/);
+  assert.match(interview.prompts[0], /map the constraints breadth-first[\s\S]*security, privacy and compliance/);
   assert.match(prompt, /A personal AI blog that ranks on Google page 1/, "The charted destination grounds the assessment.");
 });
 test("unguided repositories get the adaptive Crewbie Compass interview that charts docs/destination.md and grounds guidance and MCP", async (t) => {
@@ -721,7 +723,7 @@ test("roles carry technical working knowledge into their charters and the setup 
   assert.match(prompt, /propose setupSteps/);
   assert.match(prompt, /Split by change coupling, not by file type or layer/);
   assert.match(prompt, /Each cross-cutting concern .* has exactly one owner/);
-  assert.match(prompt, /walk through the main changes the destination's next milestone needs/);
+  assert.match(prompt, /walk through the typical changes this project sees/);
   assert.doesNotMatch(setupPrompt(report, "A blog.", []), /repo_\* tools/);
 });
 

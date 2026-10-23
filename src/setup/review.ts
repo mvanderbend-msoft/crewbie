@@ -44,7 +44,7 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
     : path === ".crewbie/instructions.md" ? ["Crewbie-managed", "Single shared working policy referenced by specialists, not duplicated into each charter."]
     : /pull_request_template/i.test(path) ? ["Crewbie-managed", "Prompt for concise implementation evidence, handoffs and learning."]
     : path === MCP_FILE ? ["Reviewed MCP configuration", "Proposed local MCP servers; secrets are prompted when a server starts and never written. Created only when absent."]
-    : path === DESTINATION_FILE ? ["User knowledge", "Destination, decisions, open questions and scope charted in the setup interview; agents read it for product direction. Created only when absent."]
+    : path === DESTINATION_FILE ? ["User knowledge", "Purpose, users, constraints, decisions, open questions and scope charted in the setup interview; agents read it for project context. Created only when absent."]
     : ["Reviewed guidance", "Apply only the separately approved instruction replacement; preserve subsequent edits."];
   return { ...change, ownership: detail[0]!, purpose: detail[1]! };
 }
