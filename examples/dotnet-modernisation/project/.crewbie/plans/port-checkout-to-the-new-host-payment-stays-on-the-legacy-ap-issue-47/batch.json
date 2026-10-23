@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-47",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/outdoor-store/issues/47. Source revision: 2026-10-13T07:50:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/outdoor-store/issues/47",
+      "revision": "2026-10-13T07:50:00Z",
+      "fingerprint": "e5e7918c12fd0383b6874ce3a4c559007d328be4c34ba54f71653949db51c89f"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "order-mapping",
+      "title": "Map orders and write them in one transaction",
+      "body": "Map `Order` and `OrderLine` to the existing tables in `src/Contoso.Outdoor.Data.Core` and add an order writer that saves an order and its lines in one transaction.\n\n## Acceptance criteria\n- An order written by EF Core matches the existing schema (tables, columns, keys and status values) so the legacy app reads it.\n- No migration is added.\n- Order totals come from PriceCalculator.",
+      "owner": "data-access",
+      "model": "claude-sonnet-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "checkout-review",
+      "title": "Port the checkout review and address step",
+      "body": "Port the `Index` GET and POST actions of CheckoutController (cart review and delivery address) and their view; the address stays in the remote session as in the legacy app.\n\n## Acceptance criteria\n- Same URL, validation messages, anti-forgery validation and redirect after a valid address.\n- Signed-out shoppers are sent to `/Account/Login` with the same return URL.\n- `PlaceOrder`, `Pay` and `Confirm` are still forwarded.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 2,
+      "dependsOn": []
+    },
+    {
+      "id": "checkout-alerts",
+      "title": "Alert on checkout failures in the new host",
+      "body": "Add an Application Insights log alert in `infra/` that notifies the team when checkout requests served by the new host fail.\n\n## Acceptance criteria\n- The alert is defined in Bicep and deploys with azd.\n- It covers only requests the new host serves.\n- No secret or personal data is in the alert definition.",
+      "owner": "cloud-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 3,
+      "dependsOn": []
+    },
+    {
+      "id": "place-order-handoff",
+      "title": "Port order placement with a hand-off to legacy payment",
+      "body": "Port `PlaceOrder`: the new host creates the pending order with the order writer and redirects to the legacy `/Checkout/Pay/{id}`, which keeps calling the payment provider.\n\n## Acceptance criteria\n- The legacy payment and confirmation pages read orders created by the new host.\n- Same redirect and anti-forgery behaviour as the legacy action.\n- `Pay` and `Confirm` stay forwarded to the legacy app.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 4,
+      "dependsOn": [
+        "order-mapping",
+        "checkout-review"
+      ]
+    }
+  ],
+  "approval": null
+}

@@ -1,39 +1,57 @@
-# Java 21 upgrade: Maven multi-module service from Java 11
+# Java 21 upgrade: a ledger service two months into Crewbie
 
-**Repository** (`contoso/ledger-service`): a double-entry ledger API built with Maven. It has three modules:
+`contoso/ledger-service` is a Maven multi-module double-entry ledger API (`ledger-core`, `ledger-persistence`,
+`ledger-app`) used by Contoso's payments and invoicing teams. It installed Crewbie on 2026-08-24 to move from Java 11 to
+Java 21 without changing its API, numbers or frameworks, and kept using it for the features that followed.
 
-- `ledger-core`: the domain, using Lombok `@Value`.
-- `ledger-persistence`: JDBC, Flyway 7, PostgreSQL and Testcontainers.
-- `ledger-app`: the JDK `HttpServer` and a Dockerfile based on `eclipse-temurin:11-jre`.
+## Why this team
 
-CI uses JDK 11. The repository already has an `AGENTS.md` and a custom `.github/agents/build.agent.md`.
-
-**Destination** (from Crewbie Compass): build and run on Java 21 (Temurin) with the same API, balances and rounding. The service keeps its current frameworks and Maven. Records and pattern matching are used only in code a task already changes, after the toolchain change merges. See [`repo/docs/destination.md`](repo/docs/destination.md).
-
-## Team
-
-| Role | Model | Why this split |
+| Role | Model | Why |
 | --- | --- | --- |
-| `build-platform` | gpt-5.3-codex | Adopted from the existing `build` agent. Owns the compiler, plugin and library versions that block Java 21 (Lombok, Mockito, JaCoCo, Surefire and Testcontainers), CI and the container image. |
-| `ledger-domain` | claude-sonnet-5.5 | Owns `ledger-core`. Converting a Lombok `@Value` class to a record renames its accessors. |
-| `persistence` | gpt-5.3-codex | Owns `ledger-persistence`. Migrations are immutable, and Flyway 10+ needs `flyway-database-postgresql`. |
-| `ledger-reviewer` | gpt-6.1-sol | Blocks any change to balances, rounding or the API, and enforces one concern per PR. |
+| `build-platform` | gpt-5.3-codex | Adopted from the repository's own `build` agent. Owns the poms, plugin and library versions, CI, packaging and the image. |
+| `ledger-domain` | claude-sonnet-5.5 | Owns `ledger-core` (balancing, rounding, records) and, since #56, the HTTP mapping in `ledger-app`. |
+| `persistence` | gpt-5.3-codex | Owns JDBC, Flyway, the PostgreSQL driver and the Testcontainers integration tests. |
+| `ledger-reviewer` | gpt-6.1-sol | Reviews every feature PR for unchanged balances, rounding and API responses, and one concern per PR. |
 
-### Adopting an existing agent
+The coordinator (claude-opus-5.5) plans issues; the improver runs on demand (nightly runs are off).
 
-The review chose `adopt` for `.github/agents/build.agent.md`. Crewbie installs it as `crewbie-build-platform.agent.md`. The original instructions and tools come first, followed by Crewbie's role sections and the managed handoff block. The original is moved to `repo/.crewbie/agent-archive/github/agents/build.agent.md`. Init deletes `.github/agents/build.agent.md`, so it is not under `repo/`.
+## Tour of `project/`
 
-## Guidance
+- **Code**: `pom.xml` (`maven.compiler.release` 21, every version), `ledger-core/` (the `Posting` record, sealed
+  `BalanceResult`, the Lombok `Journal` nobody needed to touch), `ledger-persistence/` (JDBC repository, Flyway 10
+  migrator, `*IT` tests run by Failsafe), `ledger-app/` (JDK `HttpServer`, reflection-based `JsonWriter`, Dockerfile on
+  `eclipse-temurin:21-jre`), `.github/workflows/ci.yml` (JDK 21).
+- **Configuration**: `.crewbie/config.json` (roles, models, review by `ledger-reviewer`, planning on merge).
+- **Agents**: `.github/agents/crewbie-*.agent.md`; the original build agent is archived under `.crewbie/agent-archive/`.
+- **Instructions**: `AGENTS.md`, `.github/instructions/` (`java`, `maven`, `migrations`), `.crewbie/instructions.md`,
+  `.github/skills/crewbie/SKILL.md`.
+- **Destination**: `docs/destination.md`, updated in #64 with the virtual threads decision.
+- **Memory**: `.crewbie/team/<role>/hot.md` (gotchas with their source PR), `index.md`, and
+  `.crewbie/team/build-platform/cold/java-21-build-traps.md` for the longer story behind two hot entries.
+- **Decisions**: `.crewbie/decisions/hot.md` and `.crewbie/decisions/cold/virtual-threads.md`.
+- **Plans**: `.crewbie/plans/<title-slug>-issue-<n>/` for #31 (Java 21), #45 (Flyway 10), #55 (account balance) and
+  #65 (virtual threads, in progress).
 
-- `AGENTS.md` is updated. It keeps the money and migration rules, replaces the JDK 11 pin and the Lombok rule, and adds the command for building on JDK 21 while 11 is still the default.
-- Path-scoped instructions: `java` (`**/*.java`), `maven` (`**/pom.xml`) and `migrations`.
-- `copilot-setup-steps.yml` installs Temurin 21 and 11. JDK 11 is the default, and `JAVA_HOME_21_X64` points to JDK 21 until the toolchain change merges.
-- MCP server: Context7 for version-specific library documentation, also for the cloud agent.
+`project/` is the feature branch `crewbie/issue-65-29ee5521` on 2026-10-23: `main` plus the two merged task PRs of #65
+(PostgreSQL driver 42.7.4 and `BoundedDataSource`). The open task PR #72 (virtual threads) and the unstarted
+`pinning-check` task are not in it, so `LedgerApplication` still uses a fixed thread pool.
 
-## Issue to plan
+## Read next
 
-[`issue.md`](issue.md) asks to run on Java 21. [`plan.json`](plan.json) starts with `toolchain` (build-platform). Three tasks then follow it:
+- [setup/crewbie-setup.md](setup/crewbie-setup.md): what `crewbie init` proposed on day 0.
+- [HISTORY.md](HISTORY.md): every issue, plan PR, task PR, review, fix round and memory entry since then.
 
-- `container-image` (build-platform). It is a separate PR so that payments can schedule the runtime change.
-- `persistence-on-21` (persistence).
-- `domain-records` (ledger-domain).
+## What changed after init on purpose
+
+Listed with reasons in `scenario.mjs` (`evolved`):
+
+- `copilot-setup-steps.yml` installs only JDK 21 and `AGENTS.md` lost the dual-JDK command (#44), as init's assumption
+  said they should once the toolchain change merged.
+- `java.instructions.md` lost the "Java 11 until release is 21" rule and gained the `JsonWriter` trap (#44).
+- `docs/destination.md` records the virtual threads decision and the open index question (#64).
+
+## Generated vs hand-written
+
+Crewbie-owned files (config, agents, workflows, skill, PR template, instructions not listed in `evolved`) and the plan
+files are generated by `npm run examples` from `scenario.mjs` and checked by `test/examples.test.mjs`. Application code,
+memory, decisions, the evolved files and the history are hand-written to show two months of use.

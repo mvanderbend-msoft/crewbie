@@ -1,0 +1,20 @@
+[project]
+name = "concierge"
+version = "0.4.0"
+description = "Contoso Travel concierge, a Microsoft Foundry hosted agent built with Microsoft Agent Framework."
+requires-python = ">=3.13"
+dependencies = [
+    "agent-framework-foundry",
+    "agent-framework-foundry-hosting>=1.0.0b260813",
+    "azure-identity",
+    "azure-search-documents",
+    "httpx",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

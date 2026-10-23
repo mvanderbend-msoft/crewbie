@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-28",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/travel-concierge/issues/28. Source revision: 2026-09-21T13:05:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/travel-concierge/issues/28",
+      "revision": "2026-09-21T13:05:00Z",
+      "fingerprint": "118317d5744f2fa70b6660e0a1680677332b7c02a9d14b530b777e3de76ee3ec"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "eval-runner",
+      "title": "Make the evaluations runnable in CI",
+      "body": "Turn `evals/` into a uv project with a runner that targets a given Responses endpoint, scores every dataset, writes results with the agent version and exits non-zero below a threshold. Document the command in `AGENTS.md`.\n\n## Acceptance criteria\n- The runner fails when any metric is below `evals/thresholds.json`.\n- Each result file records the agent version and the dataset it ran against.\n- The cloud agent's setup steps can run the evaluations.",
+      "owner": "evaluation",
+      "model": "claude-sonnet-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "deploy-workflow",
+      "title": "Deploy from GitHub Actions with OIDC",
+      "body": "Add `.github/workflows/deploy.yml` that signs in with a federated credential and runs `azd deploy` on pushes to `main`, using a protected GitHub environment.\n\n## Acceptance criteria\n- No Azure secret or client secret is stored in the repository or its settings.\n- The deploy identity has the Foundry Project Manager role on the project only.",
+      "owner": "foundry-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "eval-gate",
+      "title": "Gate the deploy on the evaluations",
+      "body": "Add an evaluation job to `deploy.yml` that builds the image, starts the agent host in the job, runs the evaluation runner against it and uploads the results; the deploy job needs it.\n\n## Acceptance criteria\n- The deploy job cannot run when the evaluation job fails.\n- Evaluation results are uploaded as a workflow artifact for every run.",
+      "owner": "foundry-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 2,
+      "dependsOn": [
+        "eval-runner",
+        "deploy-workflow"
+      ]
+    }
+  ],
+  "approval": null
+}

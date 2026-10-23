@@ -204,25 +204,94 @@ export default {
   start: "azd ai agent run",
   files,
   destination,
-  issue: {
-    number: 7, updatedAt: "2026-03-04T15:40:00Z",
-    title: "Answer travel-policy questions with citations",
-    body: "Employees ask the concierge things like \"Can I book business class to Singapore?\". It should answer from the travel policy documents in Azure AI Search and cite the policy section, or say it does not know.\n\n- Never make up a policy rule.\n- The agent may only read the policy index; no new write access.\n- We want to see that answers stay grounded before we enable it for everyone.\n",
+  /** Files the team changed on purpose after init, with the reason; the generator leaves them to the project. */
+  evolved: {
+    "AGENTS.md": "The team added the tool-output fencing rule (#16), the `evals/` install, test and `uv run python run.py` evaluation commands (#33) and the rule that production deploys only run from `deploy.yml` (#37).",
+    ".github/workflows/copilot-setup-steps.yml": "`evals/` became its own uv project in #33, so the cloud agent also runs `uv sync --frozen` there to run evaluations.",
+    ".github/instructions/foundry-deploy.instructions.md": "Access grants moved to `scripts/grant-agent-access.sh` (run by the `postdeploy` hook) in #12 and #22, so `applyTo` now covers `scripts/**` and the file records the post-deploy rule.",
   },
-  plan: {
-    summary: "Three tasks. The agent runtime adds a read-only policy search tool and instructions to cite or decline; the platform specialist grants the agent identity read access to the index only; evaluation adds golden questions and a groundedness threshold once the tool exists.",
-    tasks: [
-      { id: "policy-search-tool", title: "Add a policy search tool with citations", owner: "agent-runtime", priority: 1, dependsOn: [],
-        scope: "Add a read-only Azure AI Search tool to the concierge in `src/concierge` and instructions to answer only from its results, citing the section, or say it does not know.",
-        acceptanceCriteria: ["Answers include the policy title and section of each result used.", "Questions without a matching policy get an explicit I-don't-know answer.", "Unit tests mock search and cover a hit, no hit and an injected instruction inside a result."] },
-      { id: "search-access", title: "Grant the agent identity read access to the policy index", owner: "foundry-platform", priority: 1, dependsOn: [],
-        scope: "Configure the search endpoint for the hosted agent and assign the agent's Entra identity Search Index Data Reader on the search service only.",
-        acceptanceCriteria: ["`azd provision --preview` shows one role assignment scoped to the search service.", "No key or connection string is added to `azure.yaml`, workflows or the image."] },
-      { id: "groundedness-evals", title: "Evaluate grounded policy answers", owner: "evaluation", priority: 2, dependsOn: ["policy-search-tool"],
-        scope: "Add a golden set of at least 20 policy questions (including unanswerable ones) to `evals/` with groundedness and task adherence thresholds.",
-        acceptanceCriteria: ["The evaluation run reports groundedness and task adherence against `evals/thresholds.json`.", "Unanswerable questions are scored as correct only when the agent declines.", "The golden set contains no real traveller data."] },
-    ],
-  },
+  /** Issues planned since init, oldest first. Their plans are generated into project/.crewbie/plans/. */
+  issues: [
+    {
+      number: 7, updatedAt: "2026-08-27T09:10:00Z",
+      title: "Answer travel-policy questions with citations",
+      body: "Employees ask the concierge things like \"Can I book business class to Singapore?\". It should answer from the travel policy documents in Azure AI Search and cite the policy section, or say it does not know.\n\n- Never make up a policy rule.\n- The agent may only read the policy index; no new write access.\n- We want to see that answers stay grounded before we enable it for everyone.\n",
+      plan: {
+        summary: "Three tasks. The agent runtime adds a read-only policy search tool and instructions to cite or decline; the platform specialist grants the agent identity read access to the index only; evaluation adds golden questions and a groundedness threshold once the tool exists.",
+        tasks: [
+          { id: "policy-search-tool", title: "Add a policy search tool with citations", owner: "agent-runtime", priority: 1, dependsOn: [],
+            scope: "Add a read-only Azure AI Search tool to the concierge in `src/concierge` and instructions to answer only from its results, citing the section, or say it does not know.",
+            acceptanceCriteria: ["Answers include the policy title and section of each result used.", "Questions without a matching policy get an explicit I-don't-know answer.", "Unit tests mock search and cover a hit, no hit and an injected instruction inside a result."] },
+          { id: "search-access", title: "Grant the agent identity read access to the policy index", owner: "foundry-platform", priority: 1, dependsOn: [],
+            scope: "Configure the search endpoint for the hosted agent and assign the agent's Entra identity Search Index Data Reader on the search service only.",
+            acceptanceCriteria: ["`azd provision --preview` shows one role assignment scoped to the search service.", "No key or connection string is added to `azure.yaml`, workflows or the image."] },
+          { id: "groundedness-evals", title: "Evaluate grounded policy answers", owner: "evaluation", priority: 2, dependsOn: ["policy-search-tool"],
+            scope: "Add a golden set of at least 20 policy questions (including unanswerable ones) to `evals/` with groundedness and task adherence thresholds.",
+            acceptanceCriteria: ["The evaluation run reports groundedness and task adherence against `evals/thresholds.json`.", "Unanswerable questions are scored as correct only when the agent declines.", "The golden set contains no real traveller data."] },
+        ],
+      },
+    },
+    {
+      number: 17, updatedAt: "2026-09-08T10:20:00Z",
+      title: "Book trips with human approval",
+      body: "Once a traveller has picked a flight and hotel, the concierge should book it through the internal booking API (behind API Management).\n\n- Nothing is booked until the traveller approves the exact trip in the conversation; the Teams app shows the approval request.\n- Use the agent identity, no API keys.\n- Show us the agent picks the booking tool with the right arguments, and never calls it without approval.\n- Changing and cancelling trips comes later.\n",
+      plan: {
+        summary: "Three tasks. The platform specialist gives the agent identity access to the booking API through API Management and adds its settings; the agent runtime adds an approval-required `book_trip` tool and a booking client, tested through the approval round trip; evaluation adds tool-call accuracy cases once the tool exists. Changing and cancelling trips stay out, as the issue asks.",
+        tasks: [
+          { id: "booking-api-access", title: "Give the agent identity access to the booking API", owner: "foundry-platform", priority: 1, dependsOn: [],
+            scope: "Add the booking API base URL and token scope as azd environment values passed to the hosted agent, and grant the agent's Entra identity the booking API's app role after deploy.",
+            acceptanceCriteria: ["`azure.yaml` passes the booking API settings to the agent from the azd environment.", "The agent identity gets only the booking app role; no key or subscription is stored anywhere."] },
+          { id: "booking-tool", title: "Add an approval-required booking tool", owner: "agent-runtime", priority: 1, dependsOn: [],
+            scope: "Add a `book_trip` tool with `@tool(approval_mode=\"always_require\")` in `src/concierge` and a booking client that calls the API with a `DefaultAzureCredential` token.",
+            acceptanceCriteria: ["The host returns an approval request instead of booking, and the booking runs only after approval continues with `previous_response_id`.", "Tests prove a rejected or missing approval never reaches the booking client.", "The agent says it cannot change or cancel trips yet."] },
+          { id: "tool-call-evals", title: "Evaluate booking tool calls", owner: "evaluation", priority: 2, dependsOn: ["booking-tool"],
+            scope: "Add synthetic booking conversations to `evals/` scored with tool-call accuracy, including requests that must not call `book_trip`.",
+            acceptanceCriteria: ["Tool-call accuracy is reported against `evals/thresholds.json`.", "Cases cover a correct booking, a missing detail that needs a question, and a change or cancel request that must not call the tool."] },
+        ],
+      },
+    },
+    {
+      number: 28, updatedAt: "2026-09-21T13:05:00Z",
+      title: "Deploy from GitHub Actions with an evaluation gate",
+      body: "Today someone runs `azd deploy` from a laptop. We want every merge to `main` to deploy the concierge from GitHub Actions, but only if the evaluations pass first.\n\n- Sign in with OIDC, no stored Azure secrets.\n- The pipeline must fail the deploy when any metric is below `evals/thresholds.json`.\n- Keep the evaluation results of each deploy so we can compare versions.\n",
+      plan: {
+        summary: "Three tasks. Evaluation turns `evals/` into a runnable uv project whose runner exits non-zero below any threshold; the platform specialist adds a deploy workflow signing in with OIDC; then the platform specialist wires the gate so the deploy job only runs after the evaluation job passes against the built container.",
+        tasks: [
+          { id: "eval-runner", title: "Make the evaluations runnable in CI", owner: "evaluation", priority: 1, dependsOn: [],
+            scope: "Turn `evals/` into a uv project with a runner that targets a given Responses endpoint, scores every dataset, writes results with the agent version and exits non-zero below a threshold. Document the command in `AGENTS.md`.",
+            acceptanceCriteria: ["The runner fails when any metric is below `evals/thresholds.json`.", "Each result file records the agent version and the dataset it ran against.", "The cloud agent's setup steps can run the evaluations."] },
+          { id: "deploy-workflow", title: "Deploy from GitHub Actions with OIDC", owner: "foundry-platform", priority: 1, dependsOn: [],
+            scope: "Add `.github/workflows/deploy.yml` that signs in with a federated credential and runs `azd deploy` on pushes to `main`, using a protected GitHub environment.",
+            acceptanceCriteria: ["No Azure secret or client secret is stored in the repository or its settings.", "The deploy identity has the Foundry Project Manager role on the project only."] },
+          { id: "eval-gate", title: "Gate the deploy on the evaluations", owner: "foundry-platform", priority: 2, dependsOn: ["eval-runner", "deploy-workflow"],
+            scope: "Add an evaluation job to `deploy.yml` that builds the image, starts the agent host in the job, runs the evaluation runner against it and uploads the results; the deploy job needs it.",
+            acceptanceCriteria: ["The deploy job cannot run when the evaluation job fails.", "Evaluation results are uploaded as a workflow artifact for every run."] },
+        ],
+      },
+    },
+    {
+      number: 38, updatedAt: "2026-10-12T08:45:00Z",
+      title: "Plan multi-city trips over several turns",
+      body: "Travellers increasingly plan trips with several stops (for example Amsterdam, then Seattle, then Toronto). Today the concierge loses track after a few turns and treats each leg separately.\n\n- Keep the trip being planned across turns and across a restart of the host.\n- Offer flights and hotels per leg from the booking API, read-only until the traveller approves.\n- The policy check must cover the whole trip, not just one leg.\n- We need traces to see where long conversations go wrong.\n",
+      plan: {
+        summary: "Four tasks. The agent runtime first restructures the concierge into a workflow with stable policy and booking steps served by a factory, then adds a read-only offer search tool per leg; evaluation adds multi-turn golden conversations once the workflow exists, and adds tracing for the workflow steps once the offer tool exists.",
+        tasks: [
+          { id: "trip-workflow", title: "Restructure the concierge as a policy and booking workflow", owner: "agent-runtime", priority: 1, dependsOn: [],
+            scope: "Build an Agent Framework workflow in `src/concierge` with stable `policy` and `booking` executors, keep the trip draft in the workflow state and serve it from `main.py` through a zero-argument factory.",
+            acceptanceCriteria: ["A conversation resumed after a host restart keeps the trip draft and any pending approval.", "Existing policy and booking tests pass unchanged against the workflow."] },
+          { id: "offer-search-tool", title: "Search flight and hotel offers per leg", owner: "agent-runtime", priority: 2, dependsOn: ["trip-workflow"],
+            scope: "Add a read-only `search_offers` tool that queries the booking API for one leg and returns offers fenced as data; no approval is needed because nothing is reserved.",
+            acceptanceCriteria: ["Offers for each leg are shown with the policy result for the whole trip.", "Tests mock the booking API, including an offer whose text contains an instruction."] },
+          { id: "multi-turn-evals", title: "Evaluate multi-turn trip planning", owner: "evaluation", priority: 2, dependsOn: ["trip-workflow"],
+            scope: "Add synthetic multi-turn conversations for multi-city trips to `evals/`, scored for task adherence on the final turn.",
+            acceptanceCriteria: ["The dataset covers a trip resumed after a restart and a leg that breaks policy.", "Results are reported against `evals/thresholds.json`."] },
+          { id: "workflow-tracing", title: "Trace the workflow steps", owner: "evaluation", priority: 3, dependsOn: ["offer-search-tool"],
+            scope: "Add OpenTelemetry spans for the workflow executors and tools, exported to Application Insights through `APPLICATIONINSIGHTS_CONNECTION_STRING`.",
+            acceptanceCriteria: ["A multi-turn conversation shows one trace per turn with the executor and tool spans.", "Traces contain no traveller names or booking references."] },
+        ],
+      },
+    },
+  ],
   review: () => ({
     summary: "Fresh hosted-agent scaffold from `azd ai agent init`: one Agent Framework agent served with ResponsesHostServer, a generic sample AGENTS.md, no tests, CI or MCP servers. The crew is split by what changes together in an agent product: agent behavior (prompts, tools, workflow), evaluation and safety, and the Foundry platform, plus a reviewer for safety and approval gating.",
     findings: [

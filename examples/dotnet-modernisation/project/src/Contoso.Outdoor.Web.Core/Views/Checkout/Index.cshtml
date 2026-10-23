@@ -1,0 +1,22 @@
+@model CheckoutViewModel
+<h1>Checkout</h1>
+<table>
+@foreach (var line in Model.Lines)
+{
+    <tr><td>@line.Product.Name</td><td>@line.Quantity</td></tr>
+}
+</table>
+<p>Total incl. VAT: @Model.Total.ToString("C")</p>
+<form method="post" asp-action="Index">
+    <div asp-validation-summary="All"></div>
+    <input name="Name" value="@Model.Address?.Name" />
+    <input name="Street" value="@Model.Address?.Street" />
+    <input name="PostalCode" value="@Model.Address?.PostalCode" />
+    <input name="City" value="@Model.Address?.City" />
+    <button type="submit">Save address</button>
+</form>
+@if (Model.Address is not null)
+{
+    @* PlaceOrder is still legacy. MVC 5 rejects this host's anti-forgery token, so ordering only works once #52 ports PlaceOrder. *@
+    <form method="post" action="/Checkout/PlaceOrder">@Html.AntiForgeryToken()<button type="submit">Place order</button></form>
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-65",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/ledger-service/issues/65. Source revision: 2026-10-13T09:00:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/ledger-service/issues/65",
+      "revision": "2026-10-13T09:00:00Z",
+      "fingerprint": "46df293735365567b30fdbe6fa2ede1a3d8f6b87741f879ad733aaf57fb71ffd"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "driver-no-pinning",
+      "title": "Use a PostgreSQL driver that does not pin",
+      "body": "Upgrade the PostgreSQL JDBC driver, within its current major version, to a release that guards its I/O with locks instead of `synchronized`.\n\n## Acceptance criteria\n- `JdbcLedgerRepositoryIT` passes.\n- The upgrade is its own PR with no other library change.",
+      "owner": "persistence",
+      "model": "gpt-5.3-codex",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "connection-limit",
+      "title": "Cap open database connections",
+      "body": "Add `BoundedDataSource` to `ledger-persistence`, which limits open connections to 32, and use it where `ledger-app` builds its `DataSource`.\n\n## Acceptance criteria\n- A test shows that `getConnection()` beyond the limit waits until a connection closes.\n- A failed `getConnection()` releases its permit.",
+      "owner": "persistence",
+      "model": "gpt-5.3-codex",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "virtual-thread-executor",
+      "title": "Serve HTTP on virtual threads",
+      "body": "Replace the fixed thread pool in `LedgerApplication` with `Executors.newVirtualThreadPerTaskExecutor()`.\n\n## Acceptance criteria\n- All tests pass and `/journals` and `/accounts/{account}/balance` respond unchanged.\n- The PR description tells payments which image tag to test.",
+      "owner": "build-platform",
+      "model": "gpt-5.3-codex",
+      "priority": 2,
+      "dependsOn": [
+        "driver-no-pinning",
+        "connection-limit"
+      ]
+    },
+    {
+      "id": "pinning-check",
+      "title": "Show pinned virtual threads in CI",
+      "body": "Run the integration tests in `.github/workflows/ci.yml` with `-Djdk.tracePinnedThreads=short` and fail the job when a pinned thread is reported.\n\n## Acceptance criteria\n- A deliberately pinned test thread fails the job.\n- The current code passes.",
+      "owner": "build-platform",
+      "model": "gpt-5.3-codex",
+      "priority": 3,
+      "dependsOn": [
+        "virtual-thread-executor"
+      ]
+    }
+  ],
+  "approval": null
+}

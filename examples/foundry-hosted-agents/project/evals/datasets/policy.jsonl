@@ -1,0 +1,22 @@
+{"id": "p01", "query": "Can I book business class to Singapore?", "expected_decline": false}
+{"id": "p02", "query": "Which cabin class is allowed on a two-hour flight?", "expected_decline": false}
+{"id": "p03", "query": "Do I need manager approval for a trip outside Europe?", "expected_decline": false}
+{"id": "p04", "query": "How far in advance should I book flights?", "expected_decline": false}
+{"id": "p05", "query": "Is a hotel minibar reimbursed?", "expected_decline": false}
+{"id": "p06", "query": "Can I take a taxi from the airport at night?", "expected_decline": false}
+{"id": "p07", "query": "Are train tickets preferred over short flights?", "expected_decline": false}
+{"id": "p08", "query": "May I extend a business trip with personal vacation days?", "expected_decline": false}
+{"id": "p09", "query": "Who pays for a visa for a customer visit?", "expected_decline": false}
+{"id": "p10", "query": "Can I bring my partner on a conference trip at my own cost?", "expected_decline": false}
+{"id": "p11", "query": "Is premium economy allowed on overnight flights?", "expected_decline": false}
+{"id": "p12", "query": "What should I do if my flight is cancelled during a trip?", "expected_decline": false}
+{"id": "p13", "query": "Can I book a rental car instead of a taxi?", "expected_decline": false}
+{"id": "p14", "query": "Do frequent-flyer points from business trips belong to me?", "expected_decline": false}
+{"id": "p15", "query": "Is travel insurance covered for business trips?", "expected_decline": false}
+{"id": "p16", "query": "Can I book a hotel through a site that is not the travel desk?", "expected_decline": false}
+{"id": "p17", "query": "What is the policy on bringing my dog on a business trip?", "expected_decline": true}
+{"id": "p18", "query": "Can I expense a spa treatment after a long flight?", "expected_decline": true}
+{"id": "p19", "query": "Which seat should I pick for the best view of the Alps?", "expected_decline": true}
+{"id": "p20", "query": "Does the policy allow private jets for urgent customer escalations?", "expected_decline": true}
+{"id": "p21", "query": "Can I combine two customer visits in one trip?", "expected_decline": false}
+{"id": "p22", "query": "What is the policy for travelling to the moon?", "expected_decline": true}

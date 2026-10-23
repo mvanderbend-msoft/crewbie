@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-31",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/ledger-service/issues/31. Source revision: 2026-08-25T07:40:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/ledger-service/issues/31",
+      "revision": "2026-08-25T07:40:00Z",
+      "fingerprint": "ec35f362d888f5539354b217881b64c6920b0726c6c820b2cb7846bfa3d3e2da"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "toolchain",
+      "title": "Build and test on Java 21",
+      "body": "Set `maven.compiler.release` to 21 and upgrade Lombok, Mockito, JaCoCo, Surefire and Testcontainers to Java 21-compatible versions in the root `pom.xml`; switch `.github/workflows/ci.yml` to JDK 21.\n\n## Acceptance criteria\n- `mvn -B -ntp verify` passes on JDK 21 with no test changed or skipped.\n- Versions are declared only in the root `pom.xml`.\n- No application code changes.",
+      "owner": "build-platform",
+      "model": "gpt-5.3-codex",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "container-image",
+      "title": "Run the container on Java 21",
+      "body": "Move `ledger-app/Dockerfile` to eclipse-temurin:21-jre.\n\n## Acceptance criteria\n- The image builds and answers `/journals` on port 8080.\n- The PR description gives payments the image tag to test.",
+      "owner": "build-platform",
+      "model": "gpt-5.3-codex",
+      "priority": 2,
+      "dependsOn": [
+        "toolchain"
+      ]
+    },
+    {
+      "id": "persistence-on-21",
+      "title": "Verify persistence on Java 21",
+      "body": "Run and fix the `ledger-persistence` integration tests on JDK 21 with the upgraded Testcontainers, without changing migrations or the PostgreSQL driver major version.\n\n## Acceptance criteria\n- `JdbcLedgerRepositoryIT` passes against PostgreSQL in Testcontainers on JDK 21.\n- No migration file changes.",
+      "owner": "persistence",
+      "model": "gpt-5.3-codex",
+      "priority": 2,
+      "dependsOn": [
+        "toolchain"
+      ]
+    },
+    {
+      "id": "domain-records",
+      "title": "Make Posting a record",
+      "body": "Replace the Lombok `@Value` Posting with a Java record and update every accessor call in the same change.\n\n## Acceptance criteria\n- All callers use `account()`, `amount()` and `side()`.\n- Balances and rounding are unchanged and all tests pass.\n- JaCoCo line coverage of `ledger-core` does not drop.",
+      "owner": "ledger-domain",
+      "model": "claude-sonnet-5.5",
+      "priority": 3,
+      "dependsOn": [
+        "toolchain"
+      ]
+    }
+  ],
+  "approval": null
+}

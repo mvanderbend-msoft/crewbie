@@ -1,0 +1,2 @@
+CREATE TABLE journal (id BIGSERIAL PRIMARY KEY, posted_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE posting (journal_id BIGINT REFERENCES journal(id), account TEXT NOT NULL, amount NUMERIC(19,2) NOT NULL, side CHAR(1) NOT NULL);

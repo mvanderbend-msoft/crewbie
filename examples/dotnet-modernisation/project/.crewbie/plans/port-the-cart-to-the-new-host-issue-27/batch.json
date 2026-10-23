@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-27",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/outdoor-store/issues/27. Source revision: 2026-09-14T08:40:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/outdoor-store/issues/27",
+      "revision": "2026-09-14T08:40:00Z",
+      "fingerprint": "20f7d35b481aaf1995ba4e58c5ae6c8586912f08b807e100bf8c21582654e59d"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "cart-session",
+      "title": "Share the cart session value between both apps",
+      "body": "Move the cart to `src/Contoso.Outdoor.Domain` as a JSON-serialisable type and register its session key with the System.Web adapters' JSON session serializer in both the legacy app and the new host.\n\n## Acceptance criteria\n- A cart written by the legacy app reads back identically in the new host, and the other way round.\n- The legacy cart pages behave as before.\n- No second session store is added.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "cart-pricing",
+      "title": "Look up current prices for cart lines",
+      "body": "Add a query in `src/Contoso.Outdoor.Data.Core` that loads the current prices of the products in a cart for PriceCalculator.\n\n## Acceptance criteria\n- Returns the same prices as the EF6 context for the same products.\n- Products that no longer exist are left out, as the legacy cart does.\n- No migration is added.",
+      "owner": "data-access",
+      "model": "claude-sonnet-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "cart-routes",
+      "title": "Port the cart routes",
+      "body": "Port CartController (`Index` and `Add`) and its view to the new host using the remote session; YARP stops forwarding the cart routes.\n\n## Acceptance criteria\n- `/Cart` and `/Cart/Add` keep their URLs, redirects, anti-forgery validation and totals.\n- A cart started on a legacy page shows the same lines on the new host.\n- Checkout and account routes are still forwarded.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 2,
+      "dependsOn": [
+        "cart-session",
+        "cart-pricing"
+      ]
+    }
+  ],
+  "approval": null
+}

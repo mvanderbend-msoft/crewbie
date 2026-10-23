@@ -1,0 +1,22 @@
+name: Copilot setup steps
+on:
+  workflow_dispatch:
+  push:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+  pull_request:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      # The data parity tests start SQL Server with Testcontainers; pulling the image here keeps it out of the agent's session time.
+      - run: docker pull mcr.microsoft.com/mssql/server:2022-latest
+      - run: dotnet restore tests/Contoso.Outdoor.Data.Core.Tests && dotnet restore tests/Contoso.Outdoor.Web.Core.Tests

@@ -1,0 +1,52 @@
+name: Crewbie dispatch
+on:
+  issues:
+    types: [labeled]
+  pull_request_target:
+    types: [closed, ready_for_review, review_requested]
+
+  workflow_dispatch:
+    inputs:
+      issue_numbers:
+        description: Confirmed published issue IDs for indexing-lag recovery; never execution approval
+        required: false
+        default: ''
+        type: string
+  schedule:
+    - cron: '17 * * * *'
+permissions:
+  contents: read
+  checks: read
+  statuses: read
+concurrency:
+  group: crewbie-dispatch
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    # Copilot requests review when its session finishes.
+    if: >-
+      github.event_name != 'pull_request_target'
+      || github.event.action == 'closed' || github.event.action == 'ready_for_review'
+      || (github.event.action == 'review_requested' && github.event.sender.login == 'Copilot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Install approved Crewbie package
+        env:
+          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.68/crewbie-cli-0.1.0-alpha.68.tgz' }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
+      - name: Reconcile approved work
+        env:
+          GH_TOKEN: ${{ secrets.CREWBIE_USER_TOKEN }}
+          CREWBIE_CHECKS_TOKEN: ${{ github.token }}
+          CREWBIE_ADO_TOKEN: ${{ secrets.CREWBIE_ADO_TOKEN }}
+          CREWBIE_ISSUE_NUMBERS: ${{ inputs.issue_numbers }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-dispatch

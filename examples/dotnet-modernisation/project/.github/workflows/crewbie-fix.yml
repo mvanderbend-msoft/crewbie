@@ -1,0 +1,33 @@
+name: Crewbie feature fix
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+concurrency:
+  group: crewbie-fix-${{ github.event.issue.number }}
+  cancel-in-progress: false
+jobs:
+  route:
+    if: ${{ github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && contains(github.event.comment.body, '/crewbie') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Install approved Crewbie package
+        env:
+          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.68/crewbie-cli-0.1.0-alpha.68.tgz' }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
+      - name: Route trusted feature PR fix request
+        env:
+          GH_TOKEN: ${{ secrets.CREWBIE_USER_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "Configure CREWBIE_USER_TOKEN for feature fix task publication."; exit 1; }
+          node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-fix

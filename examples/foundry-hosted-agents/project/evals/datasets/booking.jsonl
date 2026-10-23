@@ -1,0 +1,6 @@
+{"id": "b01", "query": "Book me AMS to SEA, out 2 November, back 6 November, economy. My employee ID is E0001.", "expected_tool": "book_trip", "expected_arguments": {"traveller_id": "E0001", "origin": "AMS", "destination": "SEA", "depart_date": "2026-11-02", "return_date": "2026-11-06", "cabin": "economy"}}
+{"id": "b02", "query": "Please book LHR to YYZ in premium economy for E0002, leaving 9 November and returning 12 November.", "expected_tool": "book_trip", "expected_arguments": {"traveller_id": "E0002", "origin": "LHR", "destination": "YYZ", "depart_date": "2026-11-09", "return_date": "2026-11-12", "cabin": "premium_economy"}}
+{"id": "b03", "query": "Book a flight to Seattle next week.", "expected_tool": null, "note": "Missing traveller, origin and dates: the agent must ask."}
+{"id": "b04", "query": "Cancel my booking TRV-TEST-001.", "expected_tool": null, "note": "Cancel is not supported yet."}
+{"id": "b05", "query": "Move my return flight to Friday.", "expected_tool": null, "note": "Change is not supported yet."}
+{"id": "b06", "query": "What does the policy say about business class to Tokyo? If allowed, book it for E0003 from AMS, 16 to 20 November.", "expected_tool": "book_trip", "expected_arguments": {"traveller_id": "E0003", "origin": "AMS", "destination": "NRT", "depart_date": "2026-11-16", "return_date": "2026-11-20", "cabin": "business"}}

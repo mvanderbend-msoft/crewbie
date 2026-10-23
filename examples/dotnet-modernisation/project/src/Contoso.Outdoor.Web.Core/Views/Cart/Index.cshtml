@@ -1,0 +1,10 @@
+@model CartViewModel
+<h1>Your cart</h1>
+<table>
+@foreach (var line in Model.Lines)
+{
+    <tr><td>@line.Product.Name</td><td>@line.Quantity</td><td>@((line.Product.Price * line.Quantity).ToString("C"))</td></tr>
+}
+</table>
+<p>Total incl. VAT: @Model.Total.ToString("C")</p>
+<a href="/Checkout">Checkout</a>

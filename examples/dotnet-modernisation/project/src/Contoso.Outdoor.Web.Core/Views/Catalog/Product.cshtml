@@ -1,0 +1,8 @@
+@model Product
+<h1>@Model.Name</h1>
+<p>@Model.Price.ToString("C")</p>
+<form method="post" asp-controller="Cart" asp-action="Add">
+    <input type="hidden" name="productId" value="@Model.Id" />
+    <input type="number" name="quantity" value="1" min="1" />
+    <button type="submit">Add to cart</button>
+</form>

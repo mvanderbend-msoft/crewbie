@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-17",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/travel-concierge/issues/17. Source revision: 2026-09-08T10:20:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/travel-concierge/issues/17",
+      "revision": "2026-09-08T10:20:00Z",
+      "fingerprint": "8f293225e626b15dadb9298dac0ed6cfd57a1ba519ae47b047f06ccbe2f923cc"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "booking-api-access",
+      "title": "Give the agent identity access to the booking API",
+      "body": "Add the booking API base URL and token scope as azd environment values passed to the hosted agent, and grant the agent's Entra identity the booking API's app role after deploy.\n\n## Acceptance criteria\n- `azure.yaml` passes the booking API settings to the agent from the azd environment.\n- The agent identity gets only the booking app role; no key or subscription is stored anywhere.",
+      "owner": "foundry-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "booking-tool",
+      "title": "Add an approval-required booking tool",
+      "body": "Add a `book_trip` tool with `@tool(approval_mode=\"always_require\")` in `src/concierge` and a booking client that calls the API with a `DefaultAzureCredential` token.\n\n## Acceptance criteria\n- The host returns an approval request instead of booking, and the booking runs only after approval continues with `previous_response_id`.\n- Tests prove a rejected or missing approval never reaches the booking client.\n- The agent says it cannot change or cancel trips yet.",
+      "owner": "agent-runtime",
+      "model": "claude-opus-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "tool-call-evals",
+      "title": "Evaluate booking tool calls",
+      "body": "Add synthetic booking conversations to `evals/` scored with tool-call accuracy, including requests that must not call `book_trip`.\n\n## Acceptance criteria\n- Tool-call accuracy is reported against `evals/thresholds.json`.\n- Cases cover a correct booking, a missing detail that needs a question, and a change or cancel request that must not call the tool.",
+      "owner": "evaluation",
+      "model": "claude-sonnet-5.5",
+      "priority": 2,
+      "dependsOn": [
+        "booking-tool"
+      ]
+    }
+  ],
+  "approval": null
+}

@@ -1,0 +1,130 @@
+{
+  "config": {
+    "schemaVersion": 1,
+    "repository": "contoso/ledger-service",
+    "roles": [
+      {
+        "id": "build-platform",
+        "purpose": "Own the build and runtime toolchain: the root `pom.xml`, module poms, plugin and dependency versions, `.github/workflows/ci.yml`, and the `ledger-app` packaging and `ledger-app/Dockerfile`.",
+        "model": "gpt-5.3-codex",
+        "knowledge": [
+          "The root `pom.xml` uses `maven.compiler.source`/`target` 11, Lombok 1.18.20, Mockito 3.12.4, JaCoCo 0.8.7 and Surefire 2.22.2; all of these block or break on Java 21.",
+          "Mockito 5 uses the inline mock maker; on Java 21 add `-XX:+EnableDynamicAgentLoading` to Surefire's argLine to silence the dynamic agent warning (JEP 451).",
+          "Testcontainers 1.16 predates current Docker API versions; move to 1.19 or later with the upgrade.",
+          "`.github/workflows/ci.yml` pins JDK 11 through actions/setup-java; switch it to 21 in the toolchain change."
+        ],
+        "checks": [
+          "`mvn -B -ntp verify` passes on JDK 21 for all modules.",
+          "The `ledger-app/Dockerfile` image starts and answers on port 8080."
+        ],
+        "nonNegotiables": [
+          "Toolchain changes contain no refactoring of application code.",
+          "No Flyway or PostgreSQL driver major upgrade in the same PR as the JDK change."
+        ],
+        "contextPaths": [],
+        "sourceAgent": ".github/agents/build.agent.md",
+        "complexity": "standard",
+        "modelReason": "Version bumps and build configuration are well-specified, tool-heavy work where a coding-tuned model is efficient."
+      },
+      {
+        "id": "ledger-domain",
+        "purpose": "Own `ledger-core`: postings, journals, balancing and rounding, including optional Java 21 language modernisation in code it changes.",
+        "model": "claude-sonnet-5.5",
+        "knowledge": [
+          "`ledger-core/src/main/java/com/contoso/ledger/core/Posting.java` is a Lombok `@Value` class; `LedgerService.java` calls `getSide()` and `getAmount()`, which become `side()` and `amount()` as a record.",
+          "Balancing sums debits minus credits and rejects any non-zero balance; `ledger-core/src/test/java/com/contoso/ledger/core/LedgerServiceTest.java` covers the unbalanced case."
+        ],
+        "checks": [
+          "`mvn -B -ntp -pl ledger-core verify` passes and JaCoCo line coverage does not drop."
+        ],
+        "nonNegotiables": [
+          "Never change rounding, scale or balancing rules in an upgrade task."
+        ],
+        "contextPaths": [],
+        "complexity": "standard",
+        "modelReason": "Small domain module with strong tests; careful but not deep reasoning."
+      },
+      {
+        "id": "persistence",
+        "purpose": "Own `ledger-persistence`: the JDBC repository, Flyway migrations, the PostgreSQL driver and Testcontainers integration tests.",
+        "model": "gpt-5.3-codex",
+        "knowledge": [
+          "`ledger-persistence/src/main/resources/db/migration/V1__ledger.sql` stores amounts as `NUMERIC(19,2)`; the repository writes all postings of a journal in one transaction.",
+          "Flyway 7 runs on Java 21. Flyway 10 and later need the separate `flyway-database-postgresql` artifact, so a later Flyway upgrade adds it in the same change."
+        ],
+        "checks": [
+          "`ledger-persistence/src/test/java/com/contoso/ledger/persistence/JdbcLedgerRepositoryIT.java` passes against PostgreSQL in Testcontainers on JDK 21."
+        ],
+        "nonNegotiables": [
+          "Never edit a released migration."
+        ],
+        "contextPaths": [],
+        "complexity": "standard",
+        "modelReason": "JDBC and migration work is mechanical but needs tests run against a real database."
+      },
+      {
+        "id": "ledger-reviewer",
+        "purpose": "Review each feature PR for unchanged balances, rounding and HTTP API behavior, reproducible builds and the one-concern-per-PR upgrade rule.",
+        "model": "gpt-6.1-sol",
+        "knowledge": [
+          "Accessor renames from Lombok to records compile but can break reflection-based JSON or JDBC mapping; check every use by name."
+        ],
+        "checks": [
+          "Tests were not weakened or deleted to make the upgrade pass.",
+          "The PR changes only what its task names: toolchain, one library or touched-code modernisation."
+        ],
+        "nonNegotiables": [
+          "Block any PR that changes a balance, rounding mode or API response."
+        ],
+        "contextPaths": [],
+        "complexity": "standard",
+        "modelReason": "A different model family from the implementers gives an independent review at moderate cost."
+      }
+    ],
+    "constitution": null,
+    "maxActive": 2,
+    "nightly": {
+      "enabled": false,
+      "maxRecords": 20,
+      "allowedPaths": [
+        ".crewbie/team/",
+        ".crewbie/decisions/",
+        ".crewbie/decisions.md",
+        ".crewbie/instructions.md",
+        ".github/agents/crewbie-build-platform.agent.md",
+        ".github/agents/crewbie-ledger-domain.agent.md",
+        ".github/agents/crewbie-persistence.agent.md",
+        ".github/agents/crewbie-ledger-reviewer.agent.md",
+        ".github/agents/crewbie-coordinator.agent.md",
+        ".github/agents/crewbie-improver.agent.md"
+      ]
+    },
+    "ado": null,
+    "limits": {
+      "spec": 600,
+      "hot": 600,
+      "constitution": 600,
+      "topic": 1500
+    },
+    "planning": {
+      "enabled": true,
+      "model": "claude-opus-5.5",
+      "executeOnMerge": true
+    },
+    "modelProfile": "balanced",
+    "execution": {
+      "maxLaunchesPerBatch": 20,
+      "maxAttemptsPerTask": 3
+    },
+    "review": {
+      "enabled": true,
+      "role": "ledger-reviewer"
+    },
+    "local": {
+      "start": "mvn -B -ntp -pl ledger-app -am package && java -jar ledger-app/target/ledger-app.jar"
+    }
+  },
+  "configBeforeHash": "29fa66d85bec870a406a29898b1cf003c810ed55949ae3e47a08cde9e7db4b4d",
+  "constitutionText": null,
+  "instructions": []
+}

@@ -1,0 +1,8 @@
+@model IEnumerable<Product>
+<h1>@ViewBag.Category</h1>
+<ul>
+@foreach (var product in Model)
+{
+    <li><a href="/p/@product.Slug">@product.Name</a> @product.Price.ToString("C")</li>
+}
+</ul>

@@ -1,0 +1,3 @@
+# Thresholds gate every deploy; changing them needs a human owner's review.
+/evals/thresholds.json @contoso/travel-concierge-leads
+/.github/workflows/deploy.yml @contoso/travel-concierge-leads

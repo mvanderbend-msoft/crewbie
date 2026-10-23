@@ -1,0 +1,8 @@
+{
+  "recordedWith": "Contoso.Outdoor.Web (EF6) against Sql/schema.sql, CatalogController.Index and CartController pricing",
+  "tentsPage1": [
+    { "slug": "alpine-tent-3p", "name": "Alpine tent 3P", "price": 389.5000 },
+    { "slug": "trail-tent-2p", "name": "Trail tent 2P", "price": 249.0000 }
+  ],
+  "cartTotalCampStove": 12.11
+}

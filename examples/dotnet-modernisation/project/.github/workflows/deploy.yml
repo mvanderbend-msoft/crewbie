@@ -1,0 +1,52 @@
+name: deploy
+on:
+  workflow_dispatch:
+    inputs:
+      rollback:
+        description: Revision name to send all traffic back to (leave empty to deploy main)
+        required: false
+  push:
+    branches: [main]
+permissions:
+  id-token: write
+  contents: read
+concurrency: deploy-production
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: Azure/setup-azd@v2
+      - run: azd auth login --federated-credential-provider github --client-id "${{ vars.AZURE_CLIENT_ID }}" --tenant-id "${{ vars.AZURE_TENANT_ID }}"
+      - name: Roll back
+        if: ${{ inputs.rollback != '' }}
+        run: az containerapp ingress traffic set -n "$(azd env get-value SERVICE_WEB_NAME)" -g "rg-$AZURE_ENV_NAME" --revision-weight "${{ inputs.rollback }}=100"
+      - name: Deploy a revision without traffic
+        if: ${{ inputs.rollback == '' }}
+        run: |
+          azd provision --no-prompt
+          # Pin traffic to the serving revision by name; with latestRevision traffic the new revision would get it at once.
+          app="$(azd env get-value SERVICE_WEB_NAME)"; rg="rg-$AZURE_ENV_NAME"
+          current="$(az containerapp show -n "$app" -g "$rg" --query properties.latestReadyRevisionName -o tsv)"
+          if [ -n "$current" ]; then az containerapp ingress traffic set -n "$app" -g "$rg" --revision-weight "$current=100"; fi
+          azd deploy web --no-prompt
+      - name: Smoke-test the staging label, then move traffic
+        if: ${{ inputs.rollback == '' }}
+        run: |
+          app="$(azd env get-value SERVICE_WEB_NAME)"; rg="rg-$AZURE_ENV_NAME"
+          latest="$(az containerapp revision list -n "$app" -g "$rg" --query "sort_by([], &properties.createdTime)[-1].name" -o tsv)"
+          az containerapp revision label add -n "$app" -g "$rg" --label staging --revision "$latest" --yes
+          fqdn="$(az containerapp show -n "$app" -g "$rg" --query properties.configuration.ingress.fqdn -o tsv)"
+          staging="https://${app}---staging.${fqdn#*.}"
+          curl -fsS "$staging/healthz/ready" && curl -fsS "$staging/p/trail-tent-2p" > /dev/null
+          az containerapp ingress traffic set -n "$app" -g "$rg" --revision-weight "$latest=100"

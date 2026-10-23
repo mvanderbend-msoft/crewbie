@@ -10,7 +10,7 @@ import { allowedPlanningFile, planningLocation, repoText, verifyPlanningRun, typ
 import { redact } from "../setup/inventory.js";
 import { promptMap, workingTree } from "../setup/repository-map.js";
 import { planChecks, renderPlanChecks } from "./plan-checks.js";
-import { PLANNING_FILES, PLANNING_OUTPUT_BYTES, planningOutputSchema, readPlanningOutput, type PlanningSource as Source } from "./planning-output.js";
+import { PLANNING_FILES, PLANNING_OUTPUT_BYTES, planningOutputSchema, readPlanningOutput, type Plan, type PlanningSource as Source } from "./planning-output.js";
 
 export { PLANNING_LABEL } from "../config.js";
 export { parsePlan, type Plan } from "./planning-output.js";
@@ -37,9 +37,13 @@ async function sourceIssue(client: GitHubApi, config: Config, number: number, ac
   }
   return { number, title: string(issue.title, "issue title"), body, revision: string(issue.updated_at, "issue revision"), labelEvent: integer(latest.id, "label event") };
 }
+/** The readable part of a planning branch and plan directory: `<title-slug>-issue-<n>`. */
+export function planName(title: string, number: number): string {
+  const name = title.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60).replace(/-$/g, "") || "feature";
+  return `${name}-issue-${number}`;
+}
 function branch(snapshot: Snapshot): string {
-  const name = snapshot.source.title.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60).replace(/-$/g, "") || "feature";
-  return snapshot.branch ?? `crewbie/plans/${name}-issue-${snapshot.source.number}-${snapshot.key.slice(0, 16)}`;
+  return snapshot.branch ?? `crewbie/plans/${planName(snapshot.source.title, snapshot.source.number)}-${snapshot.key.slice(0, 16)}`;
 }
 async function revisionContext(client: GitHubApi, config: Config, number: number) {
   const prefix = `/repos/${config.repository}`;
@@ -223,6 +227,25 @@ PRD source: ${json(source)}`;
   return { ready: true, reason: "Ready label and human actor verified; coordinator context prepared.", model: config.planning.model };
 }
 
+/** The files a planning PR adds under `.crewbie/plans/issue-<n>/`; `automatic` means merging the PR approves and starts the batch. */
+export function planningFiles(config: Config, configBeforeHash: string | null, source: Source, plan: Plan, directory: string, recordsDecisions: boolean, map: ReturnType<typeof workingTree>): { files: Record<string, string>; automatic: boolean; checks: string; handoff: string } {
+  const records = recordsDecisions ? ` It also records shared decisions in \`${SHARED_HOT}\`; review them with the plan.` : "";
+  const checks = plan.batch ? renderPlanChecks(planChecks(plan.batch, `${source.title}\n${source.body}`, map)) : "";
+  const setup = { config, configBeforeHash, constitutionText: null, instructions: [] };
+  const automatic = config.planning?.executeOnMerge === true && plan.batch !== null && plan.questions.length === 0;
+  const handoff = automatic
+    ? `This PR only adds plan files; the team, agents and configuration are unchanged.${records}\n\n## Start work\nReview the final plan and task batch, then merge this PR. **Merging by a human with write access approves publication and paid cloud execution of this exact batch.** No separate GitHub approval review or local approval command is required by Crewbie. Your repository's branch protection still applies. Application PR merges remain human-owned.`
+    : `This PR only adds plan files and does not authorize automatic execution.${records} Resolve questions, then explicitly approve the task batch, or generate a new merge-enabled plan.`;
+  const suggestions = plan.teamSuggestions.length
+    ? `## Team suggestions (not applied)\n${plan.teamSuggestions.map((item) => `- ${item}`).join("\n")}\n\nReassess with \`crewbie init --update\` if needed.\n\n` : "";
+  const files: Record<string, string> = {
+    [`${directory}/setup.json`]: json(setup),
+    [`${directory}/plan.md`]: `# Planning issue #${source.number}\n\n${plan.summary}\n\n${plan.batch?.spec ?? "Clarification is required before decomposition."}\n\n${plan.questions.length ? `## Questions\n${plan.questions.map((q) => `- ${q}`).join("\n")}\n\n` : ""}${deliveryNote(config, plan.batch)}${checks}${suggestions}Source: https://github.com/${config.repository}/issues/${source.number}\n\n${handoff}\n`,
+  };
+  if (plan.batch) files[`${directory}/batch.json`] = json(plan.batch);
+  return { files, automatic, checks, handoff };
+}
+
 function deliveryNote(config: Config, batch: Batch | null): string {
   if (!batch) return "";
   const reviewer = reviewerFor(config);
@@ -287,21 +310,8 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
     catch (error) { if (!(error instanceof GitHubError && error.status === 404)) throw error; }
     if (current === null || textHash(current) !== textHash(plan.decisions)) decisions = plan.decisions;
   }
-  const records = decisions ? ` It also records shared decisions in \`${SHARED_HOT}\`; review them with the plan.` : "";
-  const checks = plan.batch ? renderPlanChecks(planChecks(plan.batch, `${source.title}\n${source.body}`, workingTree(root))) : "";
   const directory = planningLocation(branch(snapshot)).directory;
-  const setup = { config, configBeforeHash: snapshot.configBeforeHash, constitutionText: null, instructions: [] };
-  const automatic = config.planning.executeOnMerge === true && plan.batch !== null && plan.questions.length === 0;
-  const handoff = automatic
-    ? `This PR only adds plan files; the team, agents and configuration are unchanged.${records}\n\n## Start work\nReview the final plan and task batch, then merge this PR. **Merging by a human with write access approves publication and paid cloud execution of this exact batch.** No separate GitHub approval review or local approval command is required by Crewbie. Your repository's branch protection still applies. Application PR merges remain human-owned.`
-    : `This PR only adds plan files and does not authorize automatic execution.${records} Resolve questions, then explicitly approve the task batch, or generate a new merge-enabled plan.`;
-  const suggestions = plan.teamSuggestions.length
-    ? `## Team suggestions (not applied)\n${plan.teamSuggestions.map((item) => `- ${item}`).join("\n")}\n\nReassess with \`crewbie init --update\` if needed.\n\n` : "";
-  const files: Record<string, string> = {
-    [`${directory}/setup.json`]: json(setup),
-    [`${directory}/plan.md`]: `# Planning issue #${source.number}\n\n${plan.summary}\n\n${plan.batch?.spec ?? "Clarification is required before decomposition."}\n\n${plan.questions.length ? `## Questions\n${plan.questions.map((q) => `- ${q}`).join("\n")}\n\n` : ""}${deliveryNote(config, plan.batch)}${checks}${suggestions}Source: https://github.com/${config.repository}/issues/${source.number}\n\n${handoff}\n`,
-  };
-  if (plan.batch) files[`${directory}/batch.json`] = json(plan.batch);
+  const { files, automatic, checks, handoff } = planningFiles(config, snapshot.configBeforeHash, source, plan, directory, decisions !== null, workingTree(root));
   if (automatic && plan.batch) {
     if (snapshot.runId === undefined) throw new Error("Missing trusted planning-run identity.");
     if (await verifyPlanningRun(client, config, snapshot.runId, snapshot.baseSha) !== snapshot.base) throw new Error("Planning run is not on the default branch.");

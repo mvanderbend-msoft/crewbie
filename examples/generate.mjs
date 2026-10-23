@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Regenerates the worked examples from their scenario.mjs files with Crewbie's own setup code (run `npm run examples`).
-// Each scenario is a stub repository, the Compass map and the review Copilot returned; the output is what
-// `crewbie init` would install when the human chooses "All".
+// Regenerates the Crewbie-owned files of the worked examples with Crewbie's own setup and planning code (`npm run examples`).
+// Each scenario.mjs holds the repository before init, the Crewbie Compass answers, the review Copilot returned and
+// the issues planned in the two months since. project/ is the repository today: the generator writes what Crewbie
+// installs and plans; application code, memory, decisions and files the team changed on purpose are written by hand.
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,6 +14,8 @@ import { DESTINATION_FILE, renderDestination } from "../dist/setup/interview.js"
 import { installation } from "../dist/setup/install.js";
 import { renderSetupMarkdown } from "../dist/setup/review.js";
 import { readPlanningOutput } from "../dist/specification/planning-output.js";
+import { planName, planningFiles } from "../dist/specification/planning.js";
+import { textHash } from "../dist/core.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const SCENARIOS = ["dotnet-modernisation", "foundry-hosted-agents", "java-21-upgrade"];
@@ -21,63 +24,84 @@ export const MODELS = [
   { id: "claude-opus-5.5", name: "Claude Opus 5.5" }, { id: "claude-sonnet-5.5", name: "Claude Sonnet 5.5" },
   { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" }, { id: "gpt-5.3-codex", name: "GPT-5.3 Codex" }, { id: "claude-haiku-5.5", name: "Claude Haiku 5.5" },
 ];
-/** Files every installation gets unchanged; the examples show only what Copilot tailored to the repository. */
-const STANDARD = /^(?:\.github\/workflows\/crewbie-|\.github\/skills\/crewbie\/|\.github\/PULL_REQUEST_TEMPLATE\.md$|\.github\/agents\/crewbie-(?:coordinator|improver)\.agent\.md$|\.crewbie\/(?:instructions\.md|team\/|decisions\/))/;
+/** Memory grows with every merged PR, so after init it belongs to the team, not the generator. */
+export const MEMORY = /^\.crewbie\/(?:team|decisions)\//;
 
-/** Renders one scenario: `crewbie-setup.md` plus the tailored files under `repo/`, keyed by example-relative path. */
+export async function scenario(name) {
+  return (await import(pathToFileURL(join(here, name, "scenario.mjs")).href)).default;
+}
+
+/**
+ * Renders one scenario. `output` maps example-relative paths to the content the generator owns; `deleted` lists
+ * project paths init removed; `memory` holds the seeds init wrote, used only where the team has no memory file yet.
+ */
 export async function render(name) {
-  const scenario = (await import(pathToFileURL(join(here, name, "scenario.mjs")).href)).default;
+  const example = await scenario(name);
   const root = await mkdtemp(join(tmpdir(), "crewbie-example-"));
   try {
     execFileSync("git", ["init", "-q", "-b", "main", root]);
-    for (const [path, content] of Object.entries(scenario.files)) {
+    for (const [path, content] of Object.entries(example.files)) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await writeFile(join(root, path), content);
     }
     const assessment = await assess(root);
-    const destination = renderDestination(scenario.destination);
+    const destination = renderDestination(example.destination);
     const description = `${destination}\n(Setup creates ${DESTINATION_FILE} with exactly this map when the proposal is installed.)`;
-    const proposal = parseSetupReview(JSON.stringify(scenario.review(assessment)), assessment, description, "claude-opus-5.5", MODELS);
+    const proposal = parseSetupReview(JSON.stringify(example.review(assessment)), assessment, description, "claude-opus-5.5", MODELS);
     proposal.destination = destination;
     Object.assign(proposal.config, {
-      repository: scenario.repository, local: { start: scenario.start },
+      repository: example.repository, local: { start: example.start },
       planning: { enabled: true, model: "claude-opus-5.5", executeOnMerge: true },
     });
     const changes = await installation(root, selectGuidance(proposal, true));
-    const output = new Map([["crewbie-setup.md", `${renderSetupMarkdown(proposal, changes)}\n## Installation choice\n\nTeam plus the concrete guidance edits listed above.\n`]]);
-    for (const change of changes) if (change.after !== null && !STANDARD.test(change.path)) output.set(`repo/${change.path}`, change.after);
-    if (scenario.issue) {
-      output.set("issue.md", `# ${scenario.issue.title}\n\n${scenario.issue.body}`);
-      output.set("plan.json", `${JSON.stringify(plan(scenario, proposal.config), null, 2)}\n`);
+    const output = new Map([["setup/crewbie-setup.md", `${renderSetupMarkdown(proposal, changes)}\n## Installation choice\n\nTeam plus the concrete guidance edits listed above.\n`]]);
+    const memory = new Map();
+    const deleted = [];
+    for (const change of changes) {
+      if (change.after === null) deleted.push(change.path);
+      else if (MEMORY.test(change.path)) memory.set(change.path, change.after);
+      else if (!(change.path in example.evolved)) output.set(`project/${change.path}`, change.after);
     }
-    return { output, warnings: proposal.review.warnings ?? [], config: proposal.config, changes };
+    const config = proposal.config;
+    const configText = changes.find((change) => change.path === ".crewbie/config.json").after;
+    for (const issue of example.issues) {
+      for (const [path, content] of Object.entries(plan(issue, config, configText))) output.set(`project/${path}`, content);
+    }
+    return { output, deleted, memory, warnings: proposal.review.warnings ?? [], config, changes };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 }
 
 /**
- * The batch the planning PR commits for the sample issue (`.crewbie/plans/issue-<n>/batch.json`); merging that PR approves it.
+ * The files the planning PR for an issue adds under `.crewbie/plans/<title-slug>-issue-<n>/`, as the planning workflow writes them.
  * The scenario supplies the coordinator's answer; task models come from the owning role, as the planning schema requires.
+ * Plan checks run without a repository map, so they compare the plan with the issue only. The run-specific
+ * execution.json is omitted.
  */
-function plan(scenario, config) {
-  const { issue } = scenario;
-  const tasks = scenario.plan.tasks.map((task) => ({ ...task, model: config.roles.find((role) => role.id === task.owner)?.model ?? "missing role" }));
+function plan(issue, config, configText) {
+  const tasks = issue.plan.tasks.map((task) => ({ ...task, model: config.roles.find((role) => role.id === task.owner)?.model ?? "missing role" }));
   const source = { number: issue.number, title: issue.title, body: issue.body, revision: issue.updatedAt, labelEvent: 1 };
-  const output = JSON.stringify({ summary: scenario.plan.summary, questions: [], batch: { schemaVersion: 1, id: `issue-${issue.number}`, approval: null, tasks } });
-  const { plan: { batch } } = readPlanningOutput(output, config, source);
-  return batch;
+  const answer = JSON.stringify({ summary: issue.plan.summary, questions: [], batch: { schemaVersion: 1, id: `issue-${issue.number}`, approval: null, tasks } });
+  const { plan: parsed } = readPlanningOutput(answer, config, source);
+  return planningFiles(config, textHash(configText), source, parsed, `.crewbie/plans/${planName(issue.title, issue.number)}`, false, null).files;
+}
+
+async function exists(path) {
+  return readFile(path).then(() => true, () => false);
 }
 
 async function write(name) {
-  const { output, warnings } = await render(name);
+  const { output, deleted, memory, warnings } = await render(name);
   if (warnings.length) throw new Error(`${name} has repository warnings:\n${warnings.join("\n")}`);
-  await rm(join(here, name, "repo"), { recursive: true, force: true });
-  for (const [path, content] of output) {
-    await mkdir(dirname(join(here, name, path)), { recursive: true });
-    await writeFile(join(here, name, path), content);
+  const target = (path) => join(here, name, path);
+  for (const [path, content] of [...output, ...[...memory].map(([path, content]) => [`project/${path}`, content])]) {
+    if (MEMORY.test(path.slice("project/".length)) && await exists(target(path))) continue;
+    await mkdir(dirname(target(path)), { recursive: true });
+    await writeFile(target(path), content);
   }
-  console.log(`${name}: ${output.size} files`);
+  for (const path of deleted) await rm(target(`project/${path}`), { force: true });
+  console.log(`${name}: ${output.size} generated files`);
 }
 
 /** Every file under a directory, relative and with forward slashes. */

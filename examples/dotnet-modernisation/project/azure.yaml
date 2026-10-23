@@ -1,0 +1,14 @@
+name: contoso-outdoor-store
+metadata:
+  template: contoso-outdoor-store
+infra:
+  provider: bicep
+  path: infra
+services:
+  web:
+    project: ./src/Contoso.Outdoor.Web.Core
+    language: dotnet
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      context: ../..

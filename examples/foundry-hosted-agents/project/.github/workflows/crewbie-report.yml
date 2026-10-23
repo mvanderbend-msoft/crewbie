@@ -1,0 +1,103 @@
+name: Crewbie report
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, ready_for_review]
+  workflow_dispatch:
+  schedule:
+    - cron: '47 3 * * *'
+permissions:
+  contents: read
+jobs:
+  description:
+    if: ${{ github.event_name == 'pull_request_target' && (github.event.pull_request.user.login == 'copilot-swe-agent[bot]' || github.event.pull_request.user.login == 'Copilot') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Install approved Crewbie package
+        env:
+          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.68/crewbie-cli-0.1.0-alpha.68.tgz' }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
+      - name: Check concise PR rationale and report memory budgets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-pr-check --pr "$PR_NUMBER"
+  report:
+    if: ${{ github.event_name != 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Install approved Crewbie package
+        env:
+          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.68/crewbie-cli-0.1.0-alpha.68.tgz' }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
+      - name: Build usage report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" dashboard --collect --out crewbie-dashboard.html
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: crewbie-dashboard
+          path: crewbie-dashboard.html
+          if-no-files-found: error
+  pages:
+    if: ${{ vars.CREWBIE_PAGES_MODE == 'private' || vars.CREWBIE_PAGES_MODE == 'public' }}
+    needs: report
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+      - name: Install approved Crewbie package
+        env:
+          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.68/crewbie-cli-0.1.0-alpha.68.tgz' }}
+        run: |
+          npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
+      - name: Check explicitly approved visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGES_MODE: ${{ vars.CREWBIE_PAGES_MODE }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-pages --pages-mode "$PAGES_MODE"
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: crewbie-dashboard
+          path: _crewbie-site
+      - run: mv _crewbie-site/crewbie-dashboard.html _crewbie-site/index.html
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: _crewbie-site
+      - uses: actions/deploy-pages@v5.0.1
+        id: deployment

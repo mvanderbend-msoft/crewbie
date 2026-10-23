@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-37",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/outdoor-store/issues/37. Source revision: 2026-09-28T10:05:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/outdoor-store/issues/37",
+      "revision": "2026-09-28T10:05:00Z",
+      "fingerprint": "90e991201d7162cc5fe24c3a910aa653c8d18df45023c9f790fea0ceef5e96c2"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "health-telemetry",
+      "title": "Add health endpoints and OpenTelemetry to the host",
+      "body": "Add liveness and readiness health endpoints and the Azure Monitor OpenTelemetry distro to `src/Contoso.Outdoor.Web.Core`; readiness checks the database, not the legacy app.\n\n## Acceptance criteria\n- The health endpoints answer from the new host and are never forwarded to the legacy app.\n- Requests, dependencies and exceptions, including forwarded requests, appear in Application Insights.\n- No secret is added to configuration.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "monitoring-infra",
+      "title": "Provision monitoring and health probes",
+      "body": "Add Log Analytics and workspace-based Application Insights to `infra/`, pass the connection string to the container app and configure liveness and readiness probes.\n\n## Acceptance criteria\n- `azd provision --preview` shows only the monitoring resources and the container app change.\n- Probes use the host's health endpoints.\n- No secret is added to parameters or workflows.",
+      "owner": "cloud-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "revision-rollout",
+      "title": "Roll out through a labelled staging revision",
+      "body": "Switch the container app to multiple-revision mode; the deploy workflow creates a revision without traffic, smoke-tests it through a `staging` label, then moves traffic and keeps the previous revision for rollback.\n\n## Acceptance criteria\n- A failed smoke test leaves all traffic on the previous revision.\n- Rollback is one documented workflow run.\n- Deploys still authenticate with OIDC.",
+      "owner": "cloud-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 2,
+      "dependsOn": [
+        "health-telemetry",
+        "monitoring-infra"
+      ]
+    }
+  ],
+  "approval": null
+}

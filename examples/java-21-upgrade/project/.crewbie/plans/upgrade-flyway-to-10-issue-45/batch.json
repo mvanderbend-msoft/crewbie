@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-45",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/ledger-service/issues/45. Source revision: 2026-09-07T08:30:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/ledger-service/issues/45",
+      "revision": "2026-09-07T08:30:00Z",
+      "fingerprint": "eccc8ef9bb4d1bd06fadd78de359eb6475aa6a637bd855f50aba4304aa88c69b"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "flyway-10",
+      "title": "Move the build to Flyway 10",
+      "body": "Set the Flyway version to 10 in the root `pom.xml`, manage `flyway-database-postgresql` with the same version, and add it to `ledger-persistence/pom.xml`.\n\n## Acceptance criteria\n- `mvn -B -ntp verify` passes on JDK 21.\n- The PostgreSQL driver version is unchanged.\n- No migration file changes.",
+      "owner": "build-platform",
+      "model": "gpt-5.3-codex",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "migrator-on-10",
+      "title": "Adapt the migrator to Flyway 10",
+      "body": "Update `FlywayMigrator` and the `ledger-persistence` integration tests to the Flyway 10 API and defaults.\n\n## Acceptance criteria\n- `JdbcLedgerRepositoryIT` passes against PostgreSQL in Testcontainers.\n- Production code never enables `clean`.\n- Migrations still run at application start.",
+      "owner": "persistence",
+      "model": "gpt-5.3-codex",
+      "priority": 2,
+      "dependsOn": [
+        "flyway-10"
+      ]
+    },
+    {
+      "id": "history-compat",
+      "title": "Validate a Flyway 7 schema history",
+      "body": "Add an integration test that starts from a database whose `flyway_schema_history` was written by Flyway 7 and runs the Flyway 10 migrator against it.\n\n## Acceptance criteria\n- `validate` passes and no migration is applied again.\n- The fixture is a captured history, not a hand-written guess.",
+      "owner": "persistence",
+      "model": "gpt-5.3-codex",
+      "priority": 2,
+      "dependsOn": [
+        "flyway-10"
+      ]
+    }
+  ],
+  "approval": null
+}

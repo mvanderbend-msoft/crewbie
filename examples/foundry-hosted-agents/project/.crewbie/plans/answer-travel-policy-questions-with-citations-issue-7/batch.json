@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-7",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/travel-concierge/issues/7. Source revision: 2026-08-27T09:10:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/travel-concierge/issues/7",
+      "revision": "2026-08-27T09:10:00Z",
+      "fingerprint": "058c0a4d6ee2c3ed05c0d66e82f710b90d36f1e91ebd74bc4ba36d210a2fb5e1"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "policy-search-tool",
+      "title": "Add a policy search tool with citations",
+      "body": "Add a read-only Azure AI Search tool to the concierge in `src/concierge` and instructions to answer only from its results, citing the section, or say it does not know.\n\n## Acceptance criteria\n- Answers include the policy title and section of each result used.\n- Questions without a matching policy get an explicit I-don't-know answer.\n- Unit tests mock search and cover a hit, no hit and an injected instruction inside a result.",
+      "owner": "agent-runtime",
+      "model": "claude-opus-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "search-access",
+      "title": "Grant the agent identity read access to the policy index",
+      "body": "Configure the search endpoint for the hosted agent and assign the agent's Entra identity Search Index Data Reader on the search service only.\n\n## Acceptance criteria\n- `azd provision --preview` shows one role assignment scoped to the search service.\n- No key or connection string is added to `azure.yaml`, workflows or the image.",
+      "owner": "foundry-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "groundedness-evals",
+      "title": "Evaluate grounded policy answers",
+      "body": "Add a golden set of at least 20 policy questions (including unanswerable ones) to `evals/` with groundedness and task adherence thresholds.\n\n## Acceptance criteria\n- The evaluation run reports groundedness and task adherence against `evals/thresholds.json`.\n- Unanswerable questions are scored as correct only when the agent declines.\n- The golden set contains no real traveller data.",
+      "owner": "evaluation",
+      "model": "claude-sonnet-5.5",
+      "priority": 2,
+      "dependsOn": [
+        "policy-search-tool"
+      ]
+    }
+  ],
+  "approval": null
+}

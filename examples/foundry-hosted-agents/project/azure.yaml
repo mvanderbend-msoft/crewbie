@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+requiredVersions:
+  azd: '>=1.27.1'
+  extensions:
+    azure.ai.agents: '>=1.0.0-beta.9'
+name: travel-concierge
+services:
+  ai-project:
+    host: azure.ai.project
+    deployments:
+      - name: gpt-5.4-mini
+        model:
+          format: OpenAI
+          name: gpt-5.4-mini
+          version: '2026-03-17'
+        sku:
+          name: GlobalStandard
+          capacity: 10
+  concierge:
+    host: azure.ai.agent
+    project: src/concierge
+    language: python
+    uses:
+      - ai-project
+    kind: hosted
+    name: concierge
+    description: Plans and books business trips within Contoso travel policy.
+    protocols:
+      - protocol: responses
+        version: 2.0.0
+    env:
+      PYTHONNOUSERSITE: "1"
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+      AZURE_AI_SEARCH_ENDPOINT: ${AZURE_AI_SEARCH_ENDPOINT}
+      AZURE_AI_SEARCH_INDEX: ${AZURE_AI_SEARCH_INDEX}
+      BOOKING_API_BASE_URL: ${BOOKING_API_BASE_URL}
+      BOOKING_API_SCOPE: ${BOOKING_API_SCOPE}
+    container:
+      resources:
+        cpu: '0.5'
+        memory: 1Gi
+    hooks:
+      # The agent's Entra identity exists only after a version is deployed.
+      postdeploy:
+        shell: sh
+        run: ./scripts/grant-agent-access.sh
+infra:
+  provider: microsoft.foundry

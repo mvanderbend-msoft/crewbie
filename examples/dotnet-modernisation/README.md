@@ -1,36 +1,55 @@
 # .NET modernisation: MVC 5 to ASP.NET Core on Azure Container Apps
 
-**Repository** (`contoso/outdoor-store`): an ASP.NET MVC 5 shop on .NET Framework 4.8. It contains `Contoso.Outdoor.Web` (Global.asax, OWIN cookie auth, InProc session), `Contoso.Outdoor.Data` (EF6), `Contoso.Outdoor.Domain` and MSTest tests. CI runs a Windows build. An outdated `.github/copilot-instructions.md` exists.
+`contoso/outdoor-store` is an online outdoor shop built with ASP.NET MVC 5 on .NET Framework 4.8. It is moving route by
+route to ASP.NET Core on .NET 10 in Azure Container Apps: a YARP fallback and the System.Web adapters let the old and new
+apps share the `.Outdoor.Auth` cookie, the session and the SQL Server schema until cutover.
 
-**Destination** (from Crewbie Compass): an incremental strangler-fig migration to ASP.NET Core on .NET 10. A YARP proxy and the System.Web adapters let the legacy app keep serving every route that has not been ported yet. Both apps share the SQL Server schema until cutover. The target platform is Azure Container Apps with managed identity, deployed with azd. URLs, cookies and prices must not change. See [`repo/docs/destination.md`](repo/docs/destination.md).
+This example shows the repository two months after `crewbie init` (2026-08-24 to 2026-10-23): three features delivered
+(catalog, cart, health checks and safe rollout) and checkout in progress.
 
-## Team
+## Why this team
 
-| Role | Model | Why this split |
-| --- | --- | --- |
-| `web-migration` | claude-opus-5.5 (complex) | Ports routes while the old and new hosts share auth and session; parity mistakes reach shoppers. |
-| `data-access` | claude-sonnet-5.5 | EF6 to EF Core 10 against a schema both apps still use. |
-| `cloud-platform` | gpt-6.1-sol | Dockerfile, Bicep, azd, Container Apps and OIDC deployment. |
-| `migration-reviewer` | gpt-6.1-sol | Reviews feature PRs for parity, schema safety and Azure security, using a different model family from the main implementer. |
+| Role | Owns |
+| --- | --- |
+| `web-migration` | Porting controllers and views while both hosts share auth and session; parity mistakes reach shoppers. |
+| `data-access` | EF6 to EF Core 10 on a schema the legacy app still writes to. |
+| `cloud-platform` | Container image, Bicep, azd, Container Apps revisions, OIDC deploys and monitoring. |
+| `migration-reviewer` | Reviews each feature PR for behavior parity, schema safety and Azure security, on a different model family. |
 
-The team has no generic "frontend" or "backend" expert. Specialists are split by the concerns that change independently in this migration.
+The split follows what changes independently in a strangler migration, not "frontend" and "backend". The history shows
+why: most bumps sit on a boundary (forwarded headers, anti-forgery tokens across apps, EF6 naming conventions, probes).
 
-## Guidance
+## Tour of `project/`
 
-- `.github/copilot-instructions.md` is rewritten. The old file described only the legacy app.
-- Path-scoped instructions: `legacy-web` (the frozen MVC 5 app), `aspnetcore` (the new host), `data`, and `infra`.
-- `.crewbie/constitution.md`: parity, the shared schema, no secrets and the incremental cutover.
-- `copilot-setup-steps.yml` installs the .NET 10 SDK for the cloud agent on Ubuntu. The legacy app builds only in the existing Windows CI.
-- MCP servers in `.vscode/mcp.json`: Microsoft Learn (remote, also for the cloud agent) and Azure MCP (local).
+The repository as it is today on the in-progress feature branch `crewbie/issue-47-58bc4c10`.
 
-## Issue to plan
+- Code
+  - `src/Contoso.Outdoor.Web`: the legacy MVC 5 app, still serving everything not ported. Ported controllers stay until
+    cutover with a comment naming the PR that ported them.
+  - `src/Contoso.Outdoor.Web.Core`: the .NET 10 host. `Program.cs` holds the YARP catch-all, adapters, forwarded headers
+    and health checks.
+  - `src/Contoso.Outdoor.Domain`: multi-targeted (`net48;net10.0`) shared types, including the session types.
+  - `src/Contoso.Outdoor.Data.Core` and `tests/Contoso.Outdoor.Data.Core.Tests`: EF Core over the shared schema, with
+    parity tests against `Sql/schema.sql` and recorded legacy results.
+  - `infra/`, `azure.yaml`, `.github/workflows/deploy.yml`: Container Apps, labelled-revision rollout, OIDC.
+- Crewbie
+  - `.crewbie/config.json`: the team, models and reviewer.
+  - `.github/agents/`: one custom agent per role plus coordinator and improver.
+  - `.github/copilot-instructions.md`, `.github/instructions/`: guidance, partly updated by the team (see `evolved` in
+    `scenario.mjs`).
+  - `docs/destination.md`: the target, with decisions recorded during reviews.
+  - `.crewbie/team/<role>/hot.md`: gotchas each agent learned, with the source PR. `data-access` has a cold topic,
+    `cold/parity-tests.md`.
+  - `.crewbie/decisions/hot.md` and `cold/strangler-routing.md`: shared choices, such as which app serves which route.
+  - `.crewbie/plans/`: one folder per planned issue (#12, #27, #37 and #47).
 
-[`issue.md`](issue.md) asks to serve the catalog from the new host. [`plan.json`](plan.json) splits that into five tasks:
+## Read next
 
-1. `domain-multitarget` (web-migration)
-2. `core-host-yarp` (web-migration)
-3. `efcore-context` (data-access)
-4. `container-infra` (cloud-platform), after the host exists
-5. `catalog-routes` (web-migration), after the host, the data context and the shared domain are ready
+- [`setup/crewbie-setup.md`](setup/crewbie-setup.md): what init proposed on day 0.
+- [`HISTORY.md`](HISTORY.md): every issue, PR, review, fix round and memory entry, #11 to #56.
 
-Each task becomes its own issue and PR into the feature branch. The reviewer then checks the single feature PR.
+## Generated vs hand-written
+
+Crewbie-owned files and the plans are generated by `npm run examples` from `scenario.mjs` and checked by
+`test/examples.test.mjs`. Application code, memory, decisions, the evolved files and the history are hand-written to
+show two months of use. The code is illustrative: it is meant to read like the real thing, not to build.

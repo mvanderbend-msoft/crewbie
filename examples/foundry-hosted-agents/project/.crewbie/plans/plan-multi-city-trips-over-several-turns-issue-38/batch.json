@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-38",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/travel-concierge/issues/38. Source revision: 2026-10-12T08:45:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/travel-concierge/issues/38",
+      "revision": "2026-10-12T08:45:00Z",
+      "fingerprint": "2b11d6cb684b094ee34862ffa0f904f2dc71fb8538f41b6b660fb3ba0f0effee"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "trip-workflow",
+      "title": "Restructure the concierge as a policy and booking workflow",
+      "body": "Build an Agent Framework workflow in `src/concierge` with stable `policy` and `booking` executors, keep the trip draft in the workflow state and serve it from `main.py` through a zero-argument factory.\n\n## Acceptance criteria\n- A conversation resumed after a host restart keeps the trip draft and any pending approval.\n- Existing policy and booking tests pass unchanged against the workflow.",
+      "owner": "agent-runtime",
+      "model": "claude-opus-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "offer-search-tool",
+      "title": "Search flight and hotel offers per leg",
+      "body": "Add a read-only `search_offers` tool that queries the booking API for one leg and returns offers fenced as data; no approval is needed because nothing is reserved.\n\n## Acceptance criteria\n- Offers for each leg are shown with the policy result for the whole trip.\n- Tests mock the booking API, including an offer whose text contains an instruction.",
+      "owner": "agent-runtime",
+      "model": "claude-opus-5.5",
+      "priority": 2,
+      "dependsOn": [
+        "trip-workflow"
+      ]
+    },
+    {
+      "id": "multi-turn-evals",
+      "title": "Evaluate multi-turn trip planning",
+      "body": "Add synthetic multi-turn conversations for multi-city trips to `evals/`, scored for task adherence on the final turn.\n\n## Acceptance criteria\n- The dataset covers a trip resumed after a restart and a leg that breaks policy.\n- Results are reported against `evals/thresholds.json`.",
+      "owner": "evaluation",
+      "model": "claude-sonnet-5.5",
+      "priority": 2,
+      "dependsOn": [
+        "trip-workflow"
+      ]
+    },
+    {
+      "id": "workflow-tracing",
+      "title": "Trace the workflow steps",
+      "body": "Add OpenTelemetry spans for the workflow executors and tools, exported to Application Insights through `APPLICATIONINSIGHTS_CONNECTION_STRING`.\n\n## Acceptance criteria\n- A multi-turn conversation shows one trace per turn with the executor and tool spans.\n- Traces contain no traveller names or booking references.",
+      "owner": "evaluation",
+      "model": "claude-sonnet-5.5",
+      "priority": 3,
+      "dependsOn": [
+        "offer-search-tool"
+      ]
+    }
+  ],
+  "approval": null
+}

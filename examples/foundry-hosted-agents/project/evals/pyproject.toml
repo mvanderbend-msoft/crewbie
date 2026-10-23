@@ -1,0 +1,16 @@
+[project]
+name = "concierge-evals"
+version = "0.3.0"
+description = "Golden datasets and the evaluation gate for the Contoso Travel concierge."
+requires-python = ">=3.13"
+dependencies = [
+    "azure-ai-evaluation",
+    "azure-identity",
+    "httpx",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

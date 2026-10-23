@@ -1,31 +1,44 @@
-# Foundry hosted agents: Microsoft Agent Framework in Python
+# Foundry hosted agents: two months of Crewbie on a Microsoft Agent Framework agent
 
-**Repository** (`contoso/travel-concierge`): a travel concierge agent built with Microsoft Agent Framework (`agent-framework-foundry` and `agent-framework-foundry-hosting`). It is served by `ResponsesHostServer` from `src/concierge` and deployed as a Microsoft Foundry hosted agent with `azd` (`host: azure.ai.agent`, `infra.provider: microsoft.foundry`). The layout follows the official [foundry-samples](https://github.com/microsoft-foundry/foundry-samples) hosted-agent template: Python 3.13, uv and a Dockerfile on port 8088. An `AGENTS.md` already exists.
+`contoso/travel-concierge` is a Python travel concierge built with Microsoft Agent Framework and served by `ResponsesHostServer` as a Microsoft Foundry hosted agent (`azd`, `host: azure.ai.agent`, `infra.provider: microsoft.foundry`, Python 3.13, uv, port 8088). It answers travel-policy questions with citations and books trips only after the traveller approves; this example shows the repository on 2026-10-23, two months after `crewbie init`.
 
-**Destination** (from Crewbie Compass): an internal concierge that answers travel-policy questions and books trips only after human approval. Answers must be grounded in policy documents and checked by evaluations before rollout. See [`repo/docs/destination.md`](repo/docs/destination.md).
+## Why this team
 
-## Team
-
-| Role | Model | Why this split |
+| Role | Model | Owns |
 | --- | --- | --- |
-| `agent-runtime` | claude-opus-5.5 (complex) | Agent code, tools, instructions and the hosting entry point. The APIs are prerelease, and a wrong tool contract can book a trip. |
-| `evaluation` | claude-sonnet-5.5 | Golden datasets, groundedness and safety evaluators, thresholds and tracing. |
-| `foundry-platform` | gpt-6.1-sol | `azure.yaml`, model deployments, the agent identity's role assignments and deployment. |
-| `agent-reviewer` | gpt-6.1-sol | Reviews feature PRs for unapproved side effects, prompt injection through tool results, leaked secrets and evaluation regressions. |
+| `agent-runtime` | claude-opus-5.5 (complex) | Agent code, tools, instructions, workflow and the host entry point. Prerelease APIs, and a wrong tool contract can book a trip. |
+| `evaluation` | claude-sonnet-5.5 | Golden datasets, evaluators, thresholds and tracing. Separate so nobody lowers a threshold to ship their own change. |
+| `foundry-platform` | gpt-6.1-sol | `azure.yaml`, the Dockerfile, agent identity grants and the deploy workflow. |
+| `agent-reviewer` | gpt-6.1-sol | Reviews feature PRs for unapproved side effects, prompt injection through tool results, secrets and evaluation regressions. |
 
-Evaluation is a separate specialist because agent behavior is only as trustworthy as its tests. That role must never lower a threshold to make a change pass.
+## Tour of `project/`
 
-## Guidance
+- **Code**: `src/concierge/main.py` (thin host entry point serving a factory), `src/concierge/concierge/` (workflow, tools, booking client, fencing, instructions) and `src/concierge/tests/`.
+- **Evaluations**: `evals/` (its own uv project): datasets, `thresholds.json`, `run.py` and tests.
+- **Delivery**: `azure.yaml`, `scripts/grant-agent-access.sh` (postdeploy hook), `.github/workflows/ci.yml` and `deploy.yml` (OIDC, evaluation gate, `azd deploy`).
+- **Crewbie configuration**: `.crewbie/config.json` (roles, models, reviewer), `.crewbie/instructions.md`.
+- **Agents**: `.github/agents/crewbie-*.agent.md`, one per role plus coordinator and improver.
+- **Guidance**: `AGENTS.md` and `.github/instructions/` (`agent-code`, `evals`, `foundry-deploy`).
+- **Memory**: `.crewbie/team/<role>/hot.md` (gotchas learnt from PRs), `index.md`, and `.crewbie/team/evaluation/cold/golden-data.md`.
+- **Decisions**: `.crewbie/decisions/hot.md` and `.crewbie/decisions/cold/evaluation-gate.md`.
+- **Plans**: `.crewbie/plans/<title-slug>-issue-<n>/` for #7, #17, #28 and #38 (`plan.md`, `batch.json`, `setup.json`).
+- **Destination**: `docs/destination.md`.
 
-- `AGENTS.md` is updated. It keeps the sample's accurate commands (`azd ai agent run`, `azd ai agent invoke --local`, `azd deploy`) and adds the approval and grounding rules.
-- Path-scoped instructions: `agent-code` (`src/concierge/**/*.py`), `evals` and `foundry-deploy`.
-- There is no constitution, because the rules fit in `AGENTS.md` and the destination.
-- `copilot-setup-steps.yml` installs Python 3.13 and uv and runs `uv sync --frozen` in `src/concierge`.
-- MCP servers in `.vscode/mcp.json`: Microsoft Learn (remote, also for the cloud agent) and Azure MCP (local). For Foundry-specific tooling in your editor, you can also add the Microsoft Foundry skill: `npx skills add https://github.com/microsoft/azure-skills --skill microsoft-foundry`.
+`project/` shows the in-progress feature branch `crewbie/issue-38-7bcaf377`: `main` plus the merged tasks of plan 4. The offer search tool (#46, open) and tracing (#43, not started) are not in the code yet.
 
-## Issue to plan
+## Read next
 
-[`issue.md`](issue.md) asks for policy answers with citations. [`plan.json`](plan.json) has three tasks:
+- [`setup/crewbie-setup.md`](setup/crewbie-setup.md): what `crewbie init` proposed on day 0.
+- [`HISTORY.md`](HISTORY.md): issues, plan PRs, task PRs, reviews, `/crewbie fix` and `/crewbie revise` rounds, and the memory each PR added.
 
-- `policy-search-tool` (agent-runtime) and `search-access` (foundry-platform, read-only RBAC on the search service) run in parallel.
-- `groundedness-evals` (evaluation) runs once the tool exists.
+## Changed since init
+
+Files init installed that the team later changed on purpose (listed in `evolved` in `scenario.mjs`):
+
+- `AGENTS.md`: the fencing rule (#16), evaluation commands (#33) and the gated deploy path (#37).
+- `.github/workflows/copilot-setup-steps.yml`: also syncs the `evals` uv project (#33).
+- `.github/instructions/foundry-deploy.instructions.md`: covers `scripts/**` and the post-deploy grant rule (#12, #22).
+
+## Generated vs hand-written
+
+Crewbie-owned files (config, agents, Crewbie workflows, skill, PR template, unchanged instructions, `docs/destination.md`) and the plan folders are generated by `npm run examples` from `scenario.mjs` and checked by `test/examples.test.mjs`. Application code, memory, decisions, the evolved files and `HISTORY.md` are hand-written to show two months of use.

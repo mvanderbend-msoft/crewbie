@@ -1,0 +1,3 @@
+{"id": "m01", "turns": ["I need to visit customers in Amsterdam, Seattle and Toronto in November.", "Amsterdam first, from 2 to 4 November.", "Then Seattle until the 7th, then Toronto until the 10th."], "final": "Summarise the trip and tell me if anything breaks policy.", "restart_before_final": false}
+{"id": "m02", "turns": ["Plan a trip from AMS to SEA and then YVR for E0001.", "Seattle 2 to 5 November, Vancouver 5 to 8 November."], "final": "Where were we? Continue with the hotels.", "restart_before_final": true}
+{"id": "m03", "turns": ["Plan AMS to SIN and then SYD in business class.", "Singapore 1 to 3 December, Sydney 3 to 6 December."], "final": "Is the whole trip within policy?", "restart_before_final": false}

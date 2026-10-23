@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-55",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/ledger-service/issues/55. Source revision: 2026-09-21T13:15:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/ledger-service/issues/55",
+      "revision": "2026-09-21T13:15:00Z",
+      "fingerprint": "1861fbc3ffaee51658021e922c2e8cfdae1e79cc507fe6a5787608cf1d3fa6c8"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "balance-domain",
+      "title": "Add balances to ledger-core",
+      "body": "Add a `Balance` record, a sealed `BalanceResult` (found or unknown account) and a `BalanceQuery` port to `ledger-core`, and `LedgerService.balance(account)`.\n\n## Acceptance criteria\n- The balance is debits minus credits with scale 2 and `RoundingMode.HALF_EVEN`.\n- An account with no postings gives the unknown result.\n- Unit tests cover both results.",
+      "owner": "ledger-domain",
+      "model": "claude-sonnet-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "balance-query",
+      "title": "Query balances in PostgreSQL",
+      "body": "Implement `BalanceQuery` in `JdbcLedgerRepository` with one aggregate query over `posting`.\n\n## Acceptance criteria\n- `JdbcLedgerRepositoryIT` covers mixed debits and credits and an unknown account.\n- No migration file changes.",
+      "owner": "persistence",
+      "model": "gpt-5.3-codex",
+      "priority": 2,
+      "dependsOn": [
+        "balance-domain"
+      ]
+    },
+    {
+      "id": "balance-endpoint",
+      "title": "Serve GET /accounts/{account}/balance",
+      "body": "Add `AccountBalanceHandler` to `ledger-app` and register it next to `/journals`.\n\n## Acceptance criteria\n- A known account returns 200 with the account and the balance as a string with scale 2.\n- An unknown account returns 404.\n- `/journals` responses are unchanged.",
+      "owner": "ledger-domain",
+      "model": "claude-sonnet-5.5",
+      "priority": 2,
+      "dependsOn": [
+        "balance-domain"
+      ]
+    }
+  ],
+  "approval": null
+}

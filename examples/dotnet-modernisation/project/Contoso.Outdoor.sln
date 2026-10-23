@@ -1,0 +1,4 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+# Legacy build: Contoso.Outdoor.Web, Contoso.Outdoor.Data, Contoso.Outdoor.Domain, Contoso.Outdoor.Tests.
+# The .NET 10 projects build with the dotnet CLI (see .github/workflows/build-core.yml).

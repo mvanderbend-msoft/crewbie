@@ -1,0 +1,13 @@
+name: build
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+      - run: nuget restore Contoso.Outdoor.sln
+      # -restore also restores the SDK-style domain project (net48;net10.0), which nuget restore skips.
+      - run: msbuild Contoso.Outdoor.sln -restore /p:Configuration=Release
+      - run: vstest.console.exe tests\Contoso.Outdoor.Tests\bin\Release\Contoso.Outdoor.Tests.dll

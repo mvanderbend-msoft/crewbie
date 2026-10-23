@@ -1,0 +1,23 @@
+[
+  {
+    "name": "book_trip",
+    "description": "Book a return flight for the traveller. Runs only after the traveller approves this exact trip.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "traveller_id": {"type": "string", "description": "Employee ID of the traveller."},
+        "origin": {"type": "string", "description": "IATA code of the departure airport."},
+        "destination": {"type": "string", "description": "IATA code of the arrival airport."},
+        "depart_date": {"type": "string", "format": "date", "description": "Outbound date."},
+        "return_date": {"type": "string", "format": "date", "description": "Return date."},
+        "cabin": {"type": "string", "enum": ["economy", "premium_economy", "business"], "description": "Cabin class."}
+      },
+      "required": ["traveller_id", "origin", "destination", "depart_date", "return_date", "cabin"]
+    }
+  },
+  {
+    "name": "search_policy",
+    "description": "Search the Contoso travel policy. Returns excerpts with their title and section, or NO_MATCHING_POLICY.",
+    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
+  }
+]

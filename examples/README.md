@@ -1,6 +1,8 @@
 # Worked examples
 
-Each example shows what Crewbie produces for a realistic repository: the team and guidance `crewbie init` installs, a sample issue, and the plan the coordinator turns it into.
+Each example is a fictional repository that has used Crewbie for two months, from `crewbie init` on 2026-08-24 to 2026-10-23.
+They show what the team looks like, what the agents remember, which decisions they share, how issues became plans and
+PRs, and what reviews caught along the way.
 
 | Example | Repository | Team |
 | --- | --- | --- |
@@ -10,17 +12,33 @@ Each example shows what Crewbie produces for a realistic repository: the team an
 
 ## What each example contains
 
-- `scenario.mjs`: the repository before init (stub files), the Crewbie Compass answers, the review Copilot returned, the sample issue and the coordinator's task breakdown.
-- `crewbie-setup.md`: the assessment init shows for review.
-- `repo/`: the files init writes that are specific to the repository. These are the team in `.crewbie/config.json`, the `crewbie-*` specialist agents, instructions, the constitution if there is one, `copilot-setup-steps.yml`, `.vscode/mcp.json` and `docs/destination.md`.
-- `issue.md`: a feature request as a human would write it.
-- `plan.json`: the batch the planning PR commits to `.crewbie/plans/issue-<n>/batch.json`. Merging the planning PR approves it and starts the tasks.
+- `README.md`: the project, why this team, and a tour of where to look.
+- `HISTORY.md`: the two months as a timeline of issues, plan PRs, task PRs, reviews, `/crewbie fix` rounds and the memory
+  each PR added.
+- `setup/crewbie-setup.md`: what init proposed on day 0.
+- `project/`: the repository today. It contains the application code, `.crewbie/config.json`, the `crewbie-*` agents,
+  instructions, the Crewbie workflows, agent memory under `.crewbie/team/`, shared decisions under `.crewbie/decisions/`,
+  and every plan under `.crewbie/plans/`.
+- `scenario.mjs`: the repository before init, the Crewbie Compass answers, the review Copilot returned, and the issues
+  planned since.
 
-The standard files are omitted from `repo/` because every installation gets them unchanged. These are the `crewbie-*` workflows, the `crewbie` skill, the coordinator and improver agents, the PR template, `.crewbie/instructions.md`, and the memory files under `.crewbie/team/` and `.crewbie/decisions/`.
+## Generated vs hand-written
 
-## How they are made
+Crewbie's own code generates everything Crewbie owns: the init assessment, config, agents, instructions, workflows,
+skill, PR template, `docs/destination.md` and each plan's `plan.md`, `batch.json` and `setup.json`. `generate.mjs` builds
+the pre-init repository in a temporary Git repository, runs Crewbie's assessment, review validation and installer, then
+runs the planning output parser on each issue. A scenario that would show repository warnings in init does not generate.
 
-The outputs are not hand-written. `generate.mjs` builds each stub repository in a temporary Git repository. It runs Crewbie's own assessment, review validation, installer and planning parser on it, and writes the result. A scenario that would show repository warnings in init, such as a path that does not exist or an unowned workspace, fails to generate. `test/examples.test.mjs` fails when a committed example differs from what the current code produces.
+The application code, memory, decisions, history and the few files the team changed on purpose are written by hand to
+show two months of use. Changed files are listed with a reason in `evolved` in `scenario.mjs`. Plans omit the
+run-specific `execution.json`.
+
+`test/examples.test.mjs` checks the generated files are current. It also checks:
+
+- Every plan parses against the team's config.
+- Memory stays within Crewbie's word budgets.
+- Every memory entry cites a PR or issue that appears in the history.
+- Every memory index link resolves.
 
 ```sh
 npm run examples                      # regenerate all

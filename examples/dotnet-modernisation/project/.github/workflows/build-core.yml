@@ -1,0 +1,14 @@
+name: build-core
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test tests/Contoso.Outdoor.Web.Core.Tests
+      - run: dotnet test tests/Contoso.Outdoor.Data.Core.Tests
+      - run: az bicep build --file infra/main.bicep --stdout > /dev/null
+      - run: docker build -f src/Contoso.Outdoor.Web.Core/Dockerfile .

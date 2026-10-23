@@ -1,0 +1,78 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency: deploy-production
+env:
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    # The federated credential subject is this environment, so every job that signs in uses it.
+    environment: production
+    env:
+      FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+      AZURE_AI_SEARCH_ENDPOINT: ${{ vars.AZURE_AI_SEARCH_ENDPOINT }}
+      AZURE_AI_SEARCH_INDEX: ${{ vars.AZURE_AI_SEARCH_INDEX }}
+      BOOKING_API_BASE_URL: ${{ vars.BOOKING_API_BASE_URL }}
+      BOOKING_API_SCOPE: ${{ vars.BOOKING_API_SCOPE }}
+      EVAL_MODEL_ENDPOINT: ${{ vars.EVAL_MODEL_ENDPOINT }}
+      EVAL_MODEL_DEPLOYMENT: ${{ vars.EVAL_MODEL_DEPLOYMENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+      - name: Build the image
+        run: docker build -t concierge:${{ github.sha }} src/concierge
+      - name: Start the agent host on the runner
+        # Runs outside the container so DefaultAzureCredential can use the runner's az login.
+        working-directory: src/concierge
+        run: |
+          uv sync --frozen --no-dev
+          nohup uv run python main.py > host.log 2>&1 &
+          for i in $(seq 30); do curl -so /dev/null http://localhost:8088/ && break; sleep 2; done
+      - name: Evaluate
+        working-directory: evals
+        run: |
+          uv sync --frozen
+          uv run python run.py --target http://localhost:8088 --agent-version ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-${{ github.sha }}
+          path: |
+            evals/results/
+            src/concierge/host.log
+  deploy:
+    needs: evaluate
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Azure/setup-azd@v2
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign in azd with the federated credential
+        run: azd auth login --client-id "$AZURE_CLIENT_ID" --federated-credential-provider github --tenant-id "$AZURE_TENANT_ID"
+      - run: azd ext install azure.ai.agents
+      - run: azd deploy concierge --no-prompt
