@@ -1191,7 +1191,9 @@ Changing a task's kind invalidates its approval like other scope changes.
   or unapproved issues, open PRs (push fixes to them, or close them first), sessions
   not verified as ended and exhausted allowances. Without a free slot it waits.
 - **Ready for review.** Copilot requests your review when its session finishes;
-  that triggers dispatch, which restores the specialist's description and then
+  that triggers dispatch. Copilot's task API can report the session as active for
+  a little longer, so this dispatch first waits up to two minutes for it to end.
+  Dispatch then restores the specialist's description and
   marks the draft PR ready, so the description check runs on the final body, and
   withdraws Copilot's review request because task PRs merge without one. If
   that trigger waits for workflow approval (Copilot-actor runs can require it; see

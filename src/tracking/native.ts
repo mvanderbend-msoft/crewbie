@@ -9,6 +9,26 @@ export function pullTaskIds(tasks: Record<string, unknown>[], pr: Record<string,
   })).map((task) => string(task.id, "task ID")).sort();
 }
 
+const ENDED = new Set(["completed", "failed", "timed_out", "cancelled"]);
+
+/**
+ * Copilot requests review when its session finishes, but the task API can report the
+ * session as active for a little longer. Waits until every session on this PR has ended,
+ * so dispatch triggered by that review request sees the finished session. Returns false
+ * on timeout; dispatch then treats the session as running, as before.
+ */
+export async function awaitPullSessions(client: GitHubApi, repo: string, prId: number,
+  { timeoutMs = 120_000, intervalMs = 10_000, sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms)) } = {}): Promise<boolean> {
+  for (let waited = 0; ; waited += intervalMs) {
+    const { tasks, warning } = await cloudTasks(client, repo);
+    if (warning) return false;
+    const ids = new Set(pullTaskIds(tasks, { id: prId }));
+    if (tasks.every((task) => !ids.has(String(task.id)) || ENDED.has(String(task.state)))) return true;
+    if (waited + intervalMs > timeoutMs) return false;
+    await sleep(intervalMs);
+  }
+}
+
 export async function cloudTasks(client: GitHubApi, repo: string): Promise<{ tasks: Record<string, unknown>[]; warning: string | null }> {
   const tasks: Record<string, unknown>[] = [];
   const ids = new Set<string>();

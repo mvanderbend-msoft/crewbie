@@ -4,6 +4,7 @@ import { appendFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { hash, integer, json, optionalText, readJson, record, safePath, string, writeAtomic } from "./core.js";
+import { awaitPullSessions } from "./tracking/native.js";
 import { limitsFor, loadConfig } from "./config.js";
 import { probeCapabilities, renderReport } from "./execution/capabilities.js";
 import { githubReader } from "./execution/github.js";
@@ -421,6 +422,12 @@ async function main(): Promise<void> {
     const issueNumbers = hints ? hints.split(",").map((value) => integer(Number(value), "confirmed issue number")) : [];
     if (issueNumbers.length > 100) throw new Error("At most 100 confirmed issue IDs can be reconciled at once.");
     if (process.env.CREWBIE_CHECKS_TOKEN) CHECK_READER.client = api(process.env.CREWBIE_CHECKS_TOKEN);
+    if (process.env.GITHUB_EVENT_NAME === "pull_request_target" && process.env.GITHUB_EVENT_PATH) {
+      const event = record(await readJson(process.env.GITHUB_EVENT_PATH), "event");
+      if (event.action === "review_requested" && event.pull_request) {
+        await awaitPullSessions(github, config.repository, integer(Number(record(event.pull_request, "PR").id), "PR ID"));
+      }
+    }
     const work = await dispatch(github, config, ado, issueNumbers.length ? { issueNumbers } : undefined);
     const summary = renderDispatchResult(work, config);
     output.text(summary);
