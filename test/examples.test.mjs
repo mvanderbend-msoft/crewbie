@@ -14,6 +14,8 @@ const examples = fileURLToPath(new URL("../examples/", import.meta.url));
 const text = (value) => value.replace(/\r\n/g, "\n");
 const read = async (path) => text(await readFile(path, "utf8"));
 const optional = (path) => read(path).catch(() => null);
+// Workflows pin the Crewbie release that generated them; a version bump alone must not make examples stale.
+const unversioned = (value) => value?.replace(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?=\/crewbie-cli-|\.tgz)/g, "VERSION");
 
 for (const name of SCENARIOS) {
   const project = join(examples, name, "project");
@@ -23,7 +25,7 @@ for (const name of SCENARIOS) {
     const { output, deleted, warnings } = await render(name);
     assert.deepEqual(warnings, []);
     for (const [path, content] of output) {
-      assert.equal(await optional(join(examples, name, path)), text(content), `${name}/${path} is stale; run npm run examples`);
+      assert.equal(unversioned(await optional(join(examples, name, path))), unversioned(text(content)), `${name}/${path} is stale; run npm run examples`);
     }
     for (const path of deleted) assert.equal(await optional(join(project, path)), null, `${path} was removed by init`);
     const installed = new Set((await render(name)).changes.map((change) => change.path));
