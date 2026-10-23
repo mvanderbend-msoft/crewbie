@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "id": "issue-12",
+  "spec": "Implement the user-supplied requirements at https://github.com/contoso/outdoor-store/issues/12. Source revision: 2026-03-02T09:14:00Z. Task acceptance criteria below map that scope to specialist-owned work.",
+  "sources": [
+    {
+      "uri": "https://github.com/contoso/outdoor-store/issues/12",
+      "revision": "2026-03-02T09:14:00Z",
+      "fingerprint": "9e4c6a7f2125dbe92c315907dbf0e28c9ca2be325e0df68ec502b9e40a4608ca"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "domain-multitarget",
+      "title": "Multi-target the domain library",
+      "body": "Convert `src/Contoso.Outdoor.Domain` to an SDK-style project targeting net48 and net10.0 so the legacy and new hosts share PriceCalculator.\n\n## Acceptance criteria\n- The legacy solution still builds and its tests pass on Windows.\n- The domain library builds for net10.0 on Linux.\n- No pricing behavior changes.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 1,
+      "dependsOn": []
+    },
+    {
+      "id": "core-host-yarp",
+      "title": "Create the ASP.NET Core host with YARP fallback",
+      "body": "Add `src/Contoso.Outdoor.Web.Core` (.NET 10) with System.Web adapters and a YARP catch-all that forwards every route to the legacy app, sharing its `.Outdoor.Auth` cookie and session.\n\n## Acceptance criteria\n- Every legacy route answers through the new host with the same status and content.\n- A signed-in shopper stays signed in across both apps.\n- A health endpoint returns 200.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 2,
+      "dependsOn": []
+    },
+    {
+      "id": "efcore-context",
+      "title": "Map the catalog schema with EF Core 10",
+      "body": "Add `src/Contoso.Outdoor.Data.Core` with an EF Core 10 context for products and categories, mapped explicitly to the existing tables.\n\n## Acceptance criteria\n- Integration tests return the same products and prices as the EF6 context for the same data.\n- No migration is added.\n- Connections use managed identity in Azure.",
+      "owner": "data-access",
+      "model": "claude-sonnet-5.5",
+      "priority": 2,
+      "dependsOn": []
+    },
+    {
+      "id": "container-infra",
+      "title": "Containerise and provision the new host",
+      "body": "Add the Dockerfile, `azure.yaml` and Bicep for Container Apps, Container Registry, Key Vault and managed identity, plus a deploy workflow using OIDC.\n\n## Acceptance criteria\n- `azd provision --preview` shows only the intended resources.\n- The image builds and answers its health endpoint.\n- No secret is committed or stored as a workflow secret for Azure sign-in.",
+      "owner": "cloud-platform",
+      "model": "gpt-6.1-sol",
+      "priority": 3,
+      "dependsOn": [
+        "core-host-yarp"
+      ]
+    },
+    {
+      "id": "catalog-routes",
+      "title": "Port the catalog and product routes",
+      "body": "Port CatalogController and ProductController with their views to the new host; YARP stops forwarding exactly these routes.\n\n## Acceptance criteria\n- `/catalog` and `/p/{slug}` return the same URLs, status codes, prices and visible content as the legacy app.\n- All other routes are still forwarded.\n- Tests cover a found product, an unknown slug and a discounted price.",
+      "owner": "web-migration",
+      "model": "claude-opus-5.5",
+      "priority": 4,
+      "dependsOn": [
+        "core-host-yarp",
+        "efcore-context",
+        "domain-multitarget"
+      ]
+    }
+  ],
+  "approval": null
+}

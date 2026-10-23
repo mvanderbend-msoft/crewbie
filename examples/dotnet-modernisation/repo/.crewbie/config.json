@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "repository": "contoso/outdoor-store",
+  "roles": [
+    {
+      "id": "web-migration",
+      "purpose": "Own the route-by-route port from `src/Contoso.Outdoor.Web` (MVC 5) to `src/Contoso.Outdoor.Web.Core` (ASP.NET Core, .NET 10): controllers, Razor views, filters, YARP forwarding and System.Web adapters, plus multi-targeting `src/Contoso.Outdoor.Domain` so both apps share it.",
+      "model": "claude-opus-5.5",
+      "knowledge": [
+        "`src/Contoso.Outdoor.Web/App_Start/RouteConfig.cs` defines the public routes (for example `p/{slug}`); ported routes must keep the same templates.",
+        "`src/Contoso.Outdoor.Web/Global.asax.cs` registers filters, routes and bundles; ASP.NET Core replaces them with middleware, endpoint routing and static web assets.",
+        "`src/Contoso.Outdoor.Web/App_Start/Startup.Auth.cs` issues the `.Outdoor.Auth` cookie through OWIN; System.Web adapters remote app authentication lets the new host trust it during migration.",
+        "Sessions are InProc in `src/Contoso.Outdoor.Web/Web.config`; the cart lives there, so the new host reads it through the adapters' remote session.",
+        "`src/Contoso.Outdoor.Domain` is .NET Framework only; multi-target it (net48;net10.0) as SDK-style first so both apps share pricing."
+      ],
+      "checks": [
+        "`dotnet build` and `dotnet test` pass for the new projects; `tests/Contoso.Outdoor.Tests` still passes in the Windows CI job.",
+        "Each ported route returns the same status code, URL, redirects and visible content as the legacy route."
+      ],
+      "nonNegotiables": [
+        "Never change a public URL, query string or cookie name.",
+        "One legacy controller per task; unported routes stay forwarded by YARP."
+      ],
+      "contextPaths": [],
+      "complexity": "complex",
+      "modelReason": "Porting routes while sharing session and auth with a live legacy app needs reasoning across two frameworks; parity mistakes reach shoppers."
+    },
+    {
+      "id": "data-access",
+      "purpose": "Own `src/Contoso.Outdoor.Data` (EF6) and its EF Core 10 port in `src/Contoso.Outdoor.Data.Core`: mappings to the existing SQL Server schema, queries and transactions shared by both apps until cutover.",
+      "model": "claude-sonnet-5.5",
+      "knowledge": [
+        "`src/Contoso.Outdoor.Data/OutdoorContext.cs` is EF6 code-first; `src/Contoso.Outdoor.Data/Migrations/Configuration.cs` disables automatic migrations, and the database is authoritative.",
+        "EF6 conventions differ from EF Core (pluralised table names, cascade deletes, decimal precision); map tables, keys and `HasPrecision(18, 2)` explicitly.",
+        "Azure SQL uses `Authentication=Active Directory Default` with the app's managed identity; local development uses the developer's Entra sign-in."
+      ],
+      "checks": [
+        "Integration tests run the EF Core context against SQL Server in a container and compare query results with the EF6 context for the same data.",
+        "No EF Core or EF6 migration is added before cutover."
+      ],
+      "nonNegotiables": [
+        "No schema change the legacy EF6 app cannot read.",
+        "No connection string with a password in any committed file."
+      ],
+      "contextPaths": [],
+      "complexity": "standard",
+      "modelReason": "Mapping a known schema is well-specified work; the traps are documented in this role's knowledge."
+    },
+    {
+      "id": "cloud-platform",
+      "purpose": "Own containerisation and Azure delivery for the new host: `src/Contoso.Outdoor.Web.Core/Dockerfile`, Bicep under `infra/`, `azure.yaml`, Container Apps, Azure SQL, Key Vault, managed identity and the GitHub Actions deploy workflow.",
+      "model": "gpt-6.1-sol",
+      "knowledge": [
+        "`.github/workflows/build.yml` builds the legacy solution on windows-latest; the new host gets its own ubuntu job so neither blocks the other.",
+        "ASP.NET Core containers listen on 8080 by default since .NET 8; Container Apps ingress targets that port and terminates TLS.",
+        "azd reads `azure.yaml`: `azd provision` deploys `infra/main.bicep`, `azd deploy` builds the image, pushes it to Azure Container Registry and updates the container app."
+      ],
+      "checks": [
+        "`az bicep build --file infra/main.bicep` succeeds and `azd provision --preview` shows only intended changes.",
+        "`docker build` of the new host succeeds and the container answers its health endpoint."
+      ],
+      "nonNegotiables": [
+        "No secrets in Bicep parameters, workflows or appsettings.",
+        "GitHub Actions authenticate to Azure with OIDC federated credentials, never stored client secrets."
+      ],
+      "contextPaths": [],
+      "complexity": "standard",
+      "modelReason": "Infrastructure as code follows documented patterns; a strong general model with current Azure knowledge is enough, with Microsoft Learn MCP for specifics."
+    },
+    {
+      "id": "migration-reviewer",
+      "purpose": "Review each feature PR for behavior parity with the legacy app, shared-schema safety and Azure security before it merges.",
+      "model": "gpt-6.1-sol",
+      "knowledge": [
+        "The legacy original of every ported controller is in `src/Contoso.Outdoor.Web/Controllers`; compare actions, attributes and views side by side."
+      ],
+      "checks": [
+        "Ported actions keep routes, status codes, validation and anti-forgery attributes; the YARP catch-all still forwards every unported route.",
+        "The Windows legacy build and the new .NET 10 build both pass."
+      ],
+      "nonNegotiables": [
+        "Block a PR that changes a public URL, cookie or the shared schema without a recorded decision in `docs/destination.md`."
+      ],
+      "contextPaths": [],
+      "complexity": "standard",
+      "modelReason": "A different model family from the main implementer gives an independent second opinion at moderate cost."
+    }
+  ],
+  "constitution": ".crewbie/constitution.md",
+  "maxActive": 2,
+  "nightly": {
+    "enabled": false,
+    "maxRecords": 20,
+    "allowedPaths": [
+      ".crewbie/team/",
+      ".crewbie/decisions/",
+      ".crewbie/decisions.md",
+      ".crewbie/instructions.md",
+      ".github/agents/crewbie-web-migration.agent.md",
+      ".github/agents/crewbie-data-access.agent.md",
+      ".github/agents/crewbie-cloud-platform.agent.md",
+      ".github/agents/crewbie-migration-reviewer.agent.md",
+      ".github/agents/crewbie-coordinator.agent.md",
+      ".github/agents/crewbie-improver.agent.md"
+    ]
+  },
+  "ado": null,
+  "limits": {
+    "spec": 600,
+    "hot": 600,
+    "constitution": 600,
+    "topic": 1500
+  },
+  "planning": {
+    "enabled": true,
+    "model": "claude-opus-5.5",
+    "executeOnMerge": true
+  },
+  "modelProfile": "balanced",
+  "execution": {
+    "maxLaunchesPerBatch": 20,
+    "maxAttemptsPerTask": 3
+  },
+  "review": {
+    "enabled": true,
+    "role": "migration-reviewer"
+  },
+  "local": {
+    "start": "dotnet run --project src/Contoso.Outdoor.Web.Core"
+  }
+}

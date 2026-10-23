@@ -45,6 +45,11 @@ becomes a plan, the plan becomes agent work, and the result is merged to `main`.
 
 Shown at double speed. [Watch the full-speed video](https://github.com/user-attachments/assets/1cb92557-9156-4bfb-ac47-89c453932c23).
 
+For what init installs on larger repositories, see the [worked examples](examples/README.md). They cover a
+.NET Framework to .NET 10 modernisation, a Microsoft Agent Framework agent hosted in Foundry, and a
+Java 11 to 21 upgrade. Each example has its proposed team, its guidance, a sample issue and the plan
+Crewbie makes from it.
+
 ## How it works
 
 ```text
@@ -155,7 +160,7 @@ registry, install the package file from the
 [GitHub release](https://github.com/mvanderbend-msoft/crewbie/releases) instead:
 
 ```powershell
-npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.65/crewbie-cli-0.1.0-alpha.65.tgz
+npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.67/crewbie-cli-0.1.0-alpha.67.tgz
 ```
 
 Each release also includes a `SHA256SUMS` file to check the download. Run

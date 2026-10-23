@@ -1,6 +1,6 @@
 {
   "name": "@crewbie/cli",
-  "version": "0.1.0-alpha.66",
+  "version": "0.1.0-alpha.67",
   "description": "A repository-aware AI implementation crew for existing and greenfield projects.",
   "license": "MIT",
   "repository": {
@@ -33,6 +33,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test test/*.test.mjs",
     "check": "tsc -p tsconfig.json --noEmit",
+    "examples": "npm run build && node examples/generate.mjs",
     "prepack": "npm run build"
   },
   "dependencies": {
