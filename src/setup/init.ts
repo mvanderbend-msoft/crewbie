@@ -6,9 +6,10 @@ import { requireWriter } from "../tracking/github.js";
 import { ensureLabels, setupLabels } from "../tracking/issues.js";
 import { assess } from "./assessment.js";
 import { applyInstallation, installation, setupConfiguration } from "./install.js";
-import { needsInterview, proposeSetup, selectGuidance, setupInterview, type Analyze } from "./onboarding.js";
+import { needsInterview, proposeSetup, selectGuidance, type Analyze } from "./onboarding.js";
+import { DESTINATION_FILE, destinationInterview, renderDestination } from "./interview.js";
 import { cloudMcpConfig, cloudMcpInstructions, parseMcpServers } from "./mcp.js";
-import { explicitModel, listCopilotModels, type ModelChoice } from "./copilot.js";
+import { converseWithCopilot, explicitModel, listCopilotModels, transcriptConverse, type Converse, type ModelChoice } from "./copilot.js";
 import { describeInstallationFile, renderInstallationPreview, renderSetupMarkdown, setupReportPath } from "./review.js";
 import { terminalPrompts, type SetupPrompts } from "./terminal.js";
 import { COPILOT_VERSION_VARIABLE, copilotVersion as copilotVersionOf, copilotVersionCommand, copilotVersionVariable, setCopilotVersion } from "./copilot-version.js";
@@ -27,6 +28,7 @@ interface InitOptions {
 interface InitIO {
   client: () => GitHubApi;
   analyze?: Analyze;
+  converse?: Converse;
   listModels?: () => Promise<ModelChoice[]>;
   latestCopilotVersion?: () => Promise<string | undefined>;
   ask?: (question: string) => Promise<string>;
@@ -174,15 +176,29 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (dynamic && !catalog?.length) throw new Error("No available models were returned for specialist selection.");
     if (options["specialist-model"]) explicitModel(options["specialist-model"]);
     let description = options.description ?? "";
-    if (!description.trim() && ask && needsInterview(assessment)) description = await setupInterview(assessment, ask, report);
+    let destination: string | undefined;
+    if (!description.trim()) {
+      const charted = await optionalText(await safePath(root, DESTINATION_FILE));
+      if (charted?.trim()) {
+        description = `${charted.slice(0, 16_000)}\n(From ${DESTINATION_FILE}.)`;
+        report(`\nUsing ${DESTINATION_FILE} as the project destination; edit it or pass --description to change direction.`);
+      } else if (ask && needsInterview(assessment)) {
+        const converse = io.converse ?? (io.analyze ? transcriptConverse(io.analyze) : converseWithCopilot);
+        destination = renderDestination(await destinationInterview(assessment, model, { converse, ask, report }));
+        description = `${destination}\n(This map is saved as ${DESTINATION_FILE}. Global guidance may point agents to it for product direction; do not duplicate it.)`;
+      }
+    }
     if (!ask && !description.trim() && assessment.inventory.mode === "greenfield") {
       throw new Error("Greenfield setup needs a project description. Rerun init --description \"purpose, users, behavior, platform and constraints\"; no team was generated.");
     }
     report(`\n1. Assess\n  Model: ${model}\n  ${assessment.codeGraph ? "Reviewing AI guidance with opted-in CodeGraph structural metadata; application source bodies are not supplied to Copilot." : "Reviewing instructions, agents, constitution and MCP metadata, plus manifest summaries and CI workflows; application source is not read, only file names are mapped to check cited paths."}\n  This may take several minutes and consume AI credits; press Ctrl+C to cancel.\n  No project scripts or MCP servers are run; installation requires confirmation.\n`);
-    const propose = () => proposeSetup(assessment, description, model, {
-      ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
-      models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
-    });
+    const propose = async () => {
+      const result = await proposeSetup(assessment, description, model, {
+        ...(io.analyze ? { analyze: io.analyze } : {}), ...(ask ? { ask } : {}), report,
+        models: dynamic ? catalog ?? [] : [], specialistModel: options["specialist-model"] ?? model,
+      });
+      return destination ? { ...result, destination } : result;
+    };
     let proposal = await propose();
     if (options.start !== undefined) proposal.config.local = { start: parseConfig({ ...proposal.config, local: { start: options.start } }).local!.start };
     else if (!proposal.config.local?.start && terminal?.ask) {

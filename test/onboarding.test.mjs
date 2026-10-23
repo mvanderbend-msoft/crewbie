@@ -178,7 +178,27 @@ test("a blank interactive answer continues to a final pass instead of stopping",
   assert.equal(proposal.status, "ready");
 });
 
-test("unguided repositories get a breadth-first interview that reads manifests and proposes guidance and MCP", async (t) => {
+function interviewer(replies) {
+  const prompts = [];
+  return {
+    prompts,
+    converse: async (_model, run) => run(async (prompt) => {
+      prompts.push(prompt);
+      const reply = replies.shift();
+      assert.ok(reply !== undefined, `No scripted interview reply for: ${prompt.slice(0, 80)}`);
+      return typeof reply === "string" ? reply : JSON.stringify(reply);
+    }),
+  };
+}
+const question = (text, recommended, phase = "destination") => ({ done: false, phase, question: text, recommended });
+const finalMap = (overrides = {}) => ({
+  done: true, destination: "A personal AI blog that ranks on Google page 1 and is shared on LinkedIn.",
+  notes: ["SEO is the top quality priority."],
+  decisions: [{ topic: "Authoring", decision: "Admin portal to upload Markdown posts" }, { topic: "Hosting", decision: "Vercel (recommended default)" }],
+  notYetSpecified: ["Analytics provider"], outOfScope: ["Comments and user accounts"], ...overrides,
+});
+
+test("unguided repositories get an adaptive wayfinder interview that charts docs/destination.md and grounds guidance and MCP", async (t) => {
   const root = await fixture(t, {
     "package.json": JSON.stringify({ scripts: { dev: "vite", build: "vite build", lint: "eslint ." }, dependencies: { react: "^19.0.0" }, devDependencies: { vite: "^6.0.0" } }),
     "package-lock.json": "{}",
@@ -187,43 +207,94 @@ test("unguided repositories get a breadth-first interview that reads manifests a
   });
   const assessment = await assess(root);
   assert.equal(assessment.inventory.mode, "brownfield");
-  const questions = [];
+  const interview = interviewer([
+    question("What is the blog for and who reads it?", "A personal AI blog for engineers"),
+    question("How are new posts published?", "Markdown files in the repository", "frontier"),
+    question("Where is it hosted?", "Vercel", "frontier"),
+    finalMap(),
+  ]);
+  const asked = [];
+  const answers = ["Personal AI blog shared on LinkedIn; must rank on Google page 1", "An admin portal to upload posts", ""];
   let prompt = "";
   await initCommand(root, { model: "chosen-model" }, {
-    ask: async (question) => { questions.push(question); return questions.length === 1 ? "Personal AI blog shared on LinkedIn" : ""; },
+    converse: interview.converse,
+    ask: async (text) => { asked.push(text); return answers.shift(); },
     analyze: async (value) => {
       prompt = value;
       return JSON.stringify(response(assessment, {
         instructions: [
-          { path: ".github/copilot-instructions.md", content: "# Blog\n\n## Commands\n\n- `npm run build`\n", reason: "No global guidance." },
+          { path: ".github/copilot-instructions.md", content: "# Blog\n\nProduct direction: docs/destination.md\n\n## Commands\n\n- `npm run build`\n", reason: "No global guidance." },
           { path: ".github/instructions/seo.instructions.md", content: "---\napplyTo: \"src/**\"\n---\nEvery page has a unique title and meta description.\n", reason: "SEO is a quality priority." },
         ],
-        mcpServers: [{ name: "vercel", purpose: "Inspect deployments.", type: "http", url: "https://mcp.vercel.com", env: [], tools: ["*"], cloud: false }],
+        mcpServers: [{ name: "vercel", purpose: "Inspect deployments.", type: "http", url: "https://mcp.vercel.com", env: [], bearerSecret: "VERCEL_TOKEN", tools: ["*"], cloud: false }],
       }));
     },
     select: async () => "save",
     report() {}, client() { throw new Error("No GitHub writes"); },
   });
-  assert.equal(questions.length, 6);
-  assert.match(questions[2], /Press Enter to keep what was detected \(react, vite; npm\)/);
-  assert.match(prompt, /Destination: Personal AI blog shared on LinkedIn/);
-  assert.match(prompt, /Stack and hosting: Detected: react, vite; npm/);
-  assert.match(prompt, /Out of scope: \(not answered; choose a sensible default/);
+  assert.equal(asked.length, 3);
+  assert.match(asked[0], /^1\. What is the blog for[\s\S]*Recommended: A personal AI blog/);
+  assert.match(interview.prompts[0], /wayfinder-style[\s\S]*breadth-first[\s\S]*ONE question per turn/);
+  assert.match(interview.prompts[0], /"build": "vite build"/);
+  assert.doesNotMatch(interview.prompts[0], /SOURCE-MUST-NOT-BE-SENT/);
+  assert.match(interview.prompts[1], /^Answer: Personal AI blog/);
+  assert.match(interview.prompts[3], /^Accepted your recommendation: Vercel/);
+  assert.match(prompt, /# Destination[\s\S]*Google page 1[\s\S]*## Decisions so far[\s\S]*\*\*Authoring\*\*: Admin portal/);
+  assert.match(prompt, /saved as docs\/destination\.md/);
   assert.match(prompt, /"build": "vite build"/);
-  assert.match(prompt, /npm run build/);
   assert.doesNotMatch(prompt, /SOURCE-MUST-NOT-BE-SENT/);
   const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
   assert.equal(saved.status, "ready");
+  assert.ok(!saved.review.warnings?.some((warning) => /destination\.md/.test(warning)), "The charted file is not reported as missing.");
   assert.equal(saved.mcpServers[0].name, "vercel");
   const changes = await installation(root, saved);
+  assert.match(changes.find((file) => file.path === "docs/destination.md").after, /## Out of scope\n\n- Comments and user accounts/);
   assert.ok(changes.some((file) => file.path === ".github/instructions/seo.instructions.md"));
   const mcp = changes.find((file) => file.path === ".vscode/mcp.json");
-  assert.deepEqual(JSON.parse(mcp.after).servers.vercel, { type: "http", url: "https://mcp.vercel.com/" });
+  assert.equal(JSON.parse(mcp.after).servers.vercel.url, "https://mcp.vercel.com/");
   const markdown = await readFile(join(root, "crewbie-setup.md"), "utf8");
+  assert.match(markdown, /## Destination \(docs\/destination\.md\)/);
   assert.match(markdown, /Proposed MCP servers[\s\S]*\.vscode\/mcp\.json[\s\S]*mcp\.vercel\.com/);
   assert.doesNotMatch(markdown, /Copilot cloud agent/, "Local-only servers are not offered to the cloud agent.");
 });
 
+test("interview handles skip, done and invalid replies without stopping setup", async (t) => {
+  const root = await fixture(t, { "src/App.tsx": "export {};" });
+  const assessment = await assess(root);
+  const { destinationInterview } = await import("../dist/setup/interview.js");
+  const interview = interviewer([
+    "not json", question("Who reads it?", "Engineers"), question("Hosting?", "Vercel", "frontier"),
+    question("Another question after done", "x"), finalMap({ decisions: [] }),
+  ]);
+  const answers = ["skip", "done"];
+  const map = await destinationInterview(assessment, "model", { converse: interview.converse, ask: async () => answers.shift(), report() {} });
+  assert.match(interview.prompts[1], /Your reply was invalid/);
+  assert.match(interview.prompts[2], /^Skipped: choose a sensible default/);
+  assert.match(interview.prompts[3], /The human is done[\s\S]*Return the final map now/);
+  assert.match(interview.prompts[4], /Your reply was invalid: The interview is over/);
+  assert.equal(map.destination, finalMap().destination);
+
+  const broken = interviewer([question("What is it?", "A blog"), "bad", "bad", "bad"]);
+  const fallback = await destinationInterview(assessment, "model", { converse: broken.converse, ask: async () => "An AI blog", report() {} });
+  assert.deepEqual(fallback.decisions, [{ topic: "What is it?", decision: "An AI blog" }], "Invalid model output falls back to the collected answers.");
+});
+
+test("an existing docs/destination.md replaces the interview and is never overwritten", async (t) => {
+  const root = await fixture(t, { "src/App.tsx": "export {};", "docs/destination.md": "# Destination\n\nA charted AI blog.\n" });
+  const assessment = await assess(root);
+  let prompt = "";
+  await initCommand(root, { model: "chosen-model" }, {
+    converse: async () => { throw new Error("Must not interview again."); },
+    ask: async () => { throw new Error("No questions expected."); },
+    analyze: async (value) => { prompt = value; return JSON.stringify(response(assessment)); },
+    select: async () => "save", report() {}, client() { throw new Error("No GitHub writes"); },
+  });
+  assert.match(prompt, /A charted AI blog[\s\S]*From docs\/destination\.md/);
+  const saved = JSON.parse(await readFile(join(root, "crewbie-setup.json"), "utf8"));
+  assert.equal(saved.destination, undefined);
+  const changes = await installation(root, { ...saved, destination: "# Destination\n\nOther.\n" });
+  assert.ok(!changes.some((file) => file.path === "docs/destination.md"));
+});
 test("MCP proposals reject unsafe launchers, credentials and existing files", async (t) => {
   const root = await fixture(t, { ".vscode/mcp.json": "{\"servers\":{}}" });
   const assessment = await assess(root);
@@ -392,7 +463,7 @@ test("removing rejected links requires explicit consent and cancelling leaves no
     const review = response(report);
     review.roles[0].contextPaths = ["src/catalogue.ts"];
     let calls = 0;
-    const pending = initCommand(root, { model: "chosen-model" }, {
+    const pending = initCommand(root, { model: "chosen-model", description: "A catalogue" }, {
       analyze: async () => { calls++; return JSON.stringify(review); },
       ask: async (question) => question.startsWith("Replace rejected") ? answer : "save",
       report() {}, client() { throw new Error("No GitHub writes"); },

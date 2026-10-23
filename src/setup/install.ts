@@ -6,6 +6,7 @@ import { mergeManagedBlock, roleProfile } from "./agents.js";
 import { editableGuidance, validateInstructionScope } from "./instruction-quality.js";
 import { LEGACY_DECISIONS, SHARED_HOT, SHARED_INDEX } from "../memory/context.js";
 import { MCP_FILE, parseMcpServers, vscodeMcpConfig } from "./mcp.js";
+import { DESTINATION_FILE } from "./interview.js";
 
 async function hasPrTemplate(root: string): Promise<boolean> {
   for (const directory of ["", ".github", "docs"]) {
@@ -116,6 +117,10 @@ export async function installation(root: string, proposal: unknown, conflicts?: 
   const servers = parseMcpServers(data.mcpServers);
   // Existing MCP configuration is the human's; proposals for it stay in the assessment for manual merging.
   if (servers.length && await optionalText(await safePath(root, MCP_FILE)) === null) files[MCP_FILE] = vscodeMcpConfig(servers);
+  // The interview's map is the human's own product direction: installed with the team, never over an existing file.
+  if (typeof data.destination === "string" && data.destination.trim() && await optionalText(await safePath(root, DESTINATION_FILE)) === null) {
+    files[DESTINATION_FILE] = data.destination.endsWith("\n") ? data.destination : data.destination + "\n";
+  }
   if (data.adopt !== undefined) {
     for (const [path, digest] of Object.entries(record(data.adopt, "approved adoption hashes"))) {
       adopted[path] = string(digest, "adoption hash");

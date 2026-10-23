@@ -11,7 +11,7 @@ import { adoptedProfile } from "./agents.js";
 import { missingPaths, promptMap, unownedWorkspaces } from "./repository-map.js";
 import { analyzeWithCopilot, explicitModel, type Activity, type Analyze, type ModelChoice } from "./copilot.js";
 import { MCP_FILE, parseMcpServers, type McpServer } from "./mcp.js";
-import { detectedStack } from "./project-evidence.js";
+import { DESTINATION_FILE } from "./interview.js";
 export { analyzeWithCopilot, explicitModel, type Analyze } from "./copilot.js";
 
 export interface SetupReview {
@@ -30,6 +30,8 @@ export interface SetupProposal extends Assessment {
   /** Defaults Copilot chose where evidence or answers were missing; review them, they shape the team and guidance. */
   assumptions?: string[];
   mcpServers?: McpServer[];
+  /** Charted by the setup interview; installed as docs/destination.md only when that file is absent. */
+  destination?: string;
 }
 
 function allowedContextPaths(assessment: Assessment): string[] {
@@ -318,7 +320,8 @@ function listed(paths: string[]): string {
 function repositoryWarnings(assessment: Assessment, proposal: SetupProposal): string[] {
   const map = assessment.repository;
   if (!map) return [];
-  const created = [...proposal.instructions.map((edit) => edit.path), ...(proposal.constitutionText ? [".crewbie/constitution.md"] : [])];
+  const created = [...proposal.instructions.map((edit) => edit.path), ...(proposal.constitutionText ? [".crewbie/constitution.md"] : []),
+    ...(proposal.description.includes(DESTINATION_FILE) ? [DESTINATION_FILE] : [])];
   const warnings: string[] = [];
   const originals: string[] = [];
   for (const role of proposal.config.roles) {
@@ -468,6 +471,7 @@ export function renderSetupReview(proposal: SetupProposal): string {
     "", `GUIDANCE | ${proposal.instructions.length} proposed edits`,
     ...proposal.instructions.map((edit) => `  ${edit.beforeHash === null ? "Create" : "Update"} ${edit.path}\n    ${edit.reason ?? "Reviewed replacement text."}`),
     ...(proposal.instructions.length ? ["  Exact replacement text is in the Markdown assessment."] : ["  No concrete guidance edits proposed."]),
+    ...(proposal.destination ? ["", `DESTINATION | ${DESTINATION_FILE}`, "  Charted by the interview; created on install only when absent. Full map in the Markdown assessment."] : []),
     ...(mcp.length ? ["", `MCP | ${mcp.length} proposed servers${proposal.inventory.mcp.some((file) => file.path === MCP_FILE) ? ` (${MCP_FILE} exists; merge manually from the Markdown assessment)` : ` for ${MCP_FILE}`}`,
       ...mcp.map((server) => `  ${server.name} | ${server.type === "local" ? `${server.command} ${(server.args ?? []).join(" ")}` : server.url}${server.cloud ? " | also cloud agent" : ""}\n    ${server.purpose}`)] : []),
     ...(deferred.length ? ["", `DEFERRED | ${deferred.length} recommendations not included in All`,
@@ -495,26 +499,4 @@ export function needsInterview(assessment: Assessment): boolean {
   return assessment.inventory.mode === "greenfield"
     || (assessment.configBeforeHash === null && !assessment.inventory.files.some((file) => file.kind !== "archive"));
 }
-
-/**
- * A short, breadth-first destination interview (after Matt Pocock's wayfinder skill) before any paid analysis.
- * Blank answers are delegated choices: the assessment records its defaults as assumptions instead of stopping.
- */
-export async function setupInterview(assessment: Assessment, ask: (question: string) => Promise<string>, report: (text: string) => void): Promise<string> {
-  const stack = detectedStack(assessment.project);
-  const questions: [string, string][] = [
-    ["Destination", "Destination: what is this project, who is it for, and what does success look like for the next milestone?"],
-    ["Platforms and users", "Platforms: web, mobile, API, CLI, library? Any devices, browsers or locales that must work?"],
-    ["Stack and hosting", `Stack, package manager and hosting/deployment?${stack ? ` Press Enter to keep what was detected (${stack}).` : ""}`],
-    ["Quality priorities and constraints", "Quality priorities and constraints: e.g. SEO, accessibility, performance, security/privacy, compliance."],
-    ["External services", "External services agents will work with (hosting, CMS, analytics, auth, databases)? Used to propose MCP servers."],
-    ["Out of scope", "Out of scope: anything agents must not build or change?"],
-  ];
-  report(`\nInterview\n  No AI guidance yet, so first define the destination. ${questions.length} questions, no AI credits.\n  Press Enter to skip any; Copilot then chooses a default and records it as an assumption.\n`);
-  const lines: string[] = [];
-  for (const [topic, question] of questions) {
-    const answer = (await ask(question)).trim() || (topic === "Stack and hosting" && stack ? `Detected: ${stack}` : "");
-    lines.push(`${topic}: ${answer || "(not answered; choose a sensible default and record it as an assumption)"}`);
-  }
-  return lines.join("\n");
-}
+

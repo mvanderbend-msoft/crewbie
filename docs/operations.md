@@ -99,7 +99,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.56 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.57 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -451,11 +451,18 @@ Noninteractive runs fail explicitly on invalid links rather than guessing fixes.
 
 No fallback roster is installed if analysis fails. `--assessment-only` keeps the
 offline inventory path explicit. Init never stops to ask for a rerun. When a
-repository has no Crewbie config and no AI guidance, interactive init first asks
-six free, breadth-first questions (destination, platforms, stack and hosting,
-quality priorities, external services, out of scope), after Matt Pocock's
-wayfinder skill. Press Enter to skip any question. `--description` skips the
-interview. The model may then ask at most one round of questions; the next pass
+repository has no Crewbie config and no AI guidance, interactive init first runs
+an adaptive interview after Matt Pocock's wayfinder skill. The selected model
+names the destination first, then maps the frontier breadth-first, asking one
+question at a time with a recommended answer grounded in manifests and CI. Press
+Enter to accept the recommendation, type `skip` to let Copilot assume, or `done`
+to finish; it stops by 30 questions. The resulting map (destination, notes,
+decisions, not yet specified, out of scope) is shown in the review and
+written to `docs/destination.md` on apply, only when that file is absent. Later
+runs reuse an existing `docs/destination.md` instead of interviewing again.
+`--description` skips the interview. If the model returns invalid interview
+output, init builds the map from the answers collected so far and continues.
+The model may then ask at most one round of questions; the next pass
 is final and must propose a team. Unanswered points, and any questions left in a
 noninteractive run, become **Assumptions** in the review instead of blocking
 setup. Noninteractive greenfield setup still requires `--description`.
