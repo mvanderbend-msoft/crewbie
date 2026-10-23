@@ -249,7 +249,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
     if (choice === "save") { report(`Saved only. No files installed or GitHub labels changed.\nResume: crewbie init --proposal "${output}" --apply --guidance apply|skip`); return; }
     if (!proposal.config.planning?.enabled) {
       let planning: string;
-      const message = `Enable hosted planning using ${model}? New installations allow paid implementation after your exact-head approval and merge; existing execution opt-outs are preserved.`;
+      const message = `Enable hosted planning using ${model}? New installations authorize paid implementation when you merge the planning PR; existing execution opt-outs are preserved.`;
       if (confirm) planning = await confirm(message, false) ? "yes" : "no";
       else {
         do { planning = (await ask(`${message} Enter yes or no.`)).trim().toLowerCase(); }

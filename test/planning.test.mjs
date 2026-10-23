@@ -379,7 +379,7 @@ async function mergedFixture(t, unchangedPaths = []) {
   return { ...f, active };
 }
 
-test("merge-enabled planning adds only plan files and verifies the exact human-reviewed merge", async (t) => {
+test("merge-enabled planning adds only plan files and verifies the exact human merge", async (t) => {
   const f = await mergedFixture(t);
   assert.deepEqual(f.state.tree.map((entry) => entry.path).sort(), ["batch.json", "execution.json", "plan.md", "setup.json"].map((name) => `.crewbie/plans/progressive-catalogue-loading-issue-12/${name}`));
   const proof = await approvedMergedPlan(f.client, f.active, 13);
@@ -506,7 +506,7 @@ test("approved merge automatically publishes specialist issues, records provenan
   assert.ok(f.state.executionIssues[0].labels.includes("crewbie:owner:developer"));
   assert.equal(f.state.comments.get(100).length, 2);
   assert.match(f.state.comments.get(100)[0].body, /Execution: approved/);
-  assert.match(f.state.comments.get(100)[1].body, /approval and maintainer's merge/);
+  assert.match(f.state.comments.get(100)[1].body, /maintainer's merge.*approved plan head/);
   assert.equal(f.state.dispatches, 1);
   assert.deepEqual(f.state.writes.at(-1).body.inputs, { issue_numbers: "100" });
   assert.equal(f.state.lock, false);
@@ -516,7 +516,7 @@ test("approved merge automatically publishes specialist issues, records provenan
   assert.equal(f.state.dispatches, 2, "Dispatch reconciliation can repeat; native launch claims remain authoritative.");
 });
 
-test("merge alone, stale or bot approval, dismissed reviews and unresolved change requests cannot launch work", async (t) => {
+test("a human merge approves the exact plan independently of separate review state", async (t) => {
   const f = await mergedFixture(t);
   const approved = structuredClone(f.state.reviews[0]);
   for (const reviews of [
@@ -528,7 +528,9 @@ test("merge alone, stale or bot approval, dismissed reviews and unresolved chang
     [approved, { ...approved, id: 2, state: "CHANGES_REQUESTED" }],
   ]) {
     f.state.reviews = reviews;
-    await assert.rejects(releaseMergedPlan(f.client, f.active, 13), /approve the exact|requests changes/);
+    const proof = await approvedMergedPlan(f.client, f.active, 13);
+    assert.equal(proof.batch.approval.execute, true);
+    assert.equal(proof.approver, proof.merger);
   }
   assert.equal(f.state.writes.length, 0);
 });
@@ -593,7 +595,7 @@ test("merge execution workflow is opt-in and checks out only the trusted default
   assert.deepEqual(workflow.on.pull_request_target.types, ["closed"]);
   assert.match(workflow.jobs.release.if, /merged == true/);
   assert.equal(workflow.jobs.release.steps[0].with.ref, "${{ github.event.repository.default_branch }}");
-  const step = workflow.jobs.release.steps.find((step) => step.name?.startsWith("Verify human approval"));
+  const step = workflow.jobs.release.steps.find((step) => step.run?.includes("internal-release-plan"));
   assert.equal(step.env.GH_TOKEN, "${{ secrets.CREWBIE_USER_TOKEN }}");
   assert.match(step.run, /No credential fallback/);
   assert.match(step.run, /internal-release-plan/);

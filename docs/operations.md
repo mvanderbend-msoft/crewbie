@@ -20,6 +20,19 @@ needs **Agent tasks: read** to correlate sessions and release completed capacity
 assignment permissions alone do not grant telemetry access. The optional
 same-PR correction loop needs **Agent tasks: read/write**. See GitHub's
 [Agent Tasks permissions](https://docs.github.com/en/rest/agent-tasks/agent-tasks).
+
+The same personally owned fine-grained PAT also needs **Account permissions →
+Copilot Requests: read-only** for Copilot model discovery. In the token editor,
+select the **Account** tab, click **Add permissions**, select **Copilot Requests**
+and save with **Update**. This is separate from repository permissions; a token
+that reads issues or publishes tasks may still lack Copilot access. The resource
+owner must be the user's personal account. See
+[Copilot CLI authentication](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
+Updating the existing token's permissions keeps its value. If the token is
+replaced, update `CREWBIE_USER_TOKEN` under repository **Settings → Secrets and
+variables → Actions**, then rerun the failed workflow. Already published tasks
+do not need to be published again.
+
 Unavailable telemetry keeps capacity reserved rather than guessing completion.
 Merging a task PR into its feature branch reads the PR's check runs and commit statuses with the dispatch job's
 own `GITHUB_TOKEN` (`checks: read`, `statuses: read`), so the user credential
@@ -43,7 +56,7 @@ The installed workflows use:
 | Variable `CREWBIE_MAINTENANCE_MODEL` | Explicit approved maintenance model; not `auto` |
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
-| Config `planning.executeOnMerge` | Opt into paid task execution after a verified human approval and merge |
+| Config `planning.executeOnMerge` | Opt into paid task execution approved by a human merging the planning PR |
 | Config `review.enabled` / `review.role` | Have a configured role review each task PR whose CI ran against its own acceptance criteria before auto-merge, and every head of a plan's feature PR, in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist) and preserves the installed choice, including `enabled: false`, in which case task PRs merge on passing checks alone |
 | Config `merge.method` | How task PRs merge into the feature branch: `merge` (default), `squash` or `rebase`. Legacy `merge.mode` and `merge.minConfidence` are ignored |
 | Config `local.start` | Optional local app start command used by `crewbie test` after it checks out a feature branch, for example `npm run dev` |
@@ -125,7 +138,7 @@ repository does not publish a package or configure the npm account.
 |---|---|---|---|
 | Local onboarding/task decomposition | Supported | Supported | Local CLI and fixtures; LLM response handling uses deterministic fixtures |
 | Ready-label issue planning | Opt-in Actions CLI; eligible Copilot seat | Opt-in Actions CLI; organization billing policy | Live private Java/React intake passed prepare/analyze/publish with the coordinator charter/history, proposing five tasks across four specialists |
-| Approve-and-merge execution | Supported user-authorized assignment credential required | Credential plus repository/organization policy | Exact-head review/merge provenance, team materialization, publication and recovery fixtures; live webshop validation pending |
+| Execution after a human merge | Supported user-authorized assignment credential required | Credential plus repository/organization policy | Previous provenance, publication and recovery fixtures; updated approval behavior has not been exercised live |
 | Native custom-agent assignment | Requires eligible account/repo and user auth | Requires eligible account/policy and user auth | Named backend, frontend, tester and reviewer sessions in a private Java/React repository; native IDs confirmed |
 | Model selection | Requested explicitly; entitlement varies | Requested explicitly; policy varies | `gpt-5.4` confirmed in native session metadata; no universal model guarantee |
 | Same-PR review corrections | Agent Tasks API requires an eligible Business/Enterprise seat and user auth | Requires eligible seat/policy and user auth | Two correction rounds reused the original frontend PR, followed by tester refresh and independent re-review |
@@ -664,7 +677,7 @@ These limits are not spending caps. Links, attachments, Word/PDF files and
 external URLs are **not fetched**: paste the relevant text into the issue.
 Generated task issues are explicitly excluded, preventing recursive planning.
 
-### Approve and merge to execute
+### Merge to approve execution
 
 For a GitHub-only per-feature handoff, `config.planning.executeOnMerge` defaults to
 `true` when a new assessment is installed with hosted planning enabled. An explicit
@@ -680,8 +693,11 @@ Store credentials through the approved secret store, never issues or commits.
 Enable `crewbie-execute-plan.yml` and `crewbie-dispatch.yml` if previously disabled.
 The built-in job token is sufficient for planning, **not native assignment**.
 
-For subsequent features, your only handoff is to review the planning PR, approve
-its exact final commit, and merge it into the default branch. Ready plans only add
+For subsequent features, review the planning PR and merge it into the default
+branch. **Merging by a human with write access approves publication and paid
+execution of the exact plan.** Crewbie does not require a separate GitHub
+`APPROVED` review. Repository branch protection continues to enforce any required
+reviews before GitHub permits the merge. Ready plans only add
 files under `.crewbie/plans/<issue>/`:
 
 - The concise plan, task batch and any team suggestions (never applied).
@@ -703,9 +719,10 @@ untrusted PR-head code with assignment credentials. It independently verifies:
 
 - Prior opt-in policy from the recorded default-branch planning workflow run,
   which must have completed successfully.
-- A configured human's `APPROVED` review on the exact final head before merge,
-  and a configured human merger. Stale/bot/dismissed approvals and unresolved
-  human change requests do not qualify.
+- A human with write access merged the planning PR into the default branch.
+  That merge is the approval action. Bots and merge-queue identities do not
+  substitute for the human merger; review requirements belong to GitHub branch
+  protection.
 - The complete allowed file set, unchanged contents across reviewed head, merge
   commit and current default branch, and the unchanged source-issue requirements.
   A regenerated plan can reuse identical setup, plan or batch files: these remain
@@ -724,11 +741,40 @@ automatically merged.
 
 Missing credentials, changed policy, lost planning-run evidence, changed files
 or failed publication stop visibly. For recovery, use **Run workflow** on
-`Crewbie execute approved plan` with the merged planning PR number. All approval
-checks run again; matching issues and approvals are reused. Do not erase launch
+`Crewbie execute approved plan` with the merged planning PR number. All merge
+authorization and content checks run again; matching issues and approvals are reused. Do not erase launch
 claims or overwrite branches to force another paid session. Keep the planning
 run record until execution/recovery finishes. A merge by an unconfigured bot or
 merge-queue identity does not substitute for the required human merger.
+
+With automatic execution enabled, the generated planning workflow checks
+`CREWBIE_USER_TOKEN` after validating the planning request and before paid
+analysis. The execute-plan workflow repeats this check before task publication.
+These checks verify repository write access and read-only model discovery using
+the execution token itself; they do not start an agent or prove a model can be
+assigned. Missing Copilot Requests permission is reported with the exact token
+editor steps and secret name, without dumping HTTP headers. Blocking errors also
+appear in the Actions run summary.
+
+### Resume a merged plan
+
+A valid planning PR that was merged by a human with write access is already
+approved for execution, including one merged without a separate approval review.
+If a previous release rejected it for a missing review, update the pinned
+Crewbie package to a release that accepts the human merge as approval, then rerun **Crewbie
+execute approved plan**. You can also use **Run workflow** on the default branch
+with the merged planning PR number in `pr`.
+
+The workflow verifies the existing human merge, original opt-in policy, completed
+planning run, commit ancestry, allowed files, manifest hashes, current
+configuration and unchanged source requirements. Matching task issues and launch
+claims are reused; no new plan or approval action is needed. The provenance
+comment records the merger as the approver of the exact plan head.
+
+The new credential checks and workflow wording require a release containing
+this change plus reviewed `crewbie update` output committed to the default
+branch. Upgrading the local CLI alone does not update an installed workflow's
+package pin or template.
 
 ## ADO-authoritative work
 
@@ -1122,6 +1168,13 @@ Changing a task's kind invalidates its approval like other scope changes.
   A PR that changes `.github/workflows/` is left for a human merge, because
   workflows on the feature branch run with repository secrets for PRs into it.
   `merge.method` accepts `merge` (default), `squash` or `rebase`.
+  A human with write access can also merge a task PR manually. Dispatch accepts
+  that completed work without requiring a separate approval review, including
+  when the task issue's exact-content execution approval comment is missing.
+  The merge is verified against the linked task PR and expected feature branch.
+  Completion releases its dependency and capacity reservations; each subsequent
+  task still needs its own current execution approval. A completed task is not
+  relaunched, and watching an approved batch still checks its exact task contents.
 - **Feature PR.** When every task of the plan merged, dispatch opens one PR from
   the feature branch into the default branch, listing the tasks and closing their
   issues. Only a human merges it. If it is closed without merging, Crewbie reports

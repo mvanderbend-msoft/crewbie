@@ -105,19 +105,10 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   if (base.ref !== repository.default_branch) throw new Error("Planning must be merged into the current default branch.");
   if (runBranch !== repository.default_branch) throw new Error("Planning policy must come from a default-branch workflow run.");
   if (!await isWriter(client, original.repository, pr.merged_by)) throw new Error("A human user with write access must merge the planning PR.");
+  const merger = string(record(pr.merged_by, "merger").login, "merger login");
   const mergedAt = Date.parse(string(pr.merged_at, "merge time"));
   if (!Number.isFinite(mergedAt)) throw new Error("Invalid merge time.");
-  const reviews = await client.list(`${prefix}/pulls/${number}/reviews`);
-  const latest = new Map<string, Record<string, unknown>>();
-  for (const review of [...reviews].sort((a, b) => integer(a.id, "review ID") - integer(b.id, "review ID"))) {
-    if (!await isWriter(client, original.repository, review.user) || !["APPROVED", "CHANGES_REQUESTED", "DISMISSED"].includes(String(review.state))) continue;
-    const submitted = Date.parse(string(review.submitted_at, "review time"));
-    if (!Number.isFinite(submitted)) throw new Error("Invalid review time.");
-    if (submitted <= mergedAt) latest.set(string(record(review.user, "reviewer").login, "reviewer login"), review);
-  }
-  if ([...latest.values()].some((review) => review.state === "CHANGES_REQUESTED")) throw new Error("A write-access human reviewer still requests changes.");
-  const approval = [...latest.values()].find((review) => review.state === "APPROVED" && review.commit_id === headSha);
-  if (!approval) throw new Error("A configured human must approve the exact final planning head before merge.");
+  // The human merge authorizes execution; GitHub branch protection owns any required reviews.
   const current = record(await client.request("GET", `${prefix}/git/ref/heads/${encodeURIComponent(string(repository.default_branch, "default branch"))}`), "default ref");
   const currentSha = sha(record(current.object, "default ref object").sha);
   const compare = record(await client.request("GET", `${prefix}/compare/${mergeSha}...${currentSha}`), "merge ancestry");
@@ -171,7 +162,7 @@ export async function approvedMergedPlan(client: GitHubApi, config: Config, numb
   await verifySources(batch.sources, client, config);
   const fresh = record(await client.request("GET", `${prefix}/git/ref/heads/${encodeURIComponent(string(repository.default_branch, "default branch"))}`), "current default ref");
   if (record(fresh.object, "ref object").sha !== currentSha) throw new Error("Default branch changed during authorization. Retry against stable reviewed content.");
-  return { batch: approvedBatch(batch, true), headSha, approver: string(record(approval.user, "approver").login, "approver login"), merger: string(record(pr.merged_by, "merger").login, "merger login") };
+  return { batch: approvedBatch(batch, true), headSha, approver: merger, merger };
 }
 
 export async function releaseMergedPlan(client: GitHubApi, config: Config, number: number, ado?: AdoApi): Promise<string> {
@@ -180,7 +171,7 @@ export async function releaseMergedPlan(client: GitHubApi, config: Config, numbe
     const published = await publish(client, config, proof.batch, ado, false);
     for (const item of published) {
       const path = `/repos/${config.repository}/issues/${item.issue}/comments`;
-      const body = `Execution authorized by ${proof.approver}'s approval and ${proof.merger}'s merge of planning PR #${number}, reviewed head \`${proof.headSha}\`.\nRecorded by the configured automation credential; no agent self-approval.\n\n<!-- crewbie-plan-approval:${number}:${proof.headSha} -->`;
+      const body = `Execution authorized by ${proof.merger}'s merge of planning PR #${number}, approved plan head \`${proof.headSha}\`. The human merge approves publication and paid cloud execution of this exact batch.\nRecorded by the configured automation credential; no agent self-approval.\n\n<!-- crewbie-plan-approval:${number}:${proof.headSha} -->`;
       const comments = await client.list(path);
       let exists = false;
       for (const comment of comments) {

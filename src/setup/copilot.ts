@@ -65,6 +65,27 @@ function diagnostic(error: unknown, token: string): string {
     .replace(/\bBearer\s+\S+/gi, "Bearer <REDACTED>").slice(0, 1000);
 }
 
+function accessFailure(operation: string, error: unknown, token: string): Error {
+  const message = error instanceof Error ? error.message : "Unknown runtime failure";
+  const normalized = message.replace(/\\"/g, '"');
+  if (/\b(?:does not have|missing|requires?|without|insufficient)\b.{0,120}\bCopilot Requests\b|\bCopilot Requests\b.{0,120}\b(?:not granted|missing|required|denied)\b/i.test(normalized)) {
+    return new Error(`Copilot ${operation} failed: the selected token lacks the Copilot Requests account permission. `
+      + "Edit a personally owned fine-grained PAT: GitHub Settings > Developer settings > Personal access tokens > Fine-grained tokens > Account permissions > Copilot Requests: read-only. Save with Update. "
+      + "In GitHub Actions, edit the token stored in CREWBIE_USER_TOKEN; repository permissions alone are insufficient. "
+      + "If you replace the token, update that Actions secret. After saving, rerun the failed workflow; existing published tasks do not need to be published again.");
+  }
+  if (/"status"\s*:\s*401\b|401 Unauthorized/i.test(normalized)) {
+    return new Error(`Copilot ${operation} failed: the selected credential was rejected (401 Unauthorized). `
+      + "Use an unexpired, personally owned fine-grained PAT with Account permissions > Copilot Requests: read-only, or a supported Copilot OAuth credential. "
+      + "For hosted execution, check CREWBIE_USER_TOKEN and update the Actions secret if you replace the token, then rerun the failed workflow.");
+  }
+  if (/"status"\s*:\s*403\b|403 Forbidden/i.test(normalized)) {
+    return new Error(`Copilot ${operation} failed: access was denied (403 Forbidden). `
+      + "Check the selected account's Copilot subscription, token permissions and organization policy, then rerun the failed workflow.");
+  }
+  return new Error(`Copilot ${operation} failed: ${diagnostic(error, token)} Check authentication and model access.${operation === "assessment" ? " No setup was applied." : ""}`);
+}
+
 async function deadline<T>(operation: Promise<T>, milliseconds: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -97,7 +118,7 @@ export function copilotAccess(
       await deadline(client.start(), 30_000, "Runtime startup");
       result = await action(client, directory);
     } catch (error) {
-      failure = new Error(`Copilot ${operation} failed: ${diagnostic(error, token)} Check authentication and model access. No setup was applied.`);
+      failure = accessFailure(operation, error, token);
     } finally {
       if (client) {
         try {

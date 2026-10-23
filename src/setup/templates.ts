@@ -161,10 +161,15 @@ the coordinator maps supplied requirements to existing specialists in a PR that
 only adds plan files under \`.crewbie/plans/\`, plus \`.crewbie/decisions/hot.md\`
 when the plan makes a new cross-role choice; team changes are listed as
 suggestions, never applied. Review its questions and source revision. With \`planning.executeOnMerge\`,
-the PR includes an execution manifest. A configured human
-must approve the exact final head and merge it; Actions then publishes tasks and
-requests guarded native dispatch. Preserve the generated fingerprints; regenerate
+the PR includes an execution manifest. A human with write access reviews and
+merges the final plan; that merge is approval for paid execution. Actions publishes
+tasks and requests guarded native dispatch. Crewbie does not require a separate
+GitHub approval review; repository branch protection still applies.
+Preserve the generated fingerprints; regenerate
 and re-review edited plans. Clarification-only PRs cannot authorize execution.
+For an already merged plan, use **Actions → Crewbie execute approved plan → Run
+workflow** with its PR number to resume. The human merge, provenance, file,
+source and policy checks still apply; matching tasks and launch claims are reused.
 Otherwise approve/publish the batch locally.
 The ready label alone authorizes planning, not coding or a verified check.
 

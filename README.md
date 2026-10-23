@@ -48,7 +48,7 @@ Shown at double speed. [Watch the full-speed video](https://github.com/user-atta
 ## How it works
 
 ```text
-You write an issue ──► add label ──► Crewbie opens a plan PR ──► you approve and merge it
+You write an issue ──► add label ──► Crewbie opens a plan PR ──► you merge it
                                                                          │
       you merge the feature PR ◄── Crewbie review ◄── agents build tasks ◄┘
 ```
@@ -58,10 +58,12 @@ You write an issue ──► add label ──► Crewbie opens a plan PR ──�
    the work into small tasks and gives each task to a specialist.
 3. **Review the plan PR.** It shows the tasks, owners and order. Reply on the PR
    to answer questions, or comment `/crewbie revise <feedback>` to change it.
-4. **Approve and merge the plan PR.** This is your go-ahead. Crewbie creates one
+4. **Merge the plan PR.** Your merge approves paid execution. Crewbie creates one
    issue per task and assigns each to its Copilot cloud agent.
 5. **Agents build.** Each task gets its own PR into a shared feature branch.
    When its checks pass, Crewbie merges it there and starts the next task.
+   If you merge a task PR yourself, that accepts its completion; a separate
+   approval review is not required by Crewbie.
 6. **Review the feature PR.** When all tasks are done, Crewbie opens one feature
    PR into your default branch and its reviewer agent comments on it. Comment
    `/crewbie fix` to send the review findings back to the agents.
@@ -73,7 +75,7 @@ You write an issue ──► add label ──► Crewbie opens a plan PR ──�
 |---|---|
 | Add `crewbie:ready-for-planning` | On an issue, to start planning |
 | Reply, or `/crewbie revise <feedback>` | On a plan PR, to change the plan |
-| Approve and merge | On a plan PR, to start the work |
+| Merge the plan PR | Approves paid execution of the plan |
 | `/crewbie fix [notes]` | On a feature PR, to fix review findings |
 | Add `crewbie:restart` | On a task issue, to retry a failed start |
 | Merge | On the feature PR, when you are happy |
@@ -104,8 +106,17 @@ Do this once per repository. `crewbie init` creates the labels and the
 For `CREWBIE_USER_TOKEN`, create a fine-grained personal access token for this
 repository, owned by a user with write access, with:
 
-- **Read:** Metadata, Agent tasks
-- **Read and write:** Actions, Contents, Issues, Pull requests
+- **Repository permissions, read:** Metadata, Agent tasks
+- **Repository permissions, read and write:** Actions, Contents, Issues, Pull requests
+- **Account permissions, read:** Copilot Requests (select the **Account** tab, then **Add permissions**)
+
+The token's resource owner must be your personal account. Copilot Requests is
+needed for model discovery during execution, even when hosted planning already
+works with GitHub's built-in token. See [Copilot CLI authentication](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
+With automatic execution enabled, the planning workflow checks the execution
+credential before requesting a paid plan and checks it again before publishing
+tasks. Updating permissions on the existing token keeps its value; if you replace
+the token, update the Actions secret, then rerun the failed workflow.
 
 ```powershell
 gh secret set CREWBIE_USER_TOKEN --repo OWNER/REPO   # paste the token when asked
@@ -176,6 +187,12 @@ for coverage, privacy, limits and an offline preview.
 `CREWBIE_USER_TOKEN` secret.
 
 **5. Open an issue** with your first feature and add `crewbie:ready-for-planning`.
+
+**6. Review and start the plan.** With automatic execution enabled, a human with
+write access merges the planning PR to approve paid execution of the exact plan.
+Crewbie does not require a separate GitHub approval review; your repository's
+branch protection still applies. To resume an already merged plan, follow
+[the steps to resume a merged plan](docs/operations.md#resume-a-merged-plan).
 
 ## What init checks in your instructions
 
