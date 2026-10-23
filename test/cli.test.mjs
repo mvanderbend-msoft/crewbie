@@ -9,6 +9,15 @@ import { fixture, batch, config } from "./helpers.mjs";
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const run = (root, ...args) => execFileSync(process.execPath, [cli, "--path", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
+test("version prints the installed package version as text or JSON", async () => {
+  const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const call = (...args) => execFileSync(process.execPath, [cli, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(call("version"), `crewbie ${version}\n`);
+  assert.equal(call("--version"), `crewbie ${version}\n`);
+  assert.equal(call("-v"), `crewbie ${version}\n`);
+  assert.deepEqual(JSON.parse(call("version", "--json")), { version });
+});
+
 test("CLI supports assessment -> reviewed installation -> specification approval -> publication preview without remote access", async (t) => {
   const root = await fixture(t, { "requirements.md": "Keep existing behavior. Add one focused feature." });
   run(root, "init", "--assessment-only", "--out", "setup.json");

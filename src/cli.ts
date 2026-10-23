@@ -16,6 +16,7 @@ import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/revi
 import { initCommand } from "./setup/init.js";
 import { terminalPrompts } from "./setup/terminal.js";
 import { latestCopilotVersion } from "./setup/copilot-version.js";
+import { PACKAGE_VERSION } from "./setup/package.js";
 import { copilotAccess } from "./setup/copilot.js";
 import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
@@ -63,6 +64,7 @@ SETUP AND GUIDANCE
   init --proposal setup.json --update             Preview safe managed-file upgrades
     --json                                       Machine-readable installation preview
   update [--apply] [--offline] [--json]            Update repository integration without AI reassessment
+  version [--json]                                Print the installed Crewbie version (also --version, -v)
 
 PLANNING AND EXECUTION
   revise-plan --pr N --feedback-file feedback.txt [--apply]
@@ -120,7 +122,7 @@ async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
     allowPositionals: true, strict: true,
     options: {
-      help: { type: "boolean", short: "h" }, path: { type: "string" }, repo: { type: "string" },
+      help: { type: "boolean", short: "h" }, version: { type: "boolean", short: "v" }, path: { type: "string" }, repo: { type: "string" },
       agent: { type: "string" }, model: { type: "string" }, json: { type: "boolean" },
       "model-policy": { type: "string" }, "specialist-model": { type: "string" }, offline: { type: "boolean" },
       "model-profile": { type: "string" }, "batch-id": { type: "string" }, "run-id": { type: "string" },
@@ -147,6 +149,10 @@ async function main(): Promise<void> {
     },
   });
   const output = createOutput({ machine: values.json === true || positionals[0]?.startsWith("internal-") === true });
+  if (values.version || (positionals.length === 1 && positionals[0] === "version")) {
+    if (values.json) output.data({ version: PACKAGE_VERSION }); else output.text(`crewbie ${PACKAGE_VERSION}`);
+    return;
+  }
   if (values.help || positionals.length === 0) { output.text(HELP); return; }
   if (positionals.length !== 1 && !(positionals[0] === "test" && positionals.length === 2)) throw new Error("Choose exactly one command.");
   const command = positionals[0];

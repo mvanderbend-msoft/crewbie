@@ -158,7 +158,8 @@ registry, install the package file from the
 npm install --global --ignore-scripts https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.60/crewbie-cli-0.1.0-alpha.60.tgz
 ```
 
-Each release also includes a `SHA256SUMS` file to check the download.
+Each release also includes a `SHA256SUMS` file to check the download. Run
+`crewbie --version` (or `crewbie version`) to check which version is installed.
 
 **2. Set up your repository.** Run this inside your own project:
 
@@ -166,17 +167,27 @@ Each release also includes a `SHA256SUMS` file to check the download.
 crewbie init
 ```
 
-By default, Crewbie maps project directories and reviews your existing instructions and agents. It then
-proposes a team, such as a frontend engineer, a backend engineer and a
-reviewer, with a model for each. You review the proposal before anything is
-written. For a new project, describe what you want to build and init asks
-follow-up questions.
+Init reviews your existing instructions, agents and MCP configuration, then
+reads the code it needs with read-only tools: tracked text files only, never
+secrets, `.gitignore`d files or build output. It runs no scripts or MCP
+servers. It then proposes:
+
+- a small team that owns separate parts of your code, with a model for each
+  role and concrete working knowledge (files, conventions, commands);
+- global and path-scoped instructions when you have none;
+- MCP servers useful to the agents;
+- `.github/workflows/copilot-setup-steps.yml` when it is missing;
+- an optional short constitution.
+
+You review the proposal before anything is written. Init never stops to ask you
+to rerun it: open points become assumptions you can check in the review. A
+repository without AI guidance first gets a short interview, [Crewbie Compass](#crewbie-compass).
 
 For optional structural context, use `crewbie init --code-graph` with a separately
 installed, trusted [code-review-graph](https://github.com/tirth8205/code-review-graph)
 2.3.9+ (2.x). This explicitly permits local source indexing and sharing bounded
 file-level structural metadata with Copilot; source bodies are not included.
-The normal assessment remains tool-free and works without CodeGraph. Model
+The normal assessment works without CodeGraph. Model
 complexity and selection rationale are shown during review, not only in the
 saved report. See [structural assessment details](docs/operations.md#optional-codegraph-structural-assessment)
 for coverage, privacy, limits and an offline preview.
@@ -193,6 +204,28 @@ write access merges the planning PR to approve paid execution of the exact plan.
 Crewbie does not require a separate GitHub approval review; your repository's
 branch protection still applies. To resume an already merged plan, follow
 [the steps to resume a merged plan](docs/operations.md#resume-a-merged-plan).
+
+## Crewbie Compass
+
+When a repository has no AI guidance yet, init first charts where the project
+is going. Copilot explores the repository with the same read-only tools, then
+asks one question at a time:
+
+1. Its reading of the project, for you to confirm or correct.
+2. The destination: what the next milestone looks like when it is done.
+3. Focused follow-ups that the code cannot answer, such as intent, priorities,
+   trade-offs and what is out of scope. Copilot checks the code again before
+   each question, so the questions name real files and behaviour.
+
+Most questions are multiple choice with the recommended option preselected.
+Press Enter to accept it, pick another option, type your own answer, skip
+(Copilot assumes and records it) or finish. Compass stops by 30 questions. Each
+turn is a small AI request.
+
+The result is saved as `docs/destination.md` when you install: destination,
+decisions, notes, what is not yet specified and what is out of scope. Guidance
+and agents point to that file instead of repeating it. Later runs reuse it
+instead of asking again; use `--description "..."` to skip the interview.
 
 ## What init checks in your instructions
 
@@ -229,16 +262,20 @@ finding as retain, edit or defer, and nothing is written until you approve it.
 
 ## The team
 
-The team fits your repository; there is no fixed list of roles. A typical web app
-might get:
+The team fits your repository; there is no fixed list of roles. Init proposes
+the smallest team that owns durable, non-overlapping parts of the code, often
+two to four specialists for a small project. Owners write the tests for their
+own changes. A typical web app might get:
 
 | Role | Does |
 |---|---|
 | **Coordinator** | Splits your issue into tasks and picks an owner for each. |
-| **Frontend / backend engineers** | Build the UI and the API. |
-| **Tester** | Checks the combined work against your acceptance criteria. |
+| **Area owners** | For example the UI or the content pipeline. Build and test their part of the code. |
 | **Reviewer** | Reviews the feature PR and points out problems. |
 | **Improver** | Optional. Suggests small memory and instruction updates at night. |
+
+Each specialist's charter includes **Working knowledge**: facts init read from
+the code, such as key files, conventions and the exact commands to run.
 
 Each role is a normal GitHub custom agent in `.github/agents/`. You can edit it
 like any other file.
@@ -303,6 +340,7 @@ rarely pruned and pile up ([arXiv:2608.11095](https://arxiv.org/abs/2608.11095))
 
 | Command | Does |
 |---|---|
+| `crewbie --version` | Show the installed Crewbie version. |
 | `crewbie update` / `crewbie update --apply` | Refresh the workflows and agents after installing a new CLI version. Your team, models and memory stay as they are. |
 | `crewbie init --update` | Look at the repository again and suggest team changes. |
 | `crewbie test <feature>` | Check out a feature branch locally and start your app. |
