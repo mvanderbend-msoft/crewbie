@@ -610,7 +610,7 @@ const HEAD = "a".repeat(40), HEAD2 = "b".repeat(40);
 const reviewing = (overrides = {}) => config({ maxActive: 2, review: { enabled: true, role: "developer" }, merge: { method: "squash" }, ...overrides });
 function finishedPull(fixture) {
   fixture.pulls.set(1, { id: 1001, node_id: "PR_1", number: 101, draft: true, state: "open", mergeable: true, labels: [],
-    head: { sha: HEAD, ref: "copilot/foundation" }, user: { login: "Copilot" } });
+    head: { sha: HEAD, ref: "copilot/foundation" }, base: { ref: BRANCH }, user: { login: "Copilot" } });
   fixture.cloudTasks.push({ id: "task-1", state: "completed", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
 }
 function reviewRun(fixture, id, head = HEAD, overrides = {}) {
@@ -651,12 +651,31 @@ test("a finished task PR merges only after its own checks and trusted acceptance
   reviewComment(fixture, cfg, 55, [{ severity: "blocking", path: "docs/CHANGELOG.md", line: 1, body: "Required entry is absent." }]);
   work = await dispatch(fixture.client, cfg);
   assert.equal(fixture.merges.length, 0, "A task with a missed deliverable cannot merge despite green CI.");
-  assert.match(work[0].reason, /requested changes/);
-  fixture.prComments[101] = [];
-  reviewRun(fixture, 56);
-  reviewComment(fixture, cfg, 56, []);
+  assert.match(work[0].reason, /requested changes on aaaaaaa\. Crewbie asks crewbie-developer to fix it when a session slot frees \(1\/1\)/, "Task #3 holds the only slot.");
+  assert.equal(fixture.continuations.length, 0);
+  const roomy = reviewing({ maxActive: 2 });
+  work = await dispatch(fixture.client, roomy);
+  assert.match(work[0].reason, /requested changes on aaaaaaa\. Crewbie asked crewbie-developer to fix it on this PR \(attempt 2 of 3\)/);
+  assert.equal(work[0].state, "running");
+  assert.equal(fixture.continuations.length, 1, "A changes review asks the owner for one fix session on the task PR.");
+  const [fix] = fixture.continuations;
+  assert.deepEqual([fix.custom_agent, fix.create_pull_request, fix.base_ref, fix.head_ref], ["crewbie-developer", false, BRANCH, "copilot/foundation"]);
+  assert.match(fix.prompt, /blocking: docs\/CHANGELOG\.md:1 — Required entry is absent\./);
+  assert.match(fix.prompt, /\.crewbie\/team\/developer\/hot\.md[\s\S]*<!-- source: PR #101 review -->/, "The fix session records lasting lessons from the review in the owner's memory.");
+  assert.match(fixture.prComments[101].at(-1).body, /^<!-- crewbie-task-fix:[A-Za-z0-9+/=]+ -->\nCrewbie asked crewbie-developer/);
+  assert.ok(fixture.posted.some((item) => item.issue === 1 && /^<!-- crewbie-continuation:/.test(item.comment.body)), "The receipt tells dispatch which session on the PR is current.");
   work = await dispatch(fixture.client, cfg);
-  assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD, merge_method: "squash" }]);
+  assert.equal(work[0].state, "running", "The pending fix session holds the task until it links to the PR.");
+  assert.equal(fixture.continuations.length, 1);
+  fixture.cloudTasks.push({ id: "task-2", state: "completed", artifacts: [{ type: "pull", provider: "github", data: { id: 1001 } }] });
+  work = await dispatch(fixture.client, cfg);
+  assert.match(work[0].reason, /already asked crewbie-developer to fix this head/, "A fix session that left the head unchanged is not retried.");
+  assert.equal(fixture.continuations.length, 1);
+  fixture.pulls.get(1).head.sha = HEAD2;
+  reviewRun(fixture, 56, HEAD2);
+  reviewComment(fixture, cfg, 56, [], { head: HEAD2 });
+  work = await dispatch(fixture.client, cfg);
+  assert.deepEqual(fixture.merges, [{ number: 101, sha: HEAD2, merge_method: "squash" }]);
   assert.equal(work[0].state, "done");
   assert.match(work[0].reason, /into crewbie\/feature-[0-9a-f]{8}/);
   assert.equal(fixture.reviewRequests.length, 1, "Task review runs once for this head.");

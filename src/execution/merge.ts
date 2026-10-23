@@ -1,6 +1,6 @@
 import { mergeFor, reviewerFor, type Config } from "../config.js";
 import { GitHubError, integer, record, string } from "../core.js";
-import { requestReview, trustedReview } from "./pr-review.js";
+import { requestReview, trustedReview, type TrustedReview } from "./pr-review.js";
 import type { GitHubApi } from "../tracking/github.js";
 
 /** Copilot leaves finished PRs as drafts; Crewbie marks them ready once the session completed and attribution ran. */
@@ -51,7 +51,7 @@ async function matchesDefault(client: GitHubApi, prefix: string, base: string, f
 }
 
 /** Merges a ready task PR at the completed session's head once every check passed and GitHub reports it mergeable. Never bypasses protection. */
-export async function autoMerge(client: GitHubApi, config: Config, number: number, reviewed: string): Promise<{ merged: boolean; reason: string }> {
+export async function autoMerge(client: GitHubApi, config: Config, number: number, reviewed: string): Promise<{ merged: boolean; reason: string; changes?: TrustedReview }> {
   const merge = mergeFor(config);
   const prefix = `/repos/${config.repository}`;
   const vetted = "Session completed on";
@@ -90,7 +90,7 @@ export async function autoMerge(client: GitHubApi, config: Config, number: numbe
   if (reviewer) {
     const review = await trustedReview(client, config, number, head);
     if (!review) return { merged: false, reason: await requestReview(client, config, number, head) };
-    if (review.verdict !== "pass") return { merged: false, reason: `crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}; fix the task PR before it merges.` };
+    if (review.verdict !== "pass") return { merged: false, reason: `crewbie-${reviewer.role} requested changes on ${head.slice(0, 7)}; fix the task PR before it merges.`, changes: review };
     if (review.partial) return { merged: false, reason: "The task review omitted patches; review them and merge manually." };
   }
   try {

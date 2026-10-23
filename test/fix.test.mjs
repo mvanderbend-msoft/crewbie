@@ -228,3 +228,14 @@ test("/crewbie revise on a planning PR is left for the planning workflow", async
   assert.equal(f.created.length, 0);
   assert.equal(f.dispatches.length, 0);
 });
+
+test("/crewbie fix on a task PR explains that review fixes are automatic instead of failing silently", async () => {
+  const f = fixFixture();
+  f.feature.head.ref = "copilot/api-fix";
+  f.feature.base.ref = f.branch;
+  const message = await handleFeatureFixComment(f.client, f.cfg, f.event("/crewbie fix"));
+  assert.match(message, /Task PR/);
+  assert.match(f.posted.at(-1).body, /asks the task's specialist to fix a changes-requested review automatically[\s\S]*mention @copilot/);
+  assert.equal(f.created.length, 0);
+  assert.equal(f.dispatches.length, 0);
+});

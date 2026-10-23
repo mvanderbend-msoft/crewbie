@@ -118,7 +118,7 @@ test("task PR review checks its own acceptance criteria and reports a blocking m
   await writeFile(join(root, ".crewbie-review-output.txt"), JSON.stringify({ verdict: "changes", summary: "Missing required file.", findings: [{ severity: "blocking", path: "docs/CHANGELOG.md", line: 1, body: "Required entry is absent." }] }));
   await publishReview(root, client, reviewConfig);
   assert.match(comments[0].body, /task #1 `crewbie\/feature-[0-9a-f]{8}`[\s\S]*Blocking.*docs\/CHANGELOG\.md:1/);
-  assert.match(comments[0].body, /will not auto-merge/);
+  assert.match(comments[0].body, /asks the task's specialist to fix these findings on this PR and record lasting lessons in its memory/);
 });
 test("a feature PR is reviewed against every task of its plan, and the verdict leaves the merge to a human", async (t) => {
   const { root, comments, client } = await setup(t);

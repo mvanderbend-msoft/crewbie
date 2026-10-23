@@ -5,7 +5,7 @@ import { isWriter, type GitHubApi } from "../tracking/github.js";
 import { approvalComment, ensureLabels, hasApproval, managedIssues } from "../tracking/issues.js";
 import { verifySources } from "../tracking/sources.js";
 import { updateFeatureBody, linkedPull, type FeatureBodyItem } from "./dispatch.js";
-import { featureTasks, trustedLatestReview, type Finding } from "./pr-review.js";
+import { featureTasks, parseFindings, trustedLatestReview, type Finding } from "./pr-review.js";
 
 const COMMAND = /^\s*\/crewbie\s+(fix|revise)\b[:\s]*/i;
 const ACK_MARKER = /^<!-- crewbie-fix:([A-Za-z0-9+/=]+) -->/;
@@ -39,20 +39,6 @@ async function trustedReceipt(client: GitHubApi, comments: Record<string, unknow
     if (author && String(author.login ?? "").toLowerCase() === login.toLowerCase()) return item.receipt!;
   }
   return null;
-}
-function parseFindings(reviewBody: string): Finding[] {
-  const findings: Finding[] = [];
-  for (const match of reviewBody.matchAll(/^- \*\*(Blocking|Minor)\*\* `([^`]+)`: (.+)$/gmi)) {
-    const location = match[2]!;
-    const line = /^(.*):(\d+)$/.exec(location);
-    findings.push({
-      severity: match[1] === "Blocking" ? "blocking" : "minor",
-      path: line ? line[1]! : location,
-      line: line ? integer(Number(line[2]), "finding line", 0) : null,
-      body: match[3]!.trim(),
-    });
-  }
-  return findings;
 }
 function directory(path: string): string {
   const index = path.lastIndexOf("/");
@@ -166,6 +152,12 @@ export async function handleFeatureFixComment(client: GitHubApi, config: Config,
     return command[1]!.toLowerCase() === "revise" ? "Planning PR /crewbie revise is handled by the planning workflow." : "This PR is not a Crewbie feature PR.";
   }
   const feature = await featureTasks(client, config, pull);
+  if (!feature && command[1]!.toLowerCase() === "fix" && String(record(pull.base, "PR base").ref ?? "").startsWith("crewbie/")) {
+    await client.request("POST", `/repos/${config.repository}/issues/${number}/comments`, {
+      body: "`/crewbie fix` applies to feature PRs. On a task PR, Crewbie asks the task's specialist to fix a changes-requested review automatically, once per reviewed head and within the task's attempt allowance. To steer it yourself, mention @copilot with instructions or push fixes; Crewbie reviews the new head.",
+    });
+    return "Task PR: fixes follow the Crewbie review automatically; replied with how to steer it.";
+  }
   if (!feature) return command[1]!.toLowerCase() === "revise" ? "This PR is not a Crewbie feature PR, so /crewbie revise remains a planning-PR command." : "This PR is not a Crewbie feature PR.";
   const tasks = feature.tasks;
   const digest = tasks[0]!.metadata.batchDigest;

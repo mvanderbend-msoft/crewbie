@@ -1,6 +1,14 @@
 import { GitHubError, record, string } from "../core.js";
 import type { GitHubApi } from "./github.js";
 
+/** IDs of the cloud tasks whose artifact is this PR, sorted. */
+export function pullTaskIds(tasks: Record<string, unknown>[], pr: Record<string, unknown>): string[] {
+  return tasks.filter((task) => Array.isArray(task.artifacts) && task.artifacts.some((raw) => {
+    const artifact = record(raw, "artifact");
+    return artifact.provider === "github" && artifact.type === "pull" && artifact.data !== undefined && record(artifact.data, "artifact data").id === pr.id;
+  })).map((task) => string(task.id, "task ID")).sort();
+}
+
 export async function cloudTasks(client: GitHubApi, repo: string): Promise<{ tasks: Record<string, unknown>[]; warning: string | null }> {
   const tasks: Record<string, unknown>[] = [];
   const ids = new Set<string>();

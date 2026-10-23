@@ -12,6 +12,7 @@ import { cloudTasks } from "../tracking/native.js";
 import { checkLaunchModels, copilotStartFailure, launchAllowance, listCopilotModels, modelRejection, rejectedLaunchModels, reserveLaunch, RESTART_LABEL, RESTART_MARKER, withDispatchLock, type DiscoverModels } from "./controls.js";
 import { autoMerge, markReady } from "./merge.js";
 import { requestReview, trustedReview } from "./pr-review.js";
+import { requestTaskFix } from "./task-fix.js";
 export { withDispatchLock } from "./controls.js";
 
 export type WorkState = "blocked" | "ready" | "running" | "review" | "failed" | "done";
@@ -348,21 +349,24 @@ async function dispatchLocked(client: GitHubApi, config: Config, ado: AdoApi | u
   const rejected = candidates.length ? await rejectedLaunchModels(await discoverModels(), candidates.map((item) => item.metadata.task), config, client) : new Set<string>();
   for (const item of candidates) if (rejected.has(item.metadata.task.model)) { item.state = "blocked"; item.reason = modelRejection(item.metadata.task.model, item.metadata.task.owner); }
   const launchable = candidates.filter((item) => item.state === "ready");
+  const repo = record(await client.request("GET", `/repos/${config.repository}`), "repository");
+  const branch = string(repo.default_branch, "default branch");
+  const branchInfo = record(await client.request("GET", `/repos/${config.repository}/branches/${encodeURIComponent(branch)}`), "branch");
+  const sha = string(record(branchInfo.commit, "commit").sha, "base SHA");
   for (const item of scoped) {
     await setStatus(client, config.repository, item.issue, item.state);
     if (item.state === "review" && item.sessionComplete && item.pull && item.nativeTask?.custom_agent) {
       await attributePull(client, config, item.pull, item.nativeTask, item.metadata.task.owner, item.metadata.task.model, integer(item.issue.number, "execution issue"));
     }
     if (item.state === "review" && item.sessionComplete && item.pull?.state === "open") {
-      try { item.reason = await afterSession(client, config, item); }
+      try { item.reason = await afterSession(client, config, item, work, () => freshLaunchable(client, config, item, sha, ado), discoverModels); }
       catch (error) { item.reason = `Ready/review/merge step stopped: ${error instanceof Error ? error.message : "request failed"}`; }
     }
   }
-  const repo = record(await client.request("GET", `/repos/${config.repository}`), "repository");
-  const branch = string(repo.default_branch, "default branch");
-  const branchInfo = record(await client.request("GET", `/repos/${config.repository}/branches/${encodeURIComponent(branch)}`), "branch");
-  const sha = string(record(branchInfo.commit, "commit").sha, "base SHA");
-  for (const item of launchable) {
+  // Review fixes continue work already in flight, so they take free slots before new tasks.
+  const room = Math.max(0, config.maxActive - activeSessions(work));
+  for (const item of launchable.slice(room)) item.reason = "Waiting for repository capacity.";
+  for (const item of launchable.slice(0, room)) {
     const issue = integer(item.issue.number, "issue number");
     let fresh: Record<string, unknown>;
     try {
@@ -570,8 +574,8 @@ function labelsOf(issue: Record<string, unknown>): string[] {
   return issue.labels.map((label) => typeof label === "string" ? label : String(record(label, "label").name));
 }
 const activeSessions = (work: Work[]) => work.filter((other) => other.claimed && other.state !== "done" && other.sessionComplete !== true && other.sessionEnded !== true).length;
-/** After a completed session Crewbie marks the task PR ready and merges it once its checks and task review pass. */
-async function afterSession(client: GitHubApi, config: Config, item: Work): Promise<string> {
+/** After a completed session Crewbie marks the task PR ready and merges it once its checks and task review pass; a changes review asks the owner to fix it. */
+async function afterSession(client: GitHubApi, config: Config, item: Work, work: Work[], verify: () => Promise<unknown>, discoverModels: DiscoverModels): Promise<string> {
   const pull = item.pull!;
   const lead = await markReady(client, pull) ? "Crewbie marked the PR ready for review. " : "";
   // Copilot asks the assigning person to review every finished PR; task PRs receive a Crewbie review, not a human request.
@@ -579,6 +583,7 @@ async function afterSession(client: GitHubApi, config: Config, item: Work): Prom
   if (people.length) await client.request("DELETE", `/repos/${config.repository}/pulls/${integer(pull.number, "PR number")}/requested_reviewers`, { reviewers: people });
   const outcome = await autoMerge(client, config, integer(pull.number, "PR number"), string(record(pull.head, "PR head").sha, "PR head SHA"));
   if (outcome.merged) { item.state = "done"; await setStatus(client, config.repository, item.issue, "done"); }
+  if (outcome.changes) return lead + await requestTaskFix(client, config, item, outcome.changes, { active: activeSessions(work), verify, discoverModels });
   return lead + outcome.reason;
 }
 async function freshLaunchable(client: GitHubApi, config: Config, item: Work, sha: string, ado?: AdoApi): Promise<Record<string, unknown>> {

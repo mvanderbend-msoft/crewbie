@@ -66,7 +66,9 @@ You write an issue ──► add label ──► Crewbie opens a plan PR ──�
 4. **Merge the plan PR.** Your merge approves paid execution. Crewbie creates one
    issue per task and assigns each to its Copilot cloud agent.
 5. **Agents build.** Each task gets its own PR into a shared feature branch.
-   When its checks pass, Crewbie merges it there and starts the next task.
+   When its checks and the Crewbie review pass, Crewbie merges it there and
+   starts the next task. If the review asks for changes, the same agent fixes
+   them on the PR and records the lessons in its memory, then Crewbie reviews again.
    If you merge a task PR yourself, that accepts its completion; a separate
    approval review is not required by Crewbie.
 6. **Review the feature PR.** When all tasks are done, Crewbie opens one feature

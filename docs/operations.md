@@ -57,7 +57,7 @@ The installed workflows use:
 | Variable `CREWBIE_PAGES_MODE` | Leave unset for artifact-only reports; opt into `private` or `public` |
 | Config `planning.enabled` / `planning.model` | Opt into ready-label coordinator planning with an explicit model |
 | Config `planning.executeOnMerge` | Opt into paid task execution approved by a human merging the planning PR |
-| Config `review.enabled` / `review.role` | Have a configured role review each task PR whose CI ran against its own acceptance criteria before auto-merge, and every head of a plan's feature PR, in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist) and preserves the installed choice, including `enabled: false`, in which case task PRs merge on passing checks alone |
+| Config `review.enabled` / `review.role` | Have a configured role review each task PR whose CI ran against its own acceptance criteria before auto-merge (a "changes" verdict asks the task's specialist to fix it on the PR), and every head of a plan's feature PR, in a tool-free Copilot CLI job (`review.model` overrides the role's model). Init enables it with the proposed reviewer (preferring a review or verification specialist) and preserves the installed choice, including `enabled: false`, in which case task PRs merge on passing checks alone |
 | Config `merge.method` | How task PRs merge into the feature branch: `merge` (default), `squash` or `rebase`. Legacy `merge.mode` and `merge.minConfidence` are ignored |
 | Config `local.start` | Optional local app start command used by `crewbie test` after it checks out a feature branch, for example `npm run dev` |
 
@@ -1202,7 +1202,8 @@ Changing a task's kind invalidates its approval like other scope changes.
   newest run of each check counts) and GitHub reports no conflict. When CI ran
   and a reviewer is configured, a trusted review of that exact task head must
   also find no blocking acceptance-criteria issues or omitted patches; a
-  changes-requested or partial review leaves the PR for a fix or a human merge.
+  partial review leaves the PR for a human merge, and a changes-requested review
+  starts an automatic fix (see *Task-PR fixes* below).
   Crewbie needs no CI: with no checks (no CI, a branch filter such as
   `branches: [main]`, or runs held for approval in Actions) it merges without a
   task review and says so, because the feature PR, which Crewbie reviews and a
@@ -1241,11 +1242,27 @@ Changing a task's kind invalidates its approval like other scope changes.
   findings marked blocking or minor, in the reviewer's voice. Any blocking finding
   makes the verdict "changes". Dispatch trusts only comments posted by that
   default-branch workflow run, started by a user with write access, for the PR's current head.
-  On "changes", push fixes to the feature branch for a fresh review, or merge
-  anyway if you disagree.
+  On "changes" for a feature PR, push fixes to the feature branch for a fresh
+  review, comment `/crewbie fix`, or merge anyway if you disagree.
   A failed review run is reported with its link and not retried automatically;
   re-run it from Actions. Patches that do not fit the Copilot CLI prompt are
   listed as not reviewed.
+- **Task-PR fixes.** When a task PR's review requests changes, dispatch (which the
+  review workflow triggers) asks the task's own specialist to fix it in a cloud
+  session on the same PR branch. The prompt carries the findings and the approved
+  task. The specialist fixes blocking findings within the task's scope, explains
+  any it disagrees with in the PR handoff, and records lasting, non-obvious lessons
+  from the review in `.crewbie/team/<role>/hot.md` (or the shared decisions) with a
+  source comment pointing at the PR review. One-off fixes are not recorded. When the
+  session completes, Crewbie reviews the new head and merges the PR once the
+  review passes. Each fix counts as a task attempt (`execution.maxAttemptsPerTask`,
+  default 3 including the first launch). Crewbie asks at most once per reviewed
+  head, waits for a free session slot (fixes take free slots before new tasks), and
+  respects paused launches and the feature token ceiling. Before launching, it posts
+  a `crewbie-task-fix` marker comment on the PR, so a launch with an uncertain outcome
+  is never retried automatically. When no fix can be requested, the dispatch
+  summary says why; push fixes yourself or merge manually. `/crewbie fix` on a task
+  PR only replies with this explanation.
 - **Feature-PR fix comments.** A write-access human can comment `/crewbie fix`
   on the feature PR, optionally followed by notes, after a Crewbie
   changes-requested review. `/crewbie revise` has the same meaning on feature PRs

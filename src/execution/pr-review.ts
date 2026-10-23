@@ -198,13 +198,29 @@ export function parseReview(text: string): { verdict: Verdict; summary: string; 
   return { verdict, summary, findings };
 }
 
+/** The findings of a rendered review comment, read back from its Markdown list. */
+export function parseFindings(reviewBody: string): Finding[] {
+  const findings: Finding[] = [];
+  for (const match of reviewBody.matchAll(/^- \*\*(Blocking|Minor)\*\* `([^`]+)`: (.+)$/gmi)) {
+    const location = match[2]!;
+    const line = /^(.*):(\d+)$/.exec(location);
+    findings.push({
+      severity: match[1] === "Blocking" ? "blocking" : "minor",
+      path: line ? line[1]! : location,
+      line: line ? integer(Number(line[2]), "finding line", 0) : null,
+      body: match[3]!.trim(),
+    });
+  }
+  return findings;
+}
+
 export function renderReview(_config: Config, snapshot: Snapshot, review: ReturnType<typeof parseReview>): string {
   const marker = `<!-- crewbie-review:${Buffer.from(JSON.stringify({ run: snapshot.runId, pr: snapshot.pr, head: snapshot.head, verdict: review.verdict, partial: snapshot.omitted.length > 0 })).toString("base64")} -->`;
   const cell = (text: string) => text.replace(/\r?\n/g, " ");
   const partial = snapshot.omitted.length ? " Some patches were not reviewed; check them yourself." : "";
   const branch = snapshot.feature?.branch ?? snapshot.task!.branch;
   const next = snapshot.task
-    ? review.verdict === "changes" ? `Push fixes to this task PR for a fresh review; Crewbie will not auto-merge it.${partial}`
+    ? review.verdict === "changes" ? `Crewbie asks the task's specialist to fix these findings on this PR and record lasting lessons in its memory, then reviews the new head and merges it once the review passes. You can push fixes yourself instead.${partial}`
       : partial ? `Crewbie will not auto-merge this task PR; review the omitted patches and merge it into \`${branch}\` yourself.`
         : `Crewbie merges this task PR into \`${branch}\` after its checks pass.`
     : review.verdict === "changes"
