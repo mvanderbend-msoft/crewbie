@@ -112,7 +112,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.71 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.72 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -1206,7 +1206,12 @@ Changing a task's kind invalidates its approval like other scope changes.
   and a reviewer is configured, a trusted review of that exact task head must
   also find no blocking acceptance-criteria issues or omitted patches; a
   partial review leaves the PR for a human merge, and a changes-requested review
-  starts an automatic fix (see *Task-PR fixes* below).
+  starts an automatic fix (see *Task-PR fixes* below). The reviewer packs code
+  patches first and sends only a stats line for generated lockfiles
+  (`package-lock.json`, `yarn.lock`, `go.sum` and similar), so dependency noise
+  never crowds out source or makes a review partial. Checks GitHub holds for
+  maintainer approval are named in the review's CI evidence, with a reminder to
+  approve the workflow runs.
   Crewbie needs no CI: with no checks (no CI, a branch filter such as
   `branches: [main]`, or runs held for approval in Actions) it merges without a
   task review and says so, because the feature PR, which Crewbie reviews and a

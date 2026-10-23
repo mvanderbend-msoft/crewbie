@@ -16,6 +16,10 @@ const MARKER = /^<!-- crewbie-review:([A-Za-z0-9+/=]+) -->/;
 // Copilot CLI receives the prompt as one argument; Linux caps a single argument at 128 KiB.
 const PROMPT_BUDGET = 100_000;
 const COMMENT_BUDGET = 65_000;
+// Generated lockfiles are summarised, never sent: their patches crowd source files out of the review budget.
+// Code patches are packed before docs, content and data, so a large Markdown or JSON change cannot push code out.
+const CODE = /\.(?:[cm]?[jt]sx?|py|cs|fs|vb|java|kt|kts|scala|go|rs|rb|php|swift|c|cc|cpp|h|hpp|vue|svelte|sql|sh|ps1|ya?ml|tf|bicep)$/i;
+const LOCKFILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|deno\.lock|Cargo\.lock|poetry\.lock|uv\.lock|Pipfile\.lock|composer\.lock|Gemfile\.lock|go\.sum|packages\.lock\.json|gradle\.lockfile)$/;
 const ACTIONS_BOT = "github-actions[bot]";
 const FEATURE_MARKER = "<!-- crewbie-feature:";
 
@@ -113,22 +117,26 @@ export async function ciEvidence(client: GitHubApi, config: Config, head: string
     throw error;
   }
   const newest = new Map<string, Record<string, unknown>>();
+  const held = new Set<string>();
   for (const run of runs) {
-    if (run.conclusion === "action_required") continue;
     const key = String(run.name);
+    if (run.conclusion === "action_required") { held.add(key); continue; }
     const current = newest.get(key);
     if (!current || integer(run.id, "check run ID") > integer(current.id, "check run ID")) newest.set(key, run);
   }
+  for (const key of newest.keys()) held.delete(key);
+  const approval = held.size
+    ? ` GitHub is holding ${[...held].sort().join(", ")} for maintainer approval, so it has not run; approve the workflow runs on the PR (Copilot-authored PRs need this).` : "";
   const latest = new Map<string, Record<string, unknown>>();
   for (const status of statuses) if (!latest.has(String(status.context))) latest.set(String(status.context), status);
   const details = [
     ...[...newest.values()].map((run) => `${String(run.name)}: ${run.status === "completed" ? String(run.conclusion) : String(run.status)}`),
     ...[...latest.values()].map((status) => `${String(status.context)}: ${String(status.state)}`),
   ].sort().slice(0, 40);
-  if (!details.length) return { summary: "No CI checks ran on this head.", details };
+  if (!details.length) return { summary: `No CI checks ran on this head.${approval}`, details };
   const problem = checksPassed([...newest.values()], [...latest.values()]);
   const partial = complete ? "" : " Not every check run could be read.";
-  return { summary: problem ? `${problem}${partial}` : `All ${details.length} CI checks passed.${partial}`, details };
+  return { summary: problem ? `${problem}${partial}${approval}` : `All ${details.length} CI checks passed.${partial}${approval}`, details };
 }
 
 /** Builds the reviewer prompt from the PR's API diff and the default-branch reviewer charter; no PR code is checked out. */
@@ -164,12 +172,15 @@ CI on head ${head.slice(0, 7)}: ${ci.summary}${ci.details.length ? ` (${ci.detai
 PR: ${json({ title: pull.title, body: pull.body ?? "" })}
 Diff (API patches; files marked omitted did not fit this review):
 `;
-  const files = await client.list(`/repos/${config.repository}/pulls/${pr}/files`);
+  const listed = await client.list(`/repos/${config.repository}/pulls/${pr}/files`);
+  const files = [...listed.filter((file) => CODE.test(String(file.filename))), ...listed.filter((file) => !CODE.test(String(file.filename)))];
   let diff = "";
   const omitted: string[] = [];
   for (const file of files) {
     const name = string(file.filename, "file name");
-    const entry = `--- ${name} (${String(file.status)}, +${String(file.additions)} -${String(file.deletions)})\n${typeof file.patch === "string" ? file.patch : "(no textual patch)"}\n`;
+    const stats = `--- ${name} (${String(file.status)}, +${String(file.additions)} -${String(file.deletions)})`;
+    if (LOCKFILE.test(name)) { diff += `${stats}: generated lockfile, patch not sent; judge dependency changes from the manifest\n`; continue; }
+    const entry = `${stats}\n${typeof file.patch === "string" ? file.patch : "(no textual patch)"}\n`;
     if (Buffer.byteLength(header + diff + entry) > PROMPT_BUDGET) { omitted.push(name); diff += `--- ${name}: omitted\n`; }
     else diff += entry;
   }

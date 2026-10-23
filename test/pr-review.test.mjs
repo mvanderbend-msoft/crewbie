@@ -33,8 +33,29 @@ test("reviewer CI evidence reports failures, missing CI and unreadable checks wi
   assert.match((await ciEvidence(client, reviewConfig, HEAD)).summary, /Check e2e is failure/);
   ci.runs = []; ci.statuses = [];
   assert.equal((await ciEvidence(client, reviewConfig, HEAD)).summary, "No CI checks ran on this head.");
+  ci.runs = [{ id: 5, name: "check", status: "completed", conclusion: "action_required" }];
+  assert.match((await ciEvidence(client, reviewConfig, HEAD)).summary, /^No CI checks ran on this head\. GitHub is holding check for maintainer approval/);
+  ci.runs.push({ id: 6, name: "check", status: "completed", conclusion: "success" });
+  assert.equal((await ciEvidence(client, reviewConfig, HEAD)).summary, "All 1 CI checks passed.", "An approved re-run supersedes the held run.");
   ci.denied = true;
   assert.match((await ciEvidence(client, reviewConfig, HEAD)).summary, /could not be read \(HTTP 403\)/);
+});
+
+test("lockfile patches are never sent and code is packed before large content, so source is not crowded out", async (t) => {
+  const { root, client, diff } = await setup(t);
+  const big = (n) => "@@ -1 +1 @@\n" + "+x\n".repeat(n);
+  diff.files = [
+    { filename: "content/posts/a/index.md", status: "added", additions: 40000, deletions: 0, patch: big(40000) },
+    { filename: "package-lock.json", status: "modified", additions: 1460, deletions: 23, patch: big(40000) },
+    { filename: "src/posts.ts", status: "modified", additions: 20, deletions: 44, patch: "@@ -1 +1 @@\n-old\n+new" },
+  ];
+  assert.equal((await prepareReview(root, client, reviewConfig, 101, HEAD, 70)).ready, true);
+  const prompt = await readFile(join(root, ".crewbie-review-prompt.txt"), "utf8");
+  assert.match(prompt, /--- src\/posts\.ts \(modified, \+20 -44\)\n@@ -1 \+1 @@\n-old\n\+new/);
+  assert.match(prompt, /--- package-lock\.json \(modified, \+1460 -23\): generated lockfile, patch not sent/);
+  assert.doesNotMatch(prompt, /package-lock\.json[^\n]*\n@@/);
+  const input = JSON.parse(await readFile(join(root, ".crewbie-review-input.json"), "utf8"));
+  assert.deepEqual(input.omitted, ["content/posts/a/index.md"]);
 });
 
 async function setup(t) {
@@ -45,13 +66,14 @@ async function setup(t) {
   const b = parseBatch(batch(), config());
   const pull = { number: 101, state: "open", title: "Crewbie feature", body: "What/why", head: { sha: HEAD, ref: BRANCH, repo: { full_name: "example/project" } }, base: { ref: "main" } };
   const comments = [];
+  const diff = { files: [{ filename: "src/a.ts", status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1,2 @@\n-old\n+new" }] };
   const ci = { runs: [{ id: 1, name: "test", status: "completed", conclusion: "success" }, { id: 2, name: "lint", status: "completed", conclusion: "failure" }, { id: 3, name: "lint", status: "completed", conclusion: "success" }], statuses: [] };
   const client = {
     async list(path) {
       if (path === "/repos/example/project/issues?state=all&labels=crewbie%3Amanaged") {
         return b.tasks.map((task, index) => ({ number: index + 1, title: task.title, body: issueBody(b, task), labels: ["crewbie:managed"] }));
       }
-      if (path.endsWith("/pulls/101/files")) return [{ filename: "src/a.ts", status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1,2 @@\n-old\n+new" }];
+      if (path.endsWith("/pulls/101/files")) return diff.files;
       if (path.endsWith("/issues/101/comments")) return comments;
       if (/\/issues\/[123]\/timeline$/.test(path)) return path.includes("/issues/1/")
         ? [{ event: "cross-referenced", source: { issue: { pull_request: { url: "https://api.github.com/repos/example/project/pulls/101" } } } }] : [];
@@ -69,7 +91,7 @@ async function setup(t) {
       throw new Error(`Unexpected request: ${method} ${path}`);
     },
   };
-  return { root, pull, comments, client, ci };
+  return { root, pull, comments, client, ci, diff };
 }
 
 test("review preparation uses the reviewer's charter and the API diff; publication posts one verified-head comment per run", async (t) => {
