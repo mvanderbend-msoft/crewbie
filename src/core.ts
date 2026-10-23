@@ -46,6 +46,8 @@ export function matchesTextHash(value: string, digest: unknown): boolean {
   // Accept pre-normalization manifests and proposals from either checkout style.
   return digest === hash(lf) || digest === hash(value) || digest === hash(lf.replaceAll("\n", "\r\n"));
 }
+/** Marks a plan's setup.json: the policy a plan was made under, never an init proposal. */
+export const PLAN_SETUP_KIND = "crewbie-plan-setup";
 export function json(value: unknown): string {
   return JSON.stringify(value, null, 2) + "\n";
 }

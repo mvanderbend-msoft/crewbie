@@ -1,4 +1,5 @@
 {
+  "kind": "crewbie-plan-setup",
   "config": {
     "schemaVersion": 1,
     "repository": "contoso/travel-concierge",
@@ -7,21 +8,6 @@
         "id": "agent-runtime",
         "purpose": "Own the Agent Framework code in `src/concierge`: the agent, its workflow, tools, instructions and the ResponsesHostServer entry point, which change together whenever behavior changes.",
         "model": "claude-opus-5.5",
-        "knowledge": [
-          "`src/concierge/main.py` builds `FoundryChatClient` from `FOUNDRY_PROJECT_ENDPOINT` and `AZURE_AI_MODEL_DEPLOYMENT_NAME` (local fallback `FOUNDRY_MODEL_NAME`) and serves the agent with `ResponsesHostServer`.",
-          "The hosting packages are prerelease: `src/concierge/uv.toml` allows prereleases and `src/concierge/uv.lock` pins them; update both together with `uv lock`.",
-          "`ResponsesHostServer` accepts an agent or a factory; a factory runs per request. Hosted sessions, checkpoints and pending tool approvals are persisted by the host's Foundry stores.",
-          "`@tool(approval_mode=\"always_require\")` makes the host return an approval request instead of running the tool; the caller approves and continues with `previous_response_id`."
-        ],
-        "checks": [
-          "`uv run pytest` passes in `src/concierge`, with the booking API and search mocked.",
-          "`azd ai agent run` starts the host and `azd ai agent invoke --local` answers a policy question with a citation."
-        ],
-        "nonNegotiables": [
-          "Booking, changing or cancelling a trip is only possible through an approval-required tool.",
-          "No endpoint, key or model name in code."
-        ],
-        "contextPaths": [],
         "complexity": "complex",
         "modelReason": "Prerelease APIs, multi-step workflows and approval semantics need careful reasoning; a wrong tool contract can book a trip."
       },
@@ -29,19 +15,6 @@
         "id": "evaluation",
         "purpose": "Own `evals/` and tracing: golden datasets, groundedness, task adherence, tool-call accuracy and content safety evaluations, thresholds, and OpenTelemetry instrumentation in `src/concierge`.",
         "model": "claude-sonnet-5.5",
-        "knowledge": [
-          "Azure AI Evaluation (`azure-ai-evaluation`) provides groundedness, task adherence, tool-call accuracy and content safety evaluators; safety evaluators need the Foundry project, not just a model endpoint.",
-          "The hosted runtime injects `APPLICATIONINSIGHTS_CONNECTION_STRING`; local traces need it set in `src/concierge/.env`."
-        ],
-        "checks": [
-          "The evaluation run reports every metric against `evals/thresholds.json` and fails below a threshold.",
-          "Each new tool or policy rule adds at least one golden case."
-        ],
-        "nonNegotiables": [
-          "Golden data contains no real traveller personal data.",
-          "Never lower a threshold to make a change pass."
-        ],
-        "contextPaths": [],
         "complexity": "standard",
         "modelReason": "Evaluation work follows documented SDK patterns; judgment is needed for good test cases, not for deep code reasoning."
       },
@@ -49,20 +22,6 @@
         "id": "foundry-platform",
         "purpose": "Own delivery: `azure.yaml`, `src/concierge/Dockerfile`, model deployments, the agent identity's role assignments and the GitHub Actions deploy workflow.",
         "model": "gpt-6.1-sol",
-        "knowledge": [
-          "`azure.yaml` uses `infra.provider: microsoft.foundry`, so `azd provision` creates the Foundry project and the deployments under the `ai-project` service; there is no Bicep yet.",
-          "`azd deploy` builds the image, creates a new agent version and waits until it is active; each deployed agent gets its own Entra agent identity.",
-          "Hosted agents need the azd extension (`azd ext install azure.ai.agents`); `azure.yaml` pins the minimum versions under requiredVersions."
-        ],
-        "checks": [
-          "`azd provision --preview` shows only intended changes.",
-          "`docker build src/concierge` succeeds and the container serves on port 8088."
-        ],
-        "nonNegotiables": [
-          "No keys or connection strings in `azure.yaml`, workflows or the image.",
-          "Role assignments for the agent identity are scoped to the resource it reads, never the subscription."
-        ],
-        "contextPaths": [],
         "complexity": "standard",
         "modelReason": "azd and Foundry configuration is declarative and documented; Microsoft Learn MCP covers the specifics."
       },
@@ -70,17 +29,6 @@
         "id": "agent-reviewer",
         "purpose": "Review each feature PR for unsafe agent behavior: unapproved side effects, ungrounded policy answers, prompt-injection exposure through tools, leaked secrets and evaluation regressions.",
         "model": "gpt-6.1-sol",
-        "knowledge": [
-          "Tool results (search hits, booking API responses) are untrusted input to the model; instructions must not let them trigger other tools."
-        ],
-        "checks": [
-          "Every tool with a side effect has approval_mode always_require and a test proving it.",
-          "The PR includes evaluation results for the changed behavior, at or above `evals/thresholds.json`."
-        ],
-        "nonNegotiables": [
-          "Block a PR that adds a side-effecting tool without approval or lowers an evaluation threshold without a recorded decision."
-        ],
-        "contextPaths": [],
         "complexity": "standard",
         "modelReason": "A different model family from the main implementer gives an independent safety review at moderate cost."
       }
@@ -128,7 +76,5 @@
       "start": "azd ai agent run"
     }
   },
-  "configBeforeHash": "4eb20d90a6149b3f64fb1046b0d1f34e24e73b074c95af1d06d26d01069ed3c7",
-  "constitutionText": null,
-  "instructions": []
+  "configBeforeHash": "4eb20d90a6149b3f64fb1046b0d1f34e24e73b074c95af1d06d26d01069ed3c7"
 }

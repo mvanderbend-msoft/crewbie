@@ -22,7 +22,7 @@ jobs:
           node-version: '22'
       - name: Install approved Crewbie package
         env:
-          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.68/crewbie-cli-0.1.0-alpha.68.tgz' }}
+          CREWBIE_PACKAGE: ${{ vars.CREWBIE_PACKAGE || 'https://github.com/mvanderbend-msoft/crewbie/releases/download/v0.1.0-alpha.70/crewbie-cli-0.1.0-alpha.70.tgz' }}
         run: |
           npm install --prefix "$RUNNER_TEMP/crewbie" --ignore-scripts --no-audit --no-fund "$CREWBIE_PACKAGE"
       - name: Route trusted feature PR fix request

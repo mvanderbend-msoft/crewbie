@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { unlink } from "node:fs/promises";
-import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, optionalText, readJson, record, safePath, string, textHash, words, writeAtomic } from "../core.js";
+import { agentPrompt, bounded, errorCode, GitHubError, hash, integer, json, optionalText, readJson, record, safePath, string, textHash, words, writeAtomic, PLAN_SETUP_KIND } from "../core.js";
 import { limitsFor, parseConfig, PLANNING_LABEL, PLANNING_REPAIR_LIMIT, reviewerFor, type Config } from "../config.js";
 import { isWriter, requireWriter, type GitHubApi } from "../tracking/github.js";
 import { contextTopics, memoryContext, SHARED_HOT } from "../memory/context.js";
@@ -231,7 +231,9 @@ PRD source: ${json(source)}`;
 export function planningFiles(config: Config, configBeforeHash: string | null, source: Source, plan: Plan, directory: string, recordsDecisions: boolean, map: ReturnType<typeof workingTree>): { files: Record<string, string>; automatic: boolean; checks: string; handoff: string } {
   const records = recordsDecisions ? ` It also records shared decisions in \`${SHARED_HOT}\`; review them with the plan.` : "";
   const checks = plan.batch ? renderPlanChecks(planChecks(plan.batch, `${source.title}\n${source.body}`, map)) : "";
-  const setup = { config, configBeforeHash, constitutionText: null, instructions: [] };
+  // Role guidance (knowledge, checks, invariants, context) already lives in the owners' custom agents; revisions only compare policy.
+  const roles = config.roles.map(({ knowledge: _k, checks: _c, nonNegotiables: _n, contextPaths: _p, ...role }) => role);
+  const setup = { kind: PLAN_SETUP_KIND, config: { ...config, roles }, configBeforeHash };
   const automatic = config.planning?.executeOnMerge === true && plan.batch !== null && plan.questions.length === 0;
   const handoff = automatic
     ? `This PR only adds plan files; the team, agents and configuration are unchanged.${records}\n\n## Start work\nReview the final plan and task batch, then merge this PR. **Merging by a human with write access approves publication and paid cloud execution of this exact batch.** No separate GitHub approval review or local approval command is required by Crewbie. Your repository's branch protection still applies. Application PR merges remain human-owned.`

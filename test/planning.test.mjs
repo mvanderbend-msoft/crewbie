@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import YAML from "yaml";
 import { parseConfig, PLANNING_LABEL } from "../dist/config.js";
 import { GitHubError, hash, modelJson } from "../dist/core.js";
-import { preparePlanning, publishPlanning, parsePlan, requestPlanningRevision } from "../dist/specification/planning.js";
+import { planningFiles, preparePlanning, publishPlanning, parsePlan, requestPlanningRevision } from "../dist/specification/planning.js";
 import { installation, applyInstallation } from "../dist/setup/install.js";
 import { workflows } from "../dist/setup/templates.js";
 import { approvedMergedPlan, releaseMergedPlan, planningLocation } from "../dist/execution/planning-approval.js";
@@ -783,4 +783,17 @@ test("a planning PR edited during publication is never overwritten", async (t) =
   await assert.rejects(publishPlanning(f.root, racingClient, f.cfg), /changed before publication/);
   assert.equal(f.state.pulls[0].head.sha, "b".repeat(40));
   assert.ok(f.state.writes.every((write) => write.method !== "PATCH"));
+});
+
+test("plan setup.json records policy without role guidance and is never an init proposal", async (t) => {
+  const base = config();
+  const cfg = parseConfig({ ...base, roles: base.roles.map((role) => ({ ...role, knowledge: ["src/a.ts holds X"], checks: ["npm test"], nonNegotiables: ["keep Y"], contextPaths: ["docs/notes.md"] })) });
+  const source = { number: 12, title: "Feature", body: "Body", updatedAt: "2026-10-01T00:00:00Z" };
+  const { files } = planningFiles(cfg, null, source, { summary: "Summary", batch: null, questions: ["Which?"], teamSuggestions: [] }, ".crewbie/plans/feature-issue-12", false, null);
+  const setup = JSON.parse(files[".crewbie/plans/feature-issue-12/setup.json"]);
+  assert.equal(setup.kind, "crewbie-plan-setup");
+  for (const role of setup.config.roles) for (const key of ["knowledge", "checks", "nonNegotiables", "contextPaths"]) assert.equal(role[key], undefined, key);
+  assert.deepEqual({ ...parseConfig(setup.config), roles: [] }, { ...cfg, roles: [] });
+  const root = await fixture(t, {});
+  await assert.rejects(installation(root, setup), /not an init proposal/);
 });

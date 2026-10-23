@@ -1,5 +1,5 @@
 import { readdir, unlink } from "node:fs/promises";
-import { agentPrompt, bounded, boundedLines, errorCode, hash, json, matchesTextHash, optionalText, readJson, record, safePath, string, textHash, withoutComments, writeAtomic } from "../core.js";
+import { agentPrompt, bounded, boundedLines, errorCode, hash, json, matchesTextHash, optionalText, PLAN_SETUP_KIND, readJson, record, safePath, string, textHash, withoutComments, writeAtomic } from "../core.js";
 import { agentArchivePath, guidanceLinesFor, limitsFor, parseConfig, type Config } from "../config.js";
 import { PR_TEMPLATE, SHARED_INSTRUCTIONS, SKILL, workflows } from "./templates.js";
 import { mergeManagedBlock, roleProfile } from "./agents.js";
@@ -80,6 +80,7 @@ async function checkedChanges(root: string, files: Record<string, string | null>
 export async function installation(root: string, proposal: unknown, conflicts?: string[], kept?: string[]): Promise<FileChange[]> {
   const data = record(proposal, "setup proposal");
   if (data.status === "clarification") throw new Error("Resolve setup clarification questions before installation.");
+  if (data.kind === PLAN_SETUP_KIND) throw new Error("This is a plan's setup.json, a record of the policy the plan was made under, not an init proposal. Run crewbie init to change the team.");
   const config = setupConfiguration(data);
   if (data.configBeforeHash !== undefined) {
     const current = await optionalText(await safePath(root, ".crewbie/config.json"));

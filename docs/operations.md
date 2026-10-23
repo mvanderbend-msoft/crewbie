@@ -112,7 +112,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.69 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.71 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -683,12 +683,11 @@ Crewbie does not create PRDs/specs. The legacy batch `spec` field remains for
 compatibility and holds a deterministic source reference in hosted plans;
 model-authored specification text is discarded. The constitution remains in use.
 
-With merge execution disabled, review the proposal on its branch. Preview and apply `setup.json` through `init`,
-then review/merge the resulting configuration and profiles onto the default
-branch. Resolve questions and inspect `batch.json` before `approve --batch ...
---yes --execute` and `publish --batch ... --apply --dispatch-local --watch`.
-In this manual mode, merging the planning PR alone neither installs its
-nested setup proposal nor approves execution. The coordinator never approves
+With merge execution disabled, review the plan on its branch. Resolve questions and
+inspect `batch.json` before `approve --batch ... --yes --execute` and
+`publish --batch ... --apply --dispatch-local --watch`. In this manual mode, merging
+the planning PR alone does not approve execution. Change the team with `crewbie init`,
+not with a plan's `setup.json`. The coordinator never approves
 its own task graph.
 
 The same source/base/configuration snapshot is deduplicated, including a closed
@@ -745,7 +744,9 @@ reviews before GitHub permits the merge. Ready plans only add
 files under `.crewbie/plans/<issue>/`:
 
 - The concise plan, task batch and any team suggestions (never applied).
-- A copy of the unchanged configuration used for revisions (`setup.json`).
+- `setup.json`: the team policy the plan was made under, used to check revisions. Roles keep their id,
+  purpose and model; their knowledge, checks and invariants stay in the owners' custom agents. It is not an
+  init proposal, and `init` refuses it.
 - A bounded execution manifest identifying the planning run and reviewed files.
 
 The planning PR never changes roles, agent charters, role memory, configuration,
