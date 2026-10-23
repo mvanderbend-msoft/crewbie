@@ -190,7 +190,7 @@ function interviewer(replies) {
     }),
   };
 }
-const question = (text, recommended, phase = "destination") => ({ done: false, phase, question: text, recommended });
+const question = (text, recommended, phase = "destination", options = [recommended, "Something else"]) => ({ done: false, phase, question: text, options, recommended });
 const finalMap = (overrides = {}) => ({
   done: true, destination: "A personal AI blog that ranks on Google page 1 and is shared on LinkedIn.",
   notes: ["SEO is the top quality priority."],
@@ -198,7 +198,7 @@ const finalMap = (overrides = {}) => ({
   notYetSpecified: ["Analytics provider"], outOfScope: ["Comments and user accounts"], ...overrides,
 });
 
-test("unguided repositories get an adaptive wayfinder interview that charts docs/destination.md and grounds guidance and MCP", async (t) => {
+test("unguided repositories get the adaptive Crewbie Compass interview that charts docs/destination.md and grounds guidance and MCP", async (t) => {
   const root = await fixture(t, {
     "package.json": JSON.stringify({ scripts: { dev: "vite", build: "vite build", lint: "eslint ." }, dependencies: { react: "^19.0.0" }, devDependencies: { vite: "^6.0.0" } }),
     "package-lock.json": "{}",
@@ -213,8 +213,8 @@ test("unguided repositories get an adaptive wayfinder interview that charts docs
     question("Where is it hosted?", "Vercel", "frontier"),
     finalMap(),
   ]);
-  const asked = [];
-  const answers = ["Personal AI blog shared on LinkedIn; must rank on Google page 1", "An admin portal to upload posts", ""];
+  const asked = [], picked = [];
+  const answers = ["Personal AI blog shared on LinkedIn; must rank on Google page 1", "An admin portal to upload posts"];
   let prompt = "";
   await initCommand(root, { model: "chosen-model" }, {
     converse: interview.converse,
@@ -229,12 +229,19 @@ test("unguided repositories get an adaptive wayfinder interview that charts docs
         mcpServers: [{ name: "vercel", purpose: "Inspect deployments.", type: "http", url: "https://mcp.vercel.com", env: [], bearerSecret: "VERCEL_TOKEN", tools: ["*"], cloud: false }],
       }));
     },
-    select: async () => "save",
+    select: async (message, choices, fallback) => {
+      if (!/^\d+\. /.test(message)) return "save";
+      picked.push({ message, choices, fallback });
+      return picked.length < 3 ? choices.find((choice) => /Type your own/.test(choice.name)).value : fallback;
+    },
     report() {}, client() { throw new Error("No GitHub writes"); },
   });
-  assert.equal(asked.length, 3);
-  assert.match(asked[0], /^1\. What is the blog for[\s\S]*Recommended: A personal AI blog/);
-  assert.match(interview.prompts[0], /wayfinder-style[\s\S]*breadth-first[\s\S]*ONE question per turn/);
+  assert.equal(picked.length, 3);
+  assert.equal(picked[0].message, "1. What is the blog for and who reads it?");
+  assert.deepEqual(picked[0].choices.map((choice) => choice.name), ["A. A personal AI blog for engineers (recommended)", "B. Something else", "C. Type your own answer", "Skip", "Done"]);
+  assert.equal(picked[0].fallback, "A personal AI blog for engineers");
+  assert.deepEqual(asked, ["C. Your answer:", "C. Your answer:"]);
+  assert.match(interview.prompts[0], /Crewbie Compass[\s\S]*breadth-first[\s\S]*ONE question per turn[\s\S]*2 to 4 short, distinct answer options/);
   assert.match(interview.prompts[0], /"build": "vite build"/);
   assert.doesNotMatch(interview.prompts[0], /SOURCE-MUST-NOT-BE-SENT/);
   assert.match(interview.prompts[1], /^Answer: Personal AI blog/);
@@ -263,15 +270,16 @@ test("interview handles skip, done and invalid replies without stopping setup", 
   const assessment = await assess(root);
   const { destinationInterview } = await import("../dist/setup/interview.js");
   const interview = interviewer([
-    "not json", question("Who reads it?", "Engineers"), question("Hosting?", "Vercel", "frontier"),
+    "not json", question("Who reads it?", "Engineers"), question("Platform?", "Web", "frontier", ["Web", "Mobile"]), question("Hosting?", "Vercel", "frontier"),
     question("Another question after done", "x"), finalMap({ decisions: [] }),
   ]);
-  const answers = ["skip", "done"];
+  const answers = ["b", "skip", "done"];
   const map = await destinationInterview(assessment, "model", { converse: interview.converse, ask: async () => answers.shift(), report() {} });
   assert.match(interview.prompts[1], /Your reply was invalid/);
-  assert.match(interview.prompts[2], /^Skipped: choose a sensible default/);
-  assert.match(interview.prompts[3], /The human is done[\s\S]*Return the final map now/);
-  assert.match(interview.prompts[4], /Your reply was invalid: The interview is over/);
+  assert.match(interview.prompts[2], /^Answer: Something else/, "A letter picks that option in the text fallback.");
+  assert.match(interview.prompts[3], /^Skipped: choose a sensible default/);
+  assert.match(interview.prompts[4], /The human is done[\s\S]*Return the final map now/);
+  assert.match(interview.prompts[5], /Your reply was invalid: The interview is over/);
   assert.equal(map.destination, finalMap().destination);
 
   const broken = interviewer([question("What is it?", "A blog"), "bad", "bad", "bad"]);

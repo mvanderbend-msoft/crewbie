@@ -184,7 +184,7 @@ export async function initCommand(root: string, options: InitOptions, io: InitIO
         report(`\nUsing ${DESTINATION_FILE} as the project destination; edit it or pass --description to change direction.`);
       } else if (ask && needsInterview(assessment)) {
         const converse = io.converse ?? (io.analyze ? transcriptConverse(io.analyze) : converseWithCopilot);
-        destination = renderDestination(await destinationInterview(assessment, model, { converse, ask, report }));
+        destination = renderDestination(await destinationInterview(assessment, model, { converse, ask, select, report }));
         description = `${destination}\n(This map is saved as ${DESTINATION_FILE}. Global guidance may point agents to it for product direction; do not duplicate it.)`;
       }
     }

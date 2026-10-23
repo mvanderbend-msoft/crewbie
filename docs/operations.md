@@ -99,7 +99,7 @@ requires approved network/proxy/CA configuration, not `strict-ssl=false`.
 Review the package contents with `npm pack --dry-run`, then bootstrap with
 `npm publish --access public --tag next`. Complete any 2FA challenge directly
 with npm. Verify the published version using
-`npm view @crewbie/cli@0.1.0-alpha.57 version --registry=https://registry.npmjs.org`.
+`npm view @crewbie/cli@0.1.0-alpha.58 version --registry=https://registry.npmjs.org`.
 
 After the package exists, open its npm **Settings > Trusted publishing**, choose
 GitHub Actions, and configure:
@@ -452,11 +452,12 @@ Noninteractive runs fail explicitly on invalid links rather than guessing fixes.
 No fallback roster is installed if analysis fails. `--assessment-only` keeps the
 offline inventory path explicit. Init never stops to ask for a rerun. When a
 repository has no Crewbie config and no AI guidance, interactive init first runs
-an adaptive interview after Matt Pocock's wayfinder skill. The selected model
-names the destination first, then maps the frontier breadth-first, asking one
-question at a time with a recommended answer grounded in manifests and CI. Press
-Enter to accept the recommendation, type `skip` to let Copilot assume, or `done`
-to finish; it stops by 30 questions. The resulting map (destination, notes,
+an adaptive interview called Crewbie Compass (inspired by Matt Pocock's wayfinder
+skill). The selected model names the destination first, then maps the frontier
+breadth-first, asking one multiple-choice question at a time. Each question has
+2 to 4 options grounded in manifests and CI, with the recommended one marked and
+preselected, plus "Type your own answer", Skip (Copilot assumes) and Done. It
+stops by 30 questions. The resulting map (destination, notes,
 decisions, not yet specified, out of scope) is shown in the review and
 written to `docs/destination.md` on apply, only when that file is absent. Later
 runs reuse an existing `docs/destination.md` instead of interviewing again.
