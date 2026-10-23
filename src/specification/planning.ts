@@ -79,7 +79,7 @@ export async function requestPlanningRevision(client: GitHubApi, config: Config,
   const repository = record(await client.request("GET", `/repos/${config.repository}`), "repository");
   const base = string(repository.default_branch, "default branch");
   if (record(prior.pr.base, "planning base").ref !== base) throw new Error("The planning PR must target the default branch.");
-  if (!apply) return `Preview: one potentially billable ${config.planning.model} revision of PR #${number}, head ${prior.headSha}, with at most ${config.planning.maxFormatRepairs ?? PLANNING_REPAIR_LIMIT} additional format-correction requests. Reuses the plan without init or a full assessment. Feedback:\n${feedback}\nRepeat with --apply to request it; approval of the new final head is still required.`;
+  if (!apply) return `Preview: one potentially billable ${config.planning.model} revision of PR #${number}, head ${prior.headSha}, with at most ${config.planning.maxFormatRepairs ?? PLANNING_REPAIR_LIMIT} additional format-correction requests. Reuses the plan without init or a full assessment. Feedback:\n${feedback}\nRepeat with --apply to request it; review the revised plan before merging it.`;
   await requireWriter(client, config.repository);
   await client.request("POST", `/repos/${config.repository}/actions/workflows/crewbie-plan.yml/dispatches`, {
     ref: base, inputs: { pr: String(number), feedback, head: prior.headSha, source: issueDigest(source.title, source.body) },
@@ -292,7 +292,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
   const setup = { config, configBeforeHash: snapshot.configBeforeHash, constitutionText: null, instructions: [] };
   const automatic = config.planning.executeOnMerge === true && plan.batch !== null && plan.questions.length === 0;
   const handoff = automatic
-    ? `This PR only adds plan files; the team, agents and configuration are unchanged.${records} Approving its exact final head and merging it authorizes publication and paid cloud execution of this batch. No local installation or approval command is required. Application PR merges remain human-owned.`
+    ? `This PR only adds plan files; the team, agents and configuration are unchanged.${records}\n\n## Start work\nReview the final plan and task batch, then merge this PR. **Merging by a human with write access approves publication and paid cloud execution of this exact batch.** No separate GitHub approval review or local approval command is required by Crewbie. Your repository's branch protection still applies. Application PR merges remain human-owned.`
     : `This PR only adds plan files and does not authorize automatic execution.${records} Resolve questions, then explicitly approve the task batch, or generate a new merge-enabled plan.`;
   const suggestions = plan.teamSuggestions.length
     ? `## Team suggestions (not applied)\n${plan.teamSuggestions.map((item) => `- ${item}`).join("\n")}\n\nReassess with \`crewbie init --update\` if needed.\n\n` : "";
@@ -314,7 +314,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
   }
   // Shared decisions are reviewed memory, not execution input, so they stay outside the execution manifest.
   if (decisions) files[SHARED_HOT] = decisions;
-  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${prSummary(plan.summary, `${directory}/plan.md`)}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${checks}${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from a user with write access runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Approve the new final head.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
+  const body = `**Specialist:** \`crewbie-coordinator\` (GitHub Actions planning)\n**Requested model:** \`${config.planning.model}\`\n\n## What changed\n${prSummary(plan.summary, `${directory}/plan.md`)}\n\n## Why\nPlans source issue #${source.number}. Planning is not execution approval.\n\n## Checks\nValidated source, human request, policy and task dependencies. Application checks were not run.\n\n${checks}${handoff}\n\n${plan.questions.length ? "Answer the questions by replying to this PR; each reply from a user with write access runs one paid revision of this plan." : "Revise: comment \`/crewbie revise <feedback>\` on this PR for one paid revision reusing this plan."} Review the final plan before merging.\n\n**Usage:** tokens/AI credits unavailable; the hosted planning CLI exposes no attributed metrics here.\n\n<!-- crewbie-plan:${snapshot.key} -->\n<!-- crewbie-plan-run:${snapshot.runId ?? "local"} -->${plan.questions.length ? `\n${QUESTIONS_MARKER}` : ""}`;
   const prLimit = limitsFor(config).pr;
   // Advisory plan checks are not counted against the word budget, so they never cost a paid plan.
   if (prLimit !== undefined) bounded((checks ? body.replace(checks, "") : body).replace(/<!--[\s\S]*?-->/g, ""), prLimit, "Planning PR description");
@@ -349,7 +349,7 @@ export async function publishPlanning(root: string, client: GitHubApi, config: C
       }
     }
     await askQuestions(client, config, snapshot.revision.pr, plan.questions);
-    return `Revised the same planning PR: ${string(prior.pr.html_url, "planning PR URL")}. Review and approve the new final head before merge.`;
+    return `Revised the same planning PR: ${string(prior.pr.html_url, "planning PR URL")}. Review the revised plan; merging it authorizes execution when automatic execution is enabled.`;
   }
   await client.request("POST", `${prefix}/git/refs`, { ref: `refs/heads/${branch(snapshot)}`, sha: string(created.sha, "planning commit SHA") });
   const pull = record(await client.request("POST", `${prefix}/pulls`, {

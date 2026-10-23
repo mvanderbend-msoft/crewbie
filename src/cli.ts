@@ -16,6 +16,7 @@ import { parseReviewPlan, reconcileReview, watchReviews } from "./execution/revi
 import { initCommand } from "./setup/init.js";
 import { terminalPrompts } from "./setup/terminal.js";
 import { latestCopilotVersion } from "./setup/copilot-version.js";
+import { copilotAccess } from "./setup/copilot.js";
 import { updateRepository } from "./setup/update.js";
 import { approvedBatch, parseBatch, requireApproval } from "./specification/batch.js";
 import { preparePlanning, publishPlanning, requestPlanningRevision } from "./specification/planning.js";
@@ -211,6 +212,20 @@ async function main(): Promise<void> {
     return;
   }
   const config = await loadConfig(root);
+  if (command === "internal-execution-preflight") {
+    if (!config.planning?.enabled || !config.planning.executeOnMerge) {
+      output.text("Automatic plan execution is disabled; execution-credential preflight is not required.");
+      return;
+    }
+    const executionToken = process.env.GH_TOKEN;
+    if (!executionToken?.trim()) throw new Error("Configure the CREWBIE_USER_TOKEN Actions secret before requesting paid planning with automatic execution. Use a personally owned fine-grained PAT with repository write access and Account permissions > Copilot Requests: read-only. No credential fallback is used.");
+    await requireWriter(api(executionToken), config.repository);
+    const models = await copilotAccess(undefined, () => executionToken).listModels();
+    const summary = `Execution credential verified: repository write access and discovery of ${models.length} enabled Copilot models. No agent session was started.`;
+    output.text(summary);
+    if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Execution credential\n\n${summary}\n`);
+    return;
+  }
   if (command === "test") {
     if (!config.repository) throw new Error("Configure repository before testing a feature.");
     const client = api(token());
@@ -432,8 +447,9 @@ async function main(): Promise<void> {
     output.text(await handleFeatureFixComment(github, config, await readJson(process.env.GITHUB_EVENT_PATH)));
   } else if (command === "internal-release-plan") {
     if (!values.pr) throw new Error("Choose a merged planning PR with --pr.");
+    const number = integer(Number(values.pr), "planning PR");
     const ado = config.ado ? adoApi(config.ado, process.env.CREWBIE_ADO_TOKEN ?? "") : undefined;
-    output.text(await releaseMergedPlan(github, config, integer(Number(values.pr), "planning PR"), ado));
+    output.text(await releaseMergedPlan(github, config, number, ado));
   } else if (command === "internal-pages") {
     if (!["private", "public"].includes(values["pages-mode"] ?? "")) throw new Error("Explicitly select private or public Pages mode.");
     const pages = record(await github.request("GET", `/repos/${config.repository}/pages`), "Pages configuration");
@@ -447,8 +463,13 @@ async function main(): Promise<void> {
   } else throw new Error(`Unknown command or missing input: ${command}. Use --help.`);
 }
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
+  const message = error instanceof Error ? error.message : "Unexpected failure.";
   createOutput({ machine: process.argv.includes("--json") || process.argv.some((arg) => arg.startsWith("internal-")) })
-    .error(error instanceof Error ? error.message : "Unexpected failure.");
+    .error(message);
   process.exitCode = 1;
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const escaped = message.slice(0, 10_000).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Crewbie needs attention\n\n<pre>${escaped}</pre>\n`).catch(() => {});
+  }
 });

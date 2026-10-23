@@ -46,6 +46,11 @@ ${setup}      - name: Verify ready label and prepare coordinator context
         env:
           GH_TOKEN: \${{ github.token }}
         run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-plan --prepare
+      - name: Check execution credential before paid planning
+        if: \${{ steps.context.outputs.ready == 'true' }}
+        env:
+          GH_TOKEN: \${{ secrets.CREWBIE_USER_TOKEN }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-execution-preflight
       - uses: actions/upload-artifact@v7.0.1
         if: \${{ steps.context.outputs.ready == 'true' }}
         with:
@@ -137,7 +142,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-${setup}      - name: Verify human approval and merge, publish tasks and dispatch
+${setup}      - name: Check execution credential before publishing tasks
+        env:
+          GH_TOKEN: \${{ secrets.CREWBIE_USER_TOKEN }}
+        run: node "$RUNNER_TEMP/crewbie/node_modules/@crewbie/cli/dist/cli.js" internal-execution-preflight
+      - name: Verify human merge, publish tasks and dispatch
         env:
           GH_TOKEN: \${{ secrets.CREWBIE_USER_TOKEN }}
           CREWBIE_ADO_TOKEN: \${{ secrets.CREWBIE_ADO_TOKEN }}

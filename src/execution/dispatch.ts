@@ -20,6 +20,8 @@ export interface Work {
   metadata: NonNullable<ReturnType<typeof taskMetadata>>;
   state: WorkState;
   approved: boolean;
+  /** A verified human merge accepts completed work, without authorizing a new execution. */
+  completionApproved?: boolean;
   claimed: boolean;
   sessionComplete?: boolean;
   /** Verified that no cloud session is still running: native task terminal, or Copilot reported it could not start. */
@@ -212,6 +214,7 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     const restart = [...comments].reverse().find((comment) => String(comment.body ?? "").includes(RESTART_MARKER));
     // After a restart, an earlier closed, unmerged PR belongs to the ended attempt.
     if (pr && restart && pr.state === "closed" && !pr.merged_at && String(restart.created_at) > String(pr.created_at)) pr = null;
+    const completionApproved = !!pr?.merged_at && !approved && await isWriter(client, config.repository, pr.merged_by);
     let sessionComplete = false;
     let sessionEnded = false;
     let nativeTask: Record<string, unknown> | undefined;
@@ -223,7 +226,10 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     } else if (claim && !pr && !copilotAssigned(issue)) {
       state = "blocked"; reason = "Launch was claimed but neither Copilot assignment nor a linked PR is visible. Inspect the outcome before retrying.";
     }
-    if (pr?.merged_at) { state = "done"; reason = `Merged into ${metadata.branch}.`; }
+    if (pr?.merged_at) {
+      state = "done";
+      reason = `Merged into ${metadata.branch}.${completionApproved ? " A human with write access accepted this completed task by merging its PR." : ""}`;
+    }
     else if (pr) {
       telemetry ??= cloudTasks(client, config.repository);
       const snapshot = await telemetry;
@@ -254,8 +260,8 @@ export async function inspectWork(client: GitHubApi, config: Config, knownIssues
     if (!claim && (ownerLabels.length !== 1 || ownerLabels[0] !== `crewbie:owner:${metadata.task.owner}`)) {
       state = "blocked"; reason = "Owner label does not match the approved specialist.";
     }
-    if (!approved && state !== "failed") { state = "blocked"; reason = "Issue content no longer has current human execution approval."; }
-    result.push({ issue, metadata, state, approved, claimed: claim, sessionComplete, ...(sessionEnded ? { sessionEnded } : {}), reason, ...(pr ? { pull: pr } : {}), ...(nativeTask ? { nativeTask } : {}) });
+    if (!approved && !completionApproved && state !== "failed") { state = "blocked"; reason = "Issue content no longer has current human execution approval."; }
+    result.push({ issue, metadata, state, approved, ...(completionApproved ? { completionApproved } : {}), claimed: claim, sessionComplete, ...(sessionEnded ? { sessionEnded } : {}), reason, ...(pr ? { pull: pr } : {}), ...(nativeTask ? { nativeTask } : {}) });
   }
   const key = (batch: string, digest: string, id: string) => `${batch}/${digest}/${id}`;
   const present = new Set(result.map((item) => key(item.metadata.batch, item.metadata.batchDigest, item.metadata.task.id)));
@@ -284,7 +290,8 @@ export function batchWork(work: Work[], batch: Batch): Work[] {
   for (const task of batch.tasks) {
     const matches = selected.filter((item) => item.metadata.task.id === task.id);
     const item = matches[0];
-    if (matches.length !== 1 || !item || item.metadata.batchDigest !== digest || !item.approved
+    const completedByHuman = item?.state === "done" && item.completionApproved === true;
+    if (matches.length !== 1 || !item || item.metadata.batchDigest !== digest || (!item.approved && !completedByHuman)
       || item.issue.title !== task.title || item.issue.body !== issueBody(batch, task)) {
       throw new Error(`Published task ${task.id} differs from the approved batch; stop for reconciliation.`);
     }
@@ -605,10 +612,10 @@ async function assign(client: GitHubApi, config: Config, item: Work, fresh: Reco
 }
 /** Why a restart request cannot relaunch this task, or null when its previous session verifiably ended. */
 export function restartProblem(item: Work): string | null {
+  if (item.pull?.merged_at) return "its PR is already merged; the task is complete. Dispatch can continue with other approved work.";
   if (item.issue.state !== "open") return "the issue is closed. Reopen it first if the work is still wanted.";
   if (!item.approved) return "the issue no longer has current human execution approval.";
   if (!item.claimed) return "it was never launched; dispatch starts it when it is ready.";
-  if (item.pull?.merged_at) return "its PR is already merged.";
   if (item.pull?.state === "open") return "it has an open PR. Push fixes to it, or close it and add the label again.";
   if (item.sessionEnded !== true) return "its previous session is not verified as ended, so a relaunch could run twice.";
   return null;

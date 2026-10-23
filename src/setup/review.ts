@@ -20,7 +20,7 @@ export function describeInstallationFile(change: FileChange): FileChange & { own
   const path = change.path;
   const workflowPurposes: Record<string, string> = {
     "crewbie-plan.yml": "Prepare a coordinator plan from approved issue intake; the planning opt-in gate still applies.",
-    "crewbie-execute-plan.yml": "Verify exact-head human approval and merge before publishing implementation tasks.",
+    "crewbie-execute-plan.yml": "Treat a write-access human's merge as execution approval after verifying the exact plan, source and policy before publishing implementation tasks.",
     "crewbie-dispatch.yml": "Release approved tasks when dependencies, capacity and launch controls permit; merge each finished task PR into its plan's feature branch once checks pass, then open the feature PR to the default branch and request its review.",
     "crewbie-review.yml": "Have the configured Crewbie reviewer comment on each task and feature PR head; reads the API diff and never runs PR code.",
     "crewbie-maintain.yml": "Offer bounded knowledge-maintenance proposals; scheduled analysis remains opt-in.",
@@ -114,7 +114,7 @@ export function renderSetupMarkdown(value: unknown, changes?: FileChange[]): str
     if (cloud) lines.push("### Copilot cloud agent", "", cloudMcpInstructions(config.repository, cloud), "", block(cloud.config.trimEnd(), "json"), "");
   }
   lines.push("## Hosted planning", "", config.planning?.enabled
-    ? `Enabled with model \`${config.planning.model}\`. The ready-for-planning label authorizes a potentially billable planning run. Execution after exact-head human approval and merge: **${config.planning.executeOnMerge ? "enabled (paid work authorized by that approval and merge)" : "disabled (manual execution approval required)"}**.`
+    ? `Enabled with model \`${config.planning.model}\`. The ready-for-planning label authorizes a potentially billable planning run. Execution after a human merges the planning PR: **${config.planning.executeOnMerge ? "enabled (the merge approves paid work on the exact plan)" : "disabled (manual execution approval required)"}**.`
     : "**Disabled.** The ready-for-planning label will not create a plan. Dispatch only handles published, approved implementation tasks.", "");
   if (review && Array.isArray(review.findings)) {
     lines.push("## Assessment findings and recommendations", "", "Recommendations are not automatically applied. Only the concrete guidance edits above are proposed writes.", "");

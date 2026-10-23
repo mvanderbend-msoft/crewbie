@@ -189,7 +189,7 @@ function githubFixture(input = batch()) {
   return fixture;
 }
 
-test("end-to-end dispatch requests named specialist/model, respects two slots and releases merged dependencies", async () => {
+test("end-to-end dispatch requests named specialist/model, respects two slots and accepts a human merge without a separate approval", async () => {
   const fixture = githubFixture();
   await dispatch(fixture.client, config());
   assert.equal(fixture.assignments.length, 2);
@@ -199,8 +199,14 @@ test("end-to-end dispatch requests named specialist/model, respects two slots an
   assert.equal(fixture.locked, false);
   await dispatch(fixture.client, config());
   assert.equal(fixture.assignments.length, 2, "reconciliation must not repeat paid assignments");
-  fixture.pulls.set(1, { number: 101, merged_at: "2026-09-22", state: "closed", user: { login: "copilot-swe-agent[bot]" } });
-  await dispatch(fixture.client, config());
+  fixture.pulls.set(1, { number: 101, merged_at: "2026-09-22", state: "closed", user: { login: "copilot-swe-agent[bot]" }, merged_by: { type: "User", login: "maintainer" } });
+  const list = fixture.client.list.bind(fixture.client);
+  fixture.client.list = async (path) => path === "/repos/example/project/issues/1/comments" ? [] : list(path);
+  const work = await dispatch(fixture.client, config());
+  const merged = work.find((item) => item.issue.number === 1);
+  assert.equal(merged.state, "done");
+  assert.equal(merged.completionApproved, true);
+  assert.equal(merged.approved, false, "Accepting a completed task does not grant execution approval for another session.");
   assert.equal(fixture.assignments.length, 3);
   assert.ok(fixture.claims.has(2));
 });
