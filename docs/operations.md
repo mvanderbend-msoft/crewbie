@@ -342,6 +342,10 @@ quantities a task states that the source issue does not (and issue values no tas
 carries), overlapping acceptance criteria between implementation tasks, and task
 paths not in the repository.
 
+Plan tasks hold only task-specific scope, dependencies, acceptance criteria and
+verification; working knowledge and routine checks stay in the owner's custom
+agent definition rather than being copied into each task.
+
 Swift packages (`Package.swift`) and Xcode projects/workspaces
 (`*.xcodeproj/project.pbxproj`, `*.xcworkspace/contents.xcworkspacedata`) also
 identify nested workspaces. Xcode containers map to their containing project

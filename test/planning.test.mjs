@@ -169,6 +169,8 @@ test("planning publication accepts a model answer that starts with prose", async
   assert.match(prompt, /Repository map \(names only, no contents\): \{\s*"directories"/);
   assert.match(prompt, /values .* verbatim into every task/);
   assert.match(prompt, /exactly one owning task/);
+  assert.match(prompt, /Do not repeat working knowledge, repository checks or other standing instructions already in the owner's custom agent definition/);
+  assert.match(prompt, /Include only acceptance criteria and verification specific to the requested change/);
   assert.equal(f.state.writes.length, 0, "Preparation has no remote write capability.");
   await f.output();
   assert.match(await publishPlanning(f.root, f.client, f.cfg), /pull\/13/);
